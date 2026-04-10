@@ -21,9 +21,6 @@ if (! defined('ABSPATH')) {
 }
 
 // Plugin constants — guarded so the file is safe to re-include in tests.
-if (! defined('WICKET_AORM_VERSION')) {
-    define('WICKET_AORM_VERSION', '0.1');
-}
 if (! defined('WICKET_AORM_FILE')) {
     define('WICKET_AORM_FILE', __FILE__);
 }
@@ -112,20 +109,21 @@ register_deactivation_hook(__FILE__, 'wicket_aorm_deactivate');
 | Bootstrap
 |--------------------------------------------------------------------------
 |
-| Initialise the plugin on the plugins_loaded hook so that the base
-| plugin (wicket-wp-base-plugin) has already booted and wicket_api_client()
-| is available.
+| Initialise the plugin on the 'init' hook. The base plugin defers its
+| helper includes (which define wicket_api_client()) to 'init' priority 0
+| via WicketWP\Includes, so we hook at priority 1 to guarantee the
+| function is available.
 |
 */
 
-add_action('plugins_loaded', static function (): void {
+add_action('init', static function (): void {
     // Bail if the base plugin isn't active — admin notice handled below.
     if (! function_exists('wicket_api_client')) {
         return;
     }
 
     WicketAdminOrgRoster();
-}, 100);
+}, 1);
 
 /*
 |--------------------------------------------------------------------------

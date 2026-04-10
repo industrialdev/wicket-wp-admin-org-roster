@@ -1,4 +1,4 @@
-# CLAUDE.md — wicket-admin-org-roster
+# AGENTS.md — wicket-admin-org-roster
 
 ## Project Overview
 
