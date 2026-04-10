@@ -1,0 +1,24 @@
+{
+    "name": "industrialdev/wicket-admin-org-roster",
+    "description": "WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP API.",
+    "type": "wordpress-plugin",
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "Wicket Inc.",
+            "homepage": "https://wicket.io"
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "WicketAORM\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    }
+}

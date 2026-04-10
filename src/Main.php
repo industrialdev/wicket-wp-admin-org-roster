@@ -1,0 +1,80 @@
+<?php
+
+declare(strict_types=1);
+
+namespace WicketAORM;
+
+/**
+ * Plugin singleton orchestrator.
+ *
+ * Registers admin menus, hooks, and initialises sub-components.
+ */
+final class Main
+{
+    private static ?self $instance = null;
+
+    private function __construct()
+    {
+        $this->registerHooks();
+    }
+
+    public static function getInstance(): self
+    {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+
+        return self::$instance;
+    }
+
+    /**
+     * Register WordPress hooks and filters.
+     */
+    private function registerHooks(): void
+    {
+        // Admin menu pages.
+        add_action('admin_menu', [$this, 'registerAdminMenus']);
+
+        // REST API routes.
+        add_action('rest_api_init', [$this, 'registerRestRoutes']);
+
+        // Enqueue admin assets.
+        add_action('admin_enqueue_scripts', [$this, 'enqueueAssets']);
+    }
+
+    /**
+     * Register admin menu pages.
+     */
+    public function registerAdminMenus(): void
+    {
+        $menuPage = new Admin\MenuPage();
+        $menuPage->register();
+    }
+
+    /**
+     * Register REST API routes.
+     */
+    public function registerRestRoutes(): void
+    {
+        (new Rest\RosterController())->register_routes();
+        (new Rest\UploadController())->register_routes();
+        (new Rest\StagedRecordController())->register_routes();
+        (new Rest\SyncController())->register_routes();
+    }
+
+    /**
+     * Enqueue admin scripts and styles.
+     */
+    public function enqueueAssets(): void
+    {
+        $assets = new Assets();
+        $assets->enqueue();
+    }
+
+    /**
+     * Prevent cloning.
+     */
+    private function __clone()
+    {
+    }
+}
