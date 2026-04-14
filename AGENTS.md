@@ -35,11 +35,16 @@ wicket-admin-org-roster/
 │   │   ├── SyncService.php        # Staged → MDP (relationships, persons)
 │   │   └── MdpClient.php          # Thin wrapper around wicket_api_client()
 │   └── Admin/
-│       └── MenuPage.php           # Register admin pages (React mount points)
+│       ├── MenuPage.php           # Register all admin menu/submenu pages
+│       ├── RosterListPage.php     # Org roster listing (WP_List_Table)
+│       ├── SettingsPage.php       # Plugin settings (WordPress Settings API)
+│       └── views/                 # PHP templates for admin page rendering
 │
 ├── resources/js/                  # React source (compiled by @wordpress/scripts)
-│   ├── index.js                   # Entry — mounts React islands per admin page
-│   ├── pages/                     # Page-level React components
+│   ├── roster-detail/             # Single org roster detail island
+│   ├── upload-review/             # Upload review + validation island
+│   ├── duplicate-resolution/      # Match resolution island
+│   ├── sync-progress/             # Sync progress island
 │   ├── components/                # Shared UI built with @wordpress/components
 │   ├── hooks/                     # Custom React hooks (useRestApi, useStagedRecords)
 │   └── utils/                     # apiFetch wrapper, helpers
@@ -50,10 +55,11 @@ wicket-admin-org-roster/
 
 ## Key Architectural Decisions
 
-- **Staged records table**: A single `wp_wicket_orm_staged_records` DB table (with `upload_session_id`) serves as the intermediary between file parsing and MDP sync. React state alone was ruled out due to MDP API call volume at scale (1,000+ rows).
-- **React islands**: Multiple mounted React apps per admin page (in places with difficult layout or data manipulation), not a monolithic SPA — avoids conflicts with WordPress admin navigation. Certain admin page renders a `<div id="aorm-{page}">` mount point in PHP.
+- **Classic PHP admin pages**: The Org Roster listing, configuration, and settings pages are standard WordPress admin pages rendered in PHP. Roster listing uses `WP_List_Table`. Settings use the WordPress Settings API. No React on these pages.
+- **React islands (interactive workflows only)**: React is used exclusively for complex interactive screens that require real-time state management — roster detail view, upload review/validation, duplicate resolution, and sync progress. Each mounts into a `<div id="aorm-{feature}">` container on an otherwise PHP-rendered admin page. Each island has its own `@wordpress/scripts` entry point.
 - **@wordpress/components**: All React UI must use `@wordpress/components` for consistent WP admin look and feel. Do not introduce Material UI, Chakra, or other component libraries.
-- **Bulk action modes**: "Add to roster" vs "Replace roster" — replace mode clears existing org relationships before syncing.
+- **Staged records table**: A single `wp_wicket_aorm_staged_records` DB table (with `upload_session_id`) serves as the intermediary between file parsing and MDP sync. React state alone was ruled out due to MDP API call volume at scale (1,000+ rows).
+- **Bulk action modes**: "Add to roster" vs "Replace roster" — replace mode end-dates existing org relationships before syncing, preserving data integrity.
 
 ## Build, Test, and Development Commands
 
@@ -65,14 +71,50 @@ wicket-admin-org-roster/
 - `composer format`: Apply PHP formatting.
 - `wicket test unit:admin-org-roster`: Run unit tests with Wicket CLI tool.
 
-## Coding Style & Naming Conventions
+## Coding Standards & Formatting
 
-- PHP 8.2+, `declare(strict_types=1);`, PSR-12.
-- PSR-4 namespace: `WicketAORM\` mapped to `src/`.
-- Classes: `PascalCase`. Methods/properties: `camelCase`. Test files: `*Test.php`.
-- Favor small methods, early returns, and WordPress-native APIs/hooks.
-- External API function names (`wicket_api_client()`, `wp_create_nonce()`, etc.) stay as-is.
-- React components: PascalCase filenames matching component name. Hooks: `use` prefix, camelCase.
+### PHP
+
+- **Standard**: PSR-12 + PER-CS + PHP 8.2 Migration — enforced by `php-cs-fixer v3`.
+- **Config file**: `.php-cs-fixer.dist.php` — reuse the shared Wicket ecosystem config (same as `wicket-wp-base-plugin` and `wicket-lib-org-roster`).
+- **Key rules enforced by the formatter**:
+  - `declare(strict_types=1);` in every PHP file.
+  - Short array syntax (`[]` not `array()`).
+  - Single quotes for strings.
+  - Ordered imports (alphabetical).
+  - Trailing commas in multiline arrays/arguments.
+  - No unused imports.
+  - `elseif` (not `else if`).
+  - Visibility required on all methods and properties.
+  - One blank line before `return` statements.
+  - PHPDoc cleanup: no `@access`, no `@package`, trim whitespace.
+- **Commands**:
+  - `composer lint` — dry-run check (CI-safe).
+  - `composer format` — auto-fix in place.
+- **Run `composer lint` before every commit.** CI will reject non-conforming code.
+
+### JavaScript / React
+
+- **Toolchain**: `@wordpress/scripts` — provides ESLint, Prettier, and webpack out of the box.
+- **ESLint config**: Extends `@wordpress/eslint-plugin` (included with `@wordpress/scripts`). No custom `.eslintrc` needed unless overriding specific rules.
+- **Prettier config**: Follows WordPress defaults (tabs for indentation, single quotes, trailing commas).
+- **Commands**:
+  - `npm run lint:js` — ESLint check.
+  - `npm run format` — Prettier auto-fix.
+- **Additional rules**:
+  - Use `import` / `export` (ES modules), not `require`.
+  - Destructure `@wordpress/components` imports: `import { Button, TextControl } from '@wordpress/components';`
+  - Prefer `@wordpress/api-fetch` over raw `fetch()` for REST calls (handles nonce automatically).
+  - No `console.log` in committed code (use `console.error` for genuine error paths only).
+
+### Naming Conventions
+
+| Context | Convention | Example |
+|---|---|---|
+| PHP classes | PascalCase | `StagedRecordsTable` |
+| PHP methods/properties | camelCase | `parseUploadedFile()` |
+| PHP namespace | `WicketAORM\` | `WicketAORM\Services\FileParserService` |
+| React components | PascalCase file
 
 ## REST API Namespace
 
@@ -99,7 +141,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 - Enforce capability checks (`current_user_can()`) on every REST endpoint and admin page.
 - Use nonces for all form submissions and REST requests (`wp_create_nonce()` / `wp_verify_nonce()`).
 - Use `$wpdb` prepared statements for all direct database queries.
-- File uploads: validate MIME type, enforce allowed extensions (CSV), use `wp_handle_upload()`.
+- File uploads: validate MIME type, enforce allowed extension (CSV only), use `wp_handle_upload()`.
 
 ## Dependencies & Integrations
 
