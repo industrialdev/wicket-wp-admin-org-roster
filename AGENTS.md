@@ -107,11 +107,6 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 - **wicket-lib-org-roster**: Reference for MDP API call patterns (`MemberService`, `OrganizationService`, `ConnectionService`, bulk upload flow). Use similar patterns in `MdpClient` and `SyncService`.
 - **MDP API**: All person/org/relationship mutations go through the Wicket API via `wicket_api_client()`.
 
-## File Generation Rules
-
-- Only generate code in `src/web/app/plugins/wicket-admin-org-roster/` or `/qa`.
-- Do not modify files outside those directories.
-
 ## Commit & Pull Request Guidelines
 
 - Short, imperative, scope-specific commit messages (e.g., `adds staged records table migration`, `fixes upload validation for CSV headers`).
