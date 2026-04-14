@@ -1,0 +1,13 @@
+# Node modules
+/node_modules/
+
+# Composer vendor directory
+/vendor/
+
+# OS / editor artefacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

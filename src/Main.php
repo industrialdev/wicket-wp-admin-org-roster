@@ -64,11 +64,14 @@ final class Main
 
     /**
      * Enqueue admin scripts and styles.
+     *
+     * @param string $hookSuffix The current admin page hook suffix passed by
+     *                           the admin_enqueue_scripts action.
      */
-    public function enqueueAssets(): void
+    public function enqueueAssets(string $hookSuffix): void
     {
         $assets = new Assets();
-        $assets->enqueue();
+        $assets->enqueue($hookSuffix);
     }
 
     /**
