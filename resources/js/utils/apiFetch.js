@@ -6,13 +6,13 @@
  * from a single place.
  *
  * Assets.php calls wp_localize_script() to expose:
- *   window.aormSettings.restUrl  — the WP REST root URL
- *   window.aormSettings.nonce    — wp_create_nonce( 'wp_rest' )
+ *   window.aormContext.restUrl  — the WP REST root URL
+ *   window.aormContext.nonce    — wp_create_nonce( 'wp_rest' )
  */
 
 import apiFetchLib from '@wordpress/api-fetch';
 
-const settings = window.aormSettings ?? {};
+const settings = window.aormContext ?? {};
 
 if ( settings.nonce ) {
 	apiFetchLib.use( apiFetchLib.createNonceMiddleware( settings.nonce ) );

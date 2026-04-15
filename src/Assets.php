@@ -66,14 +66,11 @@ class Assets
             true // Load in footer.
         );
 
-        // Pass REST URL and nonce to the React app via window.aormSettings.
+        // Pass REST URL, nonce, and page-specific context to the React app via window.aormContext.
         wp_localize_script(
             self::HANDLE . '-index',
-            'aormSettings',
-            [
-                'restUrl' => esc_url_raw(rest_url()),
-                'nonce'   => wp_create_nonce('wp_rest'),
-            ]
+            'aormContext',
+            $this->buildLocalizationData($hookSuffix)
         );
 
         // Enqueue the companion stylesheet if the build produced one.
@@ -86,6 +83,33 @@ class Assets
                 $asset['version']
             );
         }
+    }
+
+    /**
+     * Build the aormContext object passed to window via wp_localize_script.
+     *
+     * All pages receive restUrl and nonce. The roster-detail page additionally
+     * receives orgUuid and membershipUuid — read from the request URL params
+     * here in PHP so React never needs to parse window.location.search itself.
+     *
+     * @param string $hookSuffix
+     * @return array<string, string>
+     */
+    private function buildLocalizationData(string $hookSuffix): array
+    {
+        $data = [
+            'restUrl' => esc_url_raw(rest_url()),
+            'nonce'   => wp_create_nonce('wp_rest'),
+        ];
+
+        if (str_contains($hookSuffix, MenuPage::DETAIL_SLUG)) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $data['orgUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['org_uuid'] ?? '')));
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $data['membershipUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['membership_uuid'] ?? '')));
+        }
+
+        return $data;
     }
 
     /**

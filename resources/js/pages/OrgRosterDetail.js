@@ -2,8 +2,9 @@
  * Org Roster Detail page — AORM-4.
  *
  * Mounted into #aorm-roster-detail by index.js. Reads org_uuid and
- * membership_uuid from the current URL's query string (set by the
- * WP_List_Table row link in the list view).
+ * membership_uuid from window.aormContext (injected server-side by
+ * Assets.php via wp_localize_script), falling back to the URL query
+ * string if those values are absent.
  *
  * Tabs (per AORM-4):
  *   1. Roster Assignment  — current members table with bulk/row actions
@@ -19,19 +20,12 @@ import RosterAssignment from '../components/RosterAssignment';
 import RosterUpload from '../components/RosterUpload';
 import RosterActivity from '../components/RosterActivity';
 
-/**
- * Read a single query-string parameter from the current page URL.
- *
- * @param {string} name
- * @returns {string|null}
- */
-function getUrlParam( name ) {
-	return new URLSearchParams( window.location.search ).get( name );
-}
-
 export default function OrgRosterDetail() {
-	const orgUuid        = getUrlParam( 'org_uuid' );
-	const membershipUuid = getUrlParam( 'membership_uuid' );
+	// org_uuid and membership_uuid are read from $_GET in PHP (Assets.php) and
+	// injected here via wp_localize_script → window.aormContext.
+	const settings       = window.aormContext ?? {};
+	const orgUuid        = settings.orgUuid        ?? null;
+	const membershipUuid = settings.membershipUuid ?? null;
 
 	const { data: roster, isLoading, error } = useRestApi(
 		orgUuid && membershipUuid
