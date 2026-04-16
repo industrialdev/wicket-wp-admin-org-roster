@@ -455,17 +455,25 @@ Audit trail for all ORM activity.
 
 #### wp_wicket_aorm_roster_meta
 
-Lightweight lookup table for fast list view queries.
+Persistent per-roster state table. Survives staged records cleanup so the list view always shows the latest known status, who last touched it, and when. Also serves as a fast lookup for the Org Roster List view (single indexed query per row instead of scanning logs or staged records).
 
 | Column | Type | Notes |
 |---|---|---|
 | id | BIGINT, PK, AI | Primary key |
 | org_uuid | VARCHAR(36) | Organization |
 | membership_uuid | VARCHAR(36) | Unique per membership |
+| roster_status | ENUM, NULL | idle, in_progress, syncing, has_failures, synced |
 | last_updated_at | DATETIME | Most recent roster save |
 | last_updated_by | VARCHAR(255) | User email |
+| last_synced_at | DATETIME, NULL | Timestamp of last successful sync |
 
 **Indexes:** membership_uuid (unique).
+
+**Lifecycle updates:**
+- Upload starts / individual add / roster assignment change → `in_progress`, update `last_updated_at` + `last_updated_by`
+- Sync running → `syncing`
+- Sync completed successfully → `synced`, set `last_synced_at`
+- Sync completed with failures → `has_failures`
 
 ### REST API endpoints
 
