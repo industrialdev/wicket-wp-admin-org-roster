@@ -10,10 +10,34 @@ namespace WicketAORM\Database;
 class Migrator
 {
     /**
+     * Current database schema version.
+     *
+     * Bump this string whenever the schema changes so that version-gated
+     * migration runs on the next activation or admin_init check.
+     */
+    public const string DB_VERSION = '1.0';
+
+    /**
+     * wp_options key that stores the installed schema version.
+     */
+    public const string DB_VERSION_OPTION = 'wicket_aorm_db_version';
+
+    /**
      * Create or update all plugin database tables.
+     *
+     * Compares the installed schema version stored in wp_options against
+     * DB_VERSION. If they already match the schema is current and no work
+     * is done. Otherwise all three tables are passed through dbDelta and
+     * the stored version is updated to DB_VERSION.
      */
     public function up(): void
     {
+        $installed = get_option(self::DB_VERSION_OPTION, '');
+
+        if ($installed === self::DB_VERSION) {
+            return;
+        }
+
         if (! function_exists('dbDelta')) {
             require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         }
@@ -21,6 +45,8 @@ class Migrator
         dbDelta($this->buildStagedRecordsSql());
         dbDelta($this->buildLogsSql());
         dbDelta($this->buildRosterMetaSql());
+
+        update_option(self::DB_VERSION_OPTION, self::DB_VERSION);
     }
 
     /**
