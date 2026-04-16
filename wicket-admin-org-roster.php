@@ -104,6 +104,29 @@ if (! function_exists('wicket_aorm_deactivate')) {
 register_activation_hook(__FILE__, 'wicket_aorm_activate');
 register_deactivation_hook(__FILE__, 'wicket_aorm_deactivate');
 
+if (! function_exists('wicket_aorm_maybe_upgrade')) {
+    /**
+     * Runs on admin_init to catch schema upgrades after plugin file updates.
+     *
+     * WordPress does not re-run the activation hook when a plugin is updated
+     * via the auto-updater or a file replacement. Hooking Migrator::up() into
+     * admin_init ensures the schema is always current on the first admin page
+     * load after an update. The version-gate inside Migrator::up() makes this
+     * a cheap no-op when the schema is already up to date.
+     */
+    function wicket_aorm_maybe_upgrade(): void
+    {
+        if (! class_exists(WicketAORM\Database\Migrator::class)) {
+            return;
+        }
+
+        $migrator = new WicketAORM\Database\Migrator();
+        $migrator->up();
+    }
+}
+
+add_action('admin_init', 'wicket_aorm_maybe_upgrade');
+
 /*
 |--------------------------------------------------------------------------
 | Bootstrap
