@@ -20,6 +20,7 @@ class Migrator
 
         dbDelta($this->buildStagedRecordsSql());
         dbDelta($this->buildLogsSql());
+        dbDelta($this->buildRosterMetaSql());
     }
 
     /**
@@ -58,6 +59,44 @@ class Migrator
   KEY level (level),
   KEY action (action),
   KEY created_at (created_at)
+) {$charsetCollate};";
+    }
+
+    /**
+     * Build the CREATE TABLE SQL for wp_wicket_aorm_roster_meta.
+     *
+     * Persistent per-roster state that survives staged-records cleanup.
+     * Gives the org roster list view a single indexed query per row instead
+     * of scanning staged_records or logs for the latest status, actor, and
+     * timestamp. Keyed uniquely on membership_uuid (one row per org+membership
+     * pair).
+     *
+     * Extracted as a protected method so unit tests can assert on the
+     * schema string without requiring a live database.
+     */
+    protected function buildRosterMetaSql(): string
+    {
+        global $wpdb;
+
+        $table          = $wpdb->prefix . 'wicket_aorm_roster_meta';
+        $charsetCollate = $wpdb->get_charset_collate();
+
+        // dbDelta requirements:
+        //   - Two spaces between PRIMARY KEY and the key definition.
+        //   - KEY / UNIQUE KEY (not INDEX) for secondary indexes.
+        //   - Each column/key on its own line.
+        return "CREATE TABLE {$table} (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  org_uuid VARCHAR(36) NOT NULL,
+  membership_uuid VARCHAR(36) NOT NULL,
+  roster_status ENUM('idle','in_progress','syncing','has_failures','synced') NULL DEFAULT NULL,
+  last_updated_at DATETIME NOT NULL,
+  last_updated_by VARCHAR(255) NOT NULL,
+  last_synced_at DATETIME NULL DEFAULT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY membership_uuid (membership_uuid),
+  KEY org_uuid (org_uuid),
+  KEY roster_status (roster_status)
 ) {$charsetCollate};";
     }
 
