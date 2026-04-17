@@ -111,10 +111,11 @@ class MenuPage
      */
     public function renderOrgRostersPage(): void
     {
-        // TODO (AORM-3): instantiate and display OrgRosterListTable.
+        // TODO (AORM-3.2): call prepare_items() and display() on RosterListTable
+        // once the MDP data fetch is implemented.
         echo '<div class="wrap">';
         echo '<h1 class="wp-heading-inline">' . esc_html__('Organization Rosters', 'wicket-aorm') . '</h1>';
-        echo '<p>' . esc_html__('Organization memberships list (WP_List_Table — coming in AORM-3).', 'wicket-aorm') . '</p>';
+        echo '<p>' . esc_html__('Organization memberships list (WP_List_Table — coming in AORM-3.2).', 'wicket-aorm') . '</p>';
         echo '</div>';
     }
 
