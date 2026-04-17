@@ -50,6 +50,31 @@ class Migrator
     }
 
     /**
+     * Drop all plugin database tables and remove the stored schema version.
+     *
+     * Called by uninstall.php when the plugin is deleted from WordPress.
+     * Intentionally not called on deactivation so that data survives a
+     * deactivate/reactivate cycle.
+     */
+    public function down(): void
+    {
+        global $wpdb;
+
+        $tables = [
+            $wpdb->prefix . 'wicket_aorm_staged_records',
+            $wpdb->prefix . 'wicket_aorm_logs',
+            $wpdb->prefix . 'wicket_aorm_roster_meta',
+        ];
+
+        foreach ($tables as $table) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query("DROP TABLE IF EXISTS `{$table}`");
+        }
+
+        delete_option(self::DB_VERSION_OPTION);
+    }
+
+    /**
      * Build the CREATE TABLE SQL for wp_wicket_aorm_logs.
      *
      * Captures every admin action (upload, validation, sync, duplicate
