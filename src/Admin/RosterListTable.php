@@ -301,7 +301,7 @@ class RosterListTable extends WP_List_Table
             $type = (string) ($resource['type'] ?? '');
             $id   = (string) ($resource['id'] ?? '');
 
-            if ($type \!== '' && $id \!== '') {
+            if ($type !== '' && $id !== '') {
                 $index[$type][$id] = $resource;
             }
         }
