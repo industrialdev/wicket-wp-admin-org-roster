@@ -19,6 +19,16 @@ class MenuPage
     /** Top-level menu slug — also the org memberships list page. */
     public const MENU_SLUG = 'wicket-aorm';
 
+    /**
+     * Hook suffix returned by add_menu_page() for the roster list page.
+     *
+     * Stored so the load-{hook} action can be registered and the Screen
+     * Options panel entry added only when this page is actually loading.
+     *
+     * @see AORM-3.7
+     */
+    private ?string $rosterListHook = null;
+
     /** Hidden detail page slug — linked to from list-table rows. */
     public const DETAIL_SLUG = 'wicket-aorm-roster-detail';
 
@@ -34,7 +44,9 @@ class MenuPage
     public function register(): void
     {
         // Top-level menu — renders the org memberships list (WP_List_Table).
-        add_menu_page(
+        // Capture the hook suffix so we can register the Screen Options entry
+        // only when this specific page is loading (AORM-3.7).
+        $this->rosterListHook = add_menu_page(
             __('Roster Management', 'wicket-aorm'),
             __('Roster Management', 'wicket-aorm'),
             self::CAPABILITY,
@@ -43,6 +55,8 @@ class MenuPage
             'dashicons-groups',
             self::MENU_POSITION,
         );
+
+        add_action('load-' . $this->rosterListHook, [$this, 'registerScreenOptions']);
 
         // Organization Rosters — replaces the auto-generated duplicate top-level link.
         add_submenu_page(
@@ -98,6 +112,31 @@ class MenuPage
         // It is registered above so WP recognises it as a valid admin page,
         // but admins navigate to it only via list-table row links.
         $this->hideSubmenuPage(self::MENU_SLUG, self::DETAIL_SLUG);
+    }
+
+    // -------------------------------------------------------------------------
+    // Screen option registration (AORM-3.7)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Register the per-page screen option for the org memberships list table.
+     *
+     * Hooked to load-{page_hook} so it runs only when the roster list page is
+     * actually being served, not on every admin request. WP_List_Table reads the
+     * saved value via get_items_per_page(RosterListTable::SCREEN_OPTION_PER_PAGE).
+     *
+     * The companion filter 'set_screen_option_aorm_rosters_per_page' is registered
+     * in the plugin bootstrap file to persist the value when the user clicks Apply.
+     *
+     * @see AORM-3.7
+     */
+    public function registerScreenOptions(): void
+    {
+        add_screen_option('per_page', [
+            'label'   => __('Organizations per page', 'wicket-aorm'),
+            'default' => 20,
+            'option'  => RosterListTable::SCREEN_OPTION_PER_PAGE,
+        ]);
     }
 
     // -------------------------------------------------------------------------

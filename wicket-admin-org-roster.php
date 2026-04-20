@@ -127,6 +127,17 @@ if (! function_exists('wicket_aorm_maybe_upgrade')) {
 
 add_action('admin_init', 'wicket_aorm_maybe_upgrade');
 
+// AORM-3.7: Persist the per-page screen option for the org roster list table.
+// The filter fires during admin_init when WP processes screen option saves. It
+// must be registered before admin_init — hooking here (plugin load time) ensures
+// that. See RosterListTable::SCREEN_OPTION_PER_PAGE and MenuPage::registerScreenOptions().
+add_filter(
+    'set_screen_option_aorm_rosters_per_page',
+    static fn (mixed $keep, string $option, mixed $value): int => (int) $value,
+    10,
+    3,
+);
+
 /*
 |--------------------------------------------------------------------------
 | Bootstrap

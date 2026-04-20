@@ -29,6 +29,16 @@ use WP_List_Table;
  */
 class RosterListTable extends WP_List_Table
 {
+    /**
+     * WordPress user-meta key used to persist the admin's per-page preference.
+     *
+     * Referenced by get_items_per_page() in prepare_items() and by
+     * MenuPage::registerScreenOptions() when registering the Screen Options panel entry.
+     *
+     * @see AORM-3.7
+     */
+    public const SCREEN_OPTION_PER_PAGE = 'aorm_rosters_per_page';
+
     private MdpClient $mdpClient;
 
     private RosterMetaTable $rosterMetaTable;
@@ -116,7 +126,7 @@ class RosterListTable extends WP_List_Table
             $this->get_sortable_columns(),
         ];
 
-        $perPage     = $this->get_items_per_page('aorm_rosters_per_page', 20);
+        $perPage     = $this->get_items_per_page(self::SCREEN_OPTION_PER_PAGE, 20);
         $currentPage = $this->get_pagenum();
 
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
