@@ -106,6 +106,7 @@ class RosterListTable extends WP_List_Table
      *
      * @see AORM-3.2
      * @see AORM-3.3
+     * @see AORM-3.4
      */
     public function prepare_items(): void
     {
@@ -124,10 +125,16 @@ class RosterListTable extends WP_List_Table
         $order     = strtolower(sanitize_key((string) ($_GET['order'] ?? 'desc'))) === 'asc' ? 'asc' : 'desc';
         $sortField = $this->mapColumnToSortField($orderby, $order);
 
+        // AORM-3.4: The built-in WP search box submits the query as $_REQUEST['s'].
+        // Sanitize and forward it to the MDP client so the API can filter results.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $search = sanitize_text_field((string) ($_REQUEST['s'] ?? ''));
+
         $response = $this->mdpClient->getOrgMemberships([
             'page'     => $currentPage,
             'per_page' => $perPage,
             'sort'     => $sortField,
+            'search'   => $search,
         ]);
 
         $data       = (array) ($response['data'] ?? []);
