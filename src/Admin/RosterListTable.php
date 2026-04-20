@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace WicketAORM\Admin;
 
+use WicketAORM\Database\RosterMetaTable;
 use WicketAORM\Services\MdpClient;
 use WP_List_Table;
 
@@ -30,14 +31,21 @@ class RosterListTable extends WP_List_Table
 {
     private MdpClient $mdpClient;
 
+    private RosterMetaTable $rosterMetaTable;
+
     /**
-     * @param array<string, mixed> $args      Passed through to WP_List_Table.
-     * @param MdpClient|null       $mdpClient Injected client; defaults to new MdpClient().
+     * @param array<string, mixed>  $args            Passed through to WP_List_Table.
+     * @param MdpClient|null        $mdpClient        Injected MDP client; defaults to new MdpClient().
+     * @param RosterMetaTable|null  $rosterMetaTable  Injected meta table; defaults to new RosterMetaTable().
      */
-    public function __construct(array $args = [], ?MdpClient $mdpClient = null)
-    {
+    public function __construct(
+        array $args = [],
+        ?MdpClient $mdpClient = null,
+        ?RosterMetaTable $rosterMetaTable = null,
+    ) {
         parent::__construct($args);
-        $this->mdpClient = $mdpClient ?? new MdpClient();
+        $this->mdpClient       = $mdpClient ?? new MdpClient();
+        $this->rosterMetaTable = $rosterMetaTable ?? new RosterMetaTable();
     }
 
     /**
@@ -85,17 +93,19 @@ class RosterListTable extends WP_List_Table
     }
 
     /**
-     * Fetch org memberships from MDP and populate $this->items.
+     * Fetch org memberships from MDP, enrich with local DB data, and populate $this->items.
      *
      * Retrieves organization memberships with Active, Delayed, or Grace Period
      * status from the MDP via MdpClient::getOrgMemberships(). Normalises the
-     * JSON:API response into flat item rows keyed by column name.
+     * JSON:API response into flat item rows, then enriches each row with
+     * roster_status, last_updated, last_updated_by, and last_synced_at from
+     * wp_wicket_aorm_roster_meta using a single indexed IN query (AORM-3.3).
      *
      * Fields populated by later tickets:
-     *   - roster_status / last_updated  (AORM-3.3 — local DB enrichment)
-     *   - column render logic           (AORM-3.8, AORM-3.9)
+     *   - column render logic  (AORM-3.8, AORM-3.9)
      *
      * @see AORM-3.2
+     * @see AORM-3.3
      */
     public function prepare_items(): void
     {
@@ -125,6 +135,7 @@ class RosterListTable extends WP_List_Table
         $totalCount = (int) ($response['meta']['page']['total_count'] ?? count($data));
 
         $this->items = $this->normalizeItems($data, $included);
+        $this->enrichFromLocalDb($this->items);
 
         $this->set_pagination_args([
             'total_items' => $totalCount,
@@ -284,9 +295,9 @@ class RosterListTable extends WP_List_Table
      * can read org_name and membership_tier directly from the item array
      * without knowledge of the JSON:API envelope.
      *
-     * Fields left empty here are populated by later tickets:
-     *   - roster_status  (AORM-3.3 — from wp_wicket_aorm_roster_meta)
-     *   - last_updated   (AORM-3.3 — from wp_wicket_aorm_roster_meta)
+     * roster_status, last_updated, last_updated_by, and last_synced_at are
+     * initialized to empty strings here; enrichFromLocalDb() overwrites them
+     * with values from wp_wicket_aorm_roster_meta (AORM-3.3).
      *
      * @param list<array<string,mixed>> $data     JSON:API primary resource array.
      * @param list<array<string,mixed>> $included JSON:API included resources array.
@@ -328,12 +339,60 @@ class RosterListTable extends WP_List_Table
                 'assigned_count'    => (string) ($attrs['assigned_count'] ?? ''),
                 'membership_status' => (string) ($attrs['status'] ?? ''),
                 'created'           => (string) ($attrs['created_at'] ?? ''),
-                'roster_status'     => '', // populated by AORM-3.3
-                'last_updated'      => '', // populated by AORM-3.3
+                'roster_status'     => '',
+                'last_updated'      => '',
+                'last_updated_by'   => '',
+                'last_synced_at'    => '',
                 'mdp_link'          => $orgId, // column_mdp_link() renders link in AORM-3.9
             ];
         }
 
         return $items;
+    }
+
+    /**
+     * Enrich normalized items with local roster meta from wp_wicket_aorm_roster_meta.
+     *
+     * Extracts all membership UUIDs from the current page of items, issues a
+     * single IN query via RosterMetaTable (which hits the unique membership_uuid
+     * index), then merges the matching DB row into each item.
+     *
+     * Fields written per item:
+     *   - roster_status   — ENUM value from roster_meta.roster_status
+     *   - last_updated    — raw DATETIME from roster_meta.last_updated_at
+     *   - last_updated_by — email / username from roster_meta.last_updated_by
+     *   - last_synced_at  — raw DATETIME from roster_meta.last_synced_at (nullable)
+     *
+     * Items whose membership_uuid has no local row are left with empty strings.
+     *
+     * @param list<array<string,mixed>> $items Items array from normalizeItems(), passed by reference.
+     *
+     * @see AORM-3.3
+     */
+    private function enrichFromLocalDb(array &$items): void
+    {
+        if (empty($items)) {
+            return;
+        }
+
+        /** @var list<string> $uuids */
+        $uuids = array_values(array_column($items, 'membership_uuid'));
+        $meta  = $this->rosterMetaTable->getByMembershipUuids($uuids);
+
+        foreach ($items as &$item) {
+            $uuid = (string) ($item['membership_uuid'] ?? '');
+            $row  = $meta[$uuid] ?? null;
+
+            if ($row === null) {
+                continue;
+            }
+
+            $item['roster_status']   = (string) ($row['roster_status'] ?? '');
+            $item['last_updated']    = (string) ($row['last_updated_at'] ?? '');
+            $item['last_updated_by'] = (string) ($row['last_updated_by'] ?? '');
+            $item['last_synced_at']  = (string) ($row['last_synced_at'] ?? '');
+        }
+
+        unset($item);
     }
 }
