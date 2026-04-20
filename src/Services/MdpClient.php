@@ -13,14 +13,15 @@ namespace WicketAORM\Services;
 class MdpClient
 {
     /**
-     * Membership statuses that qualify for the roster list view.
+     * The only MDP membership status excluded from the roster list view.
      *
-     * Only org memberships in one of these statuses are fetched and displayed.
-     * The MDP uses these exact string values in its status field.
-     *
-     * @var list<string>
+     * The MDP exposes three effective states — Active (including Grace Period
+     * memberships, which carry `in_grace: true` on an "Active" status record),
+     * Delayed, and Inactive. We filter by exclusion (`status_not_eq`) rather
+     * than inclusion so that any future statuses MDP adds are shown by default
+     * without requiring a code change here.
      */
-    public const ALLOWED_STATUSES = ['Active', 'Delayed', 'Grace Period'];
+    public const EXCLUDED_STATUS = 'Inactive';
 
     /**
      * Fetch organization memberships from the MDP.
@@ -57,7 +58,7 @@ class MdpClient
 
         $queryParams = [
             'filter' => [
-                'status_in' => self::ALLOWED_STATUSES,
+                'status_not_eq' => self::EXCLUDED_STATUS,
             ],
             'page' => [
                 'size'   => max(1, (int) ($args['per_page'] ?? 20)),
