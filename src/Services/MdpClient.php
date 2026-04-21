@@ -72,11 +72,10 @@ class MdpClient
             $queryParams['sort'] = (string) $args['sort'];
         }
 
-        // AORM-3.4: When a search term is present, apply a Ransack OR filter
-        // across org legal name, org UUID (JSON:API id on the relationship),
-        // and the MDP org identifying number (the `identifying_number` attribute).
+        // AORM-3.4: When a search term is present, apply a Ransack filter on
+        // the organisation's English legal name.
         if (! empty($args['search'])) {
-            $queryParams['filter']['organization_legal_name_en_or_organization_uuid_or_organization_identifying_number_cont'] = (string) $args['search'];
+            $queryParams['filter']['organization_legal_name_en_cont'] = (string) $args['search'];
         }
 
         $query = (string) preg_replace(

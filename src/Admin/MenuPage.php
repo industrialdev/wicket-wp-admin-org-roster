@@ -166,6 +166,7 @@ class MenuPage
         echo '<hr class="wp-header-end" />';
         echo '<form method="get">';
         echo '<input type="hidden" name="page" value="' . esc_attr(self::MENU_SLUG) . '" />';
+        $table->search_box(esc_html__('Search Organizations', 'wicket-aorm'), 'aorm-roster-search');
         $table->display();
         echo '</form>';
         echo '</div>';

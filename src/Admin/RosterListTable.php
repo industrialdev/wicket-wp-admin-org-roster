@@ -147,7 +147,7 @@ class RosterListTable extends WP_List_Table
 
         $data       = (array) ($response['data'] ?? []);
         $included   = (array) ($response['included'] ?? []);
-        $totalCount = (int) ($response['meta']['page']['total_count'] ?? count($data));
+        $totalCount = (int) ($response['meta']['page']['total_items'] ?? count($data));
 
         $this->items = $this->normalizeItems($data, $included);
         $this->enrichFromLocalDb($this->items);
