@@ -178,16 +178,33 @@ class RosterListTable extends WP_List_Table
     /**
      * Render the Organization Name column.
      *
-     * Links to the detail view, passing org_uuid and membership_uuid as URL
-     * params so the React island can bootstrap the correct roster.
-     *
-     * TODO (AORM-3.8): build admin_url() link with org_uuid + membership_uuid.
+     * Links to the roster detail page, passing org_uuid and membership_uuid as
+     * URL params so the React island can bootstrap the correct roster context.
+     * Falls back to plain escaped text when either UUID is absent.
      *
      * @param array<string, mixed> $item
+     * @see AORM-3.8
      */
     protected function column_org_name($item): string
     {
-        return esc_html((string) ($item['org_name'] ?? ''));
+        $orgName        = (string) ($item['org_name'] ?? '');
+        $orgUuid        = (string) ($item['org_uuid'] ?? '');
+        $membershipUuid = (string) ($item['membership_uuid'] ?? '');
+
+        if ($orgUuid === '' || $membershipUuid === '') {
+            return esc_html($orgName);
+        }
+
+        $url = add_query_arg(
+            [
+                'page'            => MenuPage::DETAIL_SLUG,
+                'org_uuid'        => $orgUuid,
+                'membership_uuid' => $membershipUuid,
+            ],
+            admin_url('admin.php'),
+        );
+
+        return '<a href="' . esc_url($url) . '">' . esc_html($orgName) . '</a>';
     }
 
     /**
