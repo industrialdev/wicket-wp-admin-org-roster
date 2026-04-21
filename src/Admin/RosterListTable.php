@@ -350,7 +350,7 @@ class RosterListTable extends WP_List_Table
         );
 
         return sprintf(
-            '<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>',
+            '<a href="%s" target="_blank" rel="noopener noreferrer">%s <span class="dashicons dashicons-external"></span></a>',
             esc_url($url),
             esc_html__('View in MDP', 'wicket-aorm'),
         );
