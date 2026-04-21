@@ -204,7 +204,10 @@ class RosterListTable extends WP_List_Table
             admin_url('admin.php'),
         );
 
-        return '<a href="' . esc_url($url) . '">' . esc_html($orgName) . '</a>';
+        $output = '<strong><a class="row-title" href="' . esc_url($url) . '">' . esc_html($orgName) . '</a></strong>';
+        $output .= '<div class="row-actions"><span class="edit"><a href="' . esc_url($url) . '">' . esc_html__('Edit Roster', 'wicket-aorm') . '</a></span></div>';
+
+        return $output;
     }
 
     /**
@@ -216,19 +219,42 @@ class RosterListTable extends WP_List_Table
      */
     protected function column_membership_tier($item): string
     {
-        return esc_html((string) ($item['membership_tier'] ?? ''));
+        $tier   = esc_html((string) ($item['membership_tier'] ?? ''));
+        $endsAt = (string) ($item['membership_ends_at'] ?? '');
+
+        if ($endsAt === '') {
+            return $tier;
+        }
+
+        $dateLabel = esc_html($this->formatDate($endsAt));
+
+        return $tier . '<br /><small>' . esc_html__('End Date:', 'wicket-aorm') . ' ' . $dateLabel . '</small>';
     }
 
     /**
      * Render the # Assigned column.
      *
-     * TODO (AORM-3.x): format as "assigned / max_seats".
+     * Renders as "active / max" (e.g. "200 / 350"), or "active / ∞" when the
+     * membership has unlimited assignments, or just "active" when neither
+     * max_assignments nor unlimited_assignments is set.
      *
      * @param array<string, mixed> $item
      */
     protected function column_assigned_count($item): string
     {
-        return esc_html((string) ($item['assigned_count'] ?? ''));
+        $active    = (int) ($item['active_assignments_count'] ?? 0);
+        $max       = $item['max_assignments'] ?? null;
+        $unlimited = (bool) ($item['unlimited_assignments'] ?? false);
+
+        if ($unlimited) {
+            return esc_html($active . ' / ∞');
+        }
+
+        if ($max !== null) {
+            return esc_html($active . ' / ' . (int) $max);
+        }
+
+        return esc_html((string) $active);
     }
 
     /**
@@ -244,13 +270,15 @@ class RosterListTable extends WP_List_Table
     /**
      * Render the Created column.
      *
-     * TODO (AORM-3.x): format date for display.
+     * Parses the ISO 8601 timestamp returned by the MDP and formats it as
+     * YYYY-MM-DD. Returns an empty string when no value is set or the value
+     * cannot be parsed.
      *
      * @param array<string, mixed> $item
      */
     protected function column_created($item): string
     {
-        return esc_html((string) ($item['created'] ?? ''));
+        return esc_html($this->formatDate((string) ($item['created'] ?? '')));
     }
 
     /**
@@ -323,6 +351,35 @@ class RosterListTable extends WP_List_Table
     // -------------------------------------------------------------------------
 
     /**
+     * Parse an ISO 8601 date string and return it formatted as YYYY-MM-DD,
+     * using the site's configured timezone via wp_date().
+     *
+     * Used by column renderers to normalise the raw UTC timestamps returned by
+     * the MDP API (e.g. "2026-12-31T00:00:00.000Z") into a date string that
+     * reflects the WordPress site timezone — so admins see dates that match
+     * their locale rather than raw UTC.
+     *
+     * Returns an empty string when the input is empty, cannot be parsed by
+     * strtotime(), or wp_date() fails, so column renderers never output garbage.
+     *
+     * @param string $isoDate Raw ISO 8601 string from the MDP API.
+     */
+    private function formatDate(string $isoDate): string
+    {
+        if ($isoDate === '') {
+            return '';
+        }
+
+        $timestamp = strtotime($isoDate);
+
+        if ($timestamp === false) {
+            return '';
+        }
+
+        return wp_date('Y-m-d', $timestamp) ?: '';
+    }
+
+    /**
      * Map a WP_List_Table column key + sort direction to an MDP sort field.
      *
      * JSON:API convention: prefix '-' for descending (e.g. '-updated_at').
@@ -393,18 +450,21 @@ class RosterListTable extends WP_List_Table
             $membershipAttrs = (array) ($index['memberships'][$membershipId]['attributes'] ?? []);
 
             $items[] = [
-                'org_uuid'          => $orgId,
-                'org_name'          => (string) ($orgAttrs['legal_name'] ?? ''),
-                'membership_uuid'   => (string) ($record['id'] ?? ''),
-                'membership_tier'   => (string) ($membershipAttrs['name'] ?? ''),
-                'assigned_count'    => (string) ($attrs['assigned_count'] ?? ''),
-                'membership_status' => (string) ($attrs['status'] ?? ''),
-                'created'           => (string) ($attrs['created_at'] ?? ''),
-                'roster_status'     => '',
-                'last_updated'      => '',
-                'last_updated_by'   => '',
-                'last_synced_at'    => '',
-                'mdp_link'          => $orgId, // column_mdp_link() renders link in AORM-3.9
+                'org_uuid'            => $orgId,
+                'org_name'            => (string) ($orgAttrs['legal_name'] ?? ''),
+                'membership_uuid'     => (string) ($record['id'] ?? ''),
+                'membership_tier'     => (string) ($membershipAttrs['name'] ?? ''),
+                'membership_ends_at'      => (string) ($attrs['ends_at'] ?? ''),
+                'active_assignments_count' => (int) ($attrs['active_assignments_count'] ?? 0),
+                'max_assignments'          => isset($attrs['max_assignments']) ? (int) $attrs['max_assignments'] : null,
+                'unlimited_assignments'    => (bool) ($attrs['unlimited_assignments'] ?? false),
+                'membership_status'   => (string) ($attrs['status'] ?? ''),
+                'created'             => (string) ($attrs['created_at'] ?? ''),
+                'roster_status'       => '',
+                'last_updated'        => '',
+                'last_updated_by'     => '',
+                'last_synced_at'      => '',
+                'mdp_link'            => $orgId, // column_mdp_link() renders link in AORM-3.9
             ];
         }
 

@@ -146,15 +146,28 @@ class MenuPage
     /**
      * Render the org memberships list page.
      *
+     * Instantiates RosterListTable, fetches items via prepare_items(), then
+     * renders the standard WordPress admin page scaffold: a .wrap container,
+     * an h1 heading, and a GET form wrapping the list table so that column
+     * sorting, search, and filter dropdowns (extra_tablenav) all submit back
+     * to the same admin page with the correct page slug preserved.
+     *
      * Uses WP_List_Table — no React bundle is enqueued here (AORM-1.6).
+     *
+     * @see AORM-3.10
      */
     public function renderOrgRostersPage(): void
     {
-        // TODO (AORM-3.2): call prepare_items() and display() on RosterListTable
-        // once the MDP data fetch is implemented.
+        $table = new RosterListTable();
+        $table->prepare_items();
+
         echo '<div class="wrap">';
         echo '<h1 class="wp-heading-inline">' . esc_html__('Organization Rosters', 'wicket-aorm') . '</h1>';
-        echo '<p>' . esc_html__('Organization memberships list (WP_List_Table — coming in AORM-3.2).', 'wicket-aorm') . '</p>';
+        echo '<hr class="wp-header-end" />';
+        echo '<form method="get">';
+        echo '<input type="hidden" name="page" value="' . esc_attr(self::MENU_SLUG) . '" />';
+        $table->display();
+        echo '</form>';
         echo '</div>';
     }
 
