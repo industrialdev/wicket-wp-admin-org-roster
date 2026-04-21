@@ -93,7 +93,6 @@ class RosterListTable extends WP_List_Table
         return [
             'org_name'          => ['org_name', false],
             'membership_tier'   => ['membership_tier', false],
-            'membership_status' => ['membership_status', false],
             'created'           => ['created', false],
             'roster_status'     => ['roster_status', false],
             'last_updated'      => ['last_updated', true], // default sort, newest first
@@ -262,6 +261,10 @@ class RosterListTable extends WP_List_Table
      */
     protected function column_membership_status($item): string
     {
+        if ((bool) ($item['in_grace'] ?? false)) {
+            return esc_html__('Grace Period', 'wicket-aorm');
+        }
+
         return esc_html((string) ($item['membership_status'] ?? ''));
     }
 
@@ -401,10 +404,9 @@ class RosterListTable extends WP_List_Table
     private function mapColumnToSortField(string $orderby, string $order): string
     {
         $columnMap = [
-            'org_name'          => 'organization_legal_name_en',
-            'membership_tier'   => 'membership_name_en',
-            'membership_status' => 'status',
-            'created'           => 'created_at',
+            'org_name'        => 'organization_legal_name_en',
+            'membership_tier' => 'membership_name_en',
+            'created'         => 'created_at',
             'roster_status'     => 'updated_at', // local-only; fall back to MDP updated_at
             'last_updated'      => 'updated_at',
         ];
@@ -467,6 +469,7 @@ class RosterListTable extends WP_List_Table
                 'max_assignments'          => isset($attrs['max_assignments']) ? (int) $attrs['max_assignments'] : null,
                 'unlimited_assignments'    => (bool) ($attrs['unlimited_assignments'] ?? false),
                 'membership_status'   => (string) ($attrs['status'] ?? ''),
+                'in_grace'            => (bool) ($attrs['in_grace'] ?? false),
                 'created'             => (string) ($attrs['created_at'] ?? ''),
                 'roster_status'       => '',
                 'last_updated'        => '',
