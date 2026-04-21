@@ -98,7 +98,6 @@ class RosterListTable extends WP_List_Table
             'created'           => ['created', false],
             'roster_status'     => ['roster_status', false],
             'last_updated'      => ['last_updated', true], // default sort, newest first
-            'mdp_link'          => ['mdp_link', false],
         ];
     }
 
@@ -290,7 +289,13 @@ class RosterListTable extends WP_List_Table
      */
     protected function column_roster_status($item): string
     {
-        return esc_html((string) ($item['roster_status'] ?? ''));
+        $status = (string) ($item['roster_status'] ?? '');
+
+        if ($status === '') {
+            return '<span class="description" aria-label="' . esc_attr__('No roster activity yet', 'wicket-aorm') . '">—</span>';
+        }
+
+        return esc_html($status);
     }
 
     /**
@@ -298,13 +303,19 @@ class RosterListTable extends WP_List_Table
      *
      * Shows the date and the user email from wp_wicket_aorm_roster_meta (AORM-3.3).
      *
-     * TODO (AORM-3.x): format as "YYYY-MM-DD · user@example.com".
+     * TODO (AORM-3.x): format date via formatDate() and append last_updated_by email.
      *
      * @param array<string, mixed> $item
      */
     protected function column_last_updated($item): string
     {
-        return esc_html((string) ($item['last_updated'] ?? ''));
+        $lastUpdated = (string) ($item['last_updated'] ?? '');
+
+        if ($lastUpdated === '') {
+            return '<span class="description" aria-label="' . esc_attr__('Never updated', 'wicket-aorm') . '">—</span>';
+        }
+
+        return esc_html($lastUpdated);
     }
 
     /**
@@ -398,7 +409,6 @@ class RosterListTable extends WP_List_Table
             'created'           => 'created_at',
             'roster_status'     => 'updated_at', // local-only; fall back to MDP updated_at
             'last_updated'      => 'updated_at',
-            'mdp_link'          => 'updated_at', // no meaningful MDP sort; use fallback
         ];
 
         $field = $columnMap[$orderby] ?? 'updated_at';
