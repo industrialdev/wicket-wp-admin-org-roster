@@ -93,7 +93,6 @@ class RosterListTable extends WP_List_Table
         return [
             'org_name'          => ['org_name', false],
             'membership_tier'   => ['membership_tier', false],
-            'assigned_count'    => ['assigned_count', false],
             'membership_status' => ['membership_status', false],
             'created'           => ['created', false],
             'roster_status'     => ['roster_status', false],
@@ -402,9 +401,8 @@ class RosterListTable extends WP_List_Table
     private function mapColumnToSortField(string $orderby, string $order): string
     {
         $columnMap = [
-            'org_name'          => 'organization_legal_name',
-            'membership_tier'   => 'membership_name',
-            'assigned_count'    => 'assigned_count',
+            'org_name'          => 'organization_legal_name_en',
+            'membership_tier'   => 'membership_name_en',
             'membership_status' => 'status',
             'created'           => 'created_at',
             'roster_status'     => 'updated_at', // local-only; fall back to MDP updated_at
