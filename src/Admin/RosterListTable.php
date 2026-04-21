@@ -282,13 +282,40 @@ class RosterListTable extends WP_List_Table
     /**
      * Render the MDP link column.
      *
-     * TODO (AORM-3.9): render an anchor to the MDP org membership record URL.
+     * Builds an external link to the membership assignment view in the MDP admin app
+     * using the wicket_admin URL from get_wicket_settings().
+     * Returns an empty string when either UUID or the app base URL is unavailable.
      *
      * @param array<string, mixed> $item
      */
     protected function column_mdp_link($item): string
     {
-        return esc_html((string) ($item['mdp_link'] ?? ''));
+        $orgUuid        = (string) ($item['org_uuid'] ?? '');
+        $membershipUuid = (string) ($item['membership_uuid'] ?? '');
+
+        if ($orgUuid === '' || $membershipUuid === '') {
+            return '';
+        }
+
+        $wicketSettings = (array) get_wicket_settings();
+        $appBaseUrl     = rtrim((string) ($wicketSettings['wicket_admin'] ?? ''), '/');
+
+        if ($appBaseUrl === '') {
+            return '';
+        }
+
+        $url = sprintf(
+            '%s/organizations/%s/memberships/%s',
+            $appBaseUrl,
+            rawurlencode($orgUuid),
+            rawurlencode($membershipUuid),
+        );
+
+        return sprintf(
+            '<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>',
+            esc_url($url),
+            esc_html__('View in MDP', 'wicket-aorm'),
+        );
     }
 
     // -------------------------------------------------------------------------
