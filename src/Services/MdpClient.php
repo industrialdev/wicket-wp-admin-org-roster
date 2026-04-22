@@ -97,9 +97,9 @@ class MdpClient
      * Fetch a single org-membership record from the MDP.
      *
      * Filters the `organization_memberships` endpoint to the exact
-     * (org_uuid, membership_uuid) pair and includes related organization
-     * and membership resources so the caller receives a fully-resolved
-     * detail payload in one request.
+     * (org_uuid, membership_uuid) pair and includes related organization,
+     * membership, and people (owner) resources so the caller receives a
+     * fully-resolved detail payload in one request.
      *
      * Returns an empty array when `wicket_api_client()` is unavailable,
      * no matching record exists, or the request throws.
@@ -111,8 +111,10 @@ class MdpClient
      *   membership_uuid: string,
      *   membership_tier: string,
      *   membership_status: string,
+     *   membership_owner: string,
      *   assigned_count: int,
      *   max_assignments: int|null,
+     *   unlimited_assignments: bool,
      * }|array{}
      */
     public function getOrgMembershipDetail(string $org_uuid, string $membership_uuid): array
@@ -128,7 +130,7 @@ class MdpClient
                 'organization_uuid_eq' => $org_uuid,
                 'uuid_eq'              => $membership_uuid,
             ],
-            'include' => 'organization,membership',
+            'include' => 'organization,membership,people',
             'page'    => [
                 'size'   => 1,
                 'number' => 1,
@@ -173,8 +175,10 @@ class MdpClient
      *   membership_uuid: string,
      *   membership_tier: string,
      *   membership_status: string,
+     *   membership_owner: string,
      *   assigned_count: int,
      *   max_assignments: int|null,
+     *   unlimited_assignments: bool,
      * }|array{}
      */
     private function normalizeOrgMembershipDetail(array $response): array
@@ -205,23 +209,32 @@ class MdpClient
         $orgAttrs  = $orgItem['attributes'] ?? [];
 
         // Resolve membership tier.
-        $membershipRelId    = (string) ($record['relationships']['membership']['data']['id'] ?? '');
-        $membershipItem     = $included['memberships:' . $membershipRelId] ?? [];
-        $membershipAttrs    = $membershipItem['attributes'] ?? [];
+        $membershipRelId  = (string) ($record['relationships']['membership']['data']['id'] ?? '');
+        $membershipItem   = $included['memberships:' . $membershipRelId] ?? [];
+        $membershipAttrs  = $membershipItem['attributes'] ?? [];
 
-        $maxAssignments = isset($attrs['max_assignments'])
-            ? (int) $attrs['max_assignments']
-            : null;
+        // Resolve membership owner (people relationship).
+        $ownerRelId = (string) ($record['relationships']['owner']['data']['id'] ?? '');
+        $ownerItem  = $included['people:' . $ownerRelId] ?? [];
+        $ownerAttrs = $ownerItem['attributes'] ?? [];
+        $ownerName  = (string) ($ownerAttrs['full_name'] ?? '');
+
+        $unlimitedAssignments = (bool) ($attrs['unlimited_assignments'] ?? false);
+        $maxAssignments       = $unlimitedAssignments || ! isset($attrs['max_assignments'])
+            ? null
+            : (int) $attrs['max_assignments'];
 
         return [
-            'org_uuid'          => $orgRelId,
-            'org_name'          => (string) ($orgAttrs['legal_name_en'] ?? ''),
-            'org_type'          => (string) ($orgAttrs['type'] ?? ''),
-            'membership_uuid'   => $membershipRelId,
-            'membership_tier'   => (string) ($membershipAttrs['name'] ?? ''),
-            'membership_status' => (string) ($attrs['status'] ?? ''),
-            'assigned_count'    => (int) ($attrs['member_count'] ?? 0),
-            'max_assignments'   => $maxAssignments,
+            'org_uuid'              => $orgRelId,
+            'org_name'              => (string) ($orgAttrs['legal_name_en'] ?? ''),
+            'org_type'              => (string) ($orgAttrs['type'] ?? ''),
+            'membership_uuid'       => (string) ($record['id'] ?? ''),
+            'membership_tier'       => (string) ($membershipAttrs['name'] ?? ''),
+            'membership_status'     => (string) ($attrs['status'] ?? ''),
+            'membership_owner'      => $ownerName,
+            'assigned_count'        => (int) ($attrs['active_assignments_count'] ?? 0),
+            'max_assignments'       => $maxAssignments,
+            'unlimited_assignments' => $unlimitedAssignments,
         ];
     }
 }

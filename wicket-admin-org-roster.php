@@ -151,11 +151,11 @@ add_filter(
 */
 
 add_action('init', static function (): void {
-    // Bail if the base plugin isn't active — admin notice handled below.
-    if (! function_exists('wicket_api_client')) {
-        return;
-    }
-
+    // Always initialise the singleton so admin_menu pages are registered by WP.
+    // Gating initialization on wicket_api_client() caused WordPress to never add
+    // the pages to $_registered_pages, resulting in "Sorry, you are not allowed
+    // to access this page" even for admins. Individual MDP operations inside
+    // MdpClient already bail gracefully when wicket_api_client() returns null.
     WicketAdminOrgRoster();
 }, 1);
 

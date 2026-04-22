@@ -108,10 +108,16 @@ class MenuPage
             [$this, 'renderSettingsPage'],
         );
 
-        // Remove the detail page from the visible sidebar menu.
-        // It is registered above so WP recognises it as a valid admin page,
-        // but admins navigate to it only via list-table row links.
-        $this->hideSubmenuPage(self::MENU_SLUG, self::DETAIL_SLUG);
+        // Hide the detail page from the visible sidebar via CSS.
+        //
+        // remove_submenu_page() must NOT be used here: WordPress resolves the
+        // parent slug by scanning $submenu at request time (get_admin_page_parent()),
+        // so removing the entry causes get_plugin_page_hookname() to produce the
+        // wrong hook name, which no longer matches $_registered_pages, and every
+        // direct URL visit results in "Sorry, you are not allowed to access this page."
+        //
+        // CSS removal is the correct WP pattern for "registered but not in the menu".
+        add_action('admin_head', [$this, 'hideDetailPageFromMenu']);
     }
 
     // -------------------------------------------------------------------------
@@ -222,14 +228,22 @@ class MenuPage
     // -------------------------------------------------------------------------
 
     /**
-     * Remove a submenu item from the visible sidebar while keeping the page
-     * registered so WP still serves it at its URL.
+     * Suppress the detail submenu item from the visible sidebar via CSS.
      *
-     * @param string $parentSlug
-     * @param string $submenuSlug
+     * remove_submenu_page() is deliberately avoided: it strips the entry from
+     * $submenu, which breaks get_admin_page_parent() → get_plugin_page_hookname()
+     * at request time, producing a hook name that no longer matches
+     * $_registered_pages. The result is "Sorry, you are not allowed to access
+     * this page." for every direct URL visit.
+     *
+     * CSS removal keeps the page fully accessible while hiding the link.
+     *
+     * Hooked to admin_head (fires on every admin page load, but the <style>
+     * block is tiny and cached by the browser alongside other admin CSS).
      */
-    private function hideSubmenuPage(string $parentSlug, string $submenuSlug): void
+    public function hideDetailPageFromMenu(): void
     {
-        remove_submenu_page($parentSlug, $submenuSlug);
+        $slug = esc_attr(self::DETAIL_SLUG);
+        echo '<style>#adminmenu a[href*="page=' . $slug . '"] { display: none !important; }</style>';
     }
 }

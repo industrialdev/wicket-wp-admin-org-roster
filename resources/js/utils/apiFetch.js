@@ -12,14 +12,14 @@
 
 import apiFetchLib from '@wordpress/api-fetch';
 
-const settings = window.aormContext ?? {};
+const context = window.aormContext ?? {};
 
-if ( settings.nonce ) {
-	apiFetchLib.use( apiFetchLib.createNonceMiddleware( settings.nonce ) );
+if ( context.nonce ) {
+	apiFetchLib.use( apiFetchLib.createNonceMiddleware( context.nonce ) );
 }
 
-if ( settings.restUrl ) {
-	apiFetchLib.use( apiFetchLib.createRootURLMiddleware( settings.restUrl ) );
+if ( context.restUrl ) {
+	apiFetchLib.use( apiFetchLib.createRootURLMiddleware( context.restUrl ) );
 }
 
 /**

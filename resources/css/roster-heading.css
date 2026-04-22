@@ -1,0 +1,47 @@
+/* ==========================================================================
+   RosterHeading — AORM-4.2
+   ========================================================================== */
+
+.aorm-roster-heading {
+	margin-bottom: 24px;
+	padding: 15px;
+	background: white;
+	max-width: 900px;
+}
+
+.aorm-roster-heading__org-name {
+	margin: 0 0 10px;
+}
+
+.aorm-roster-heading__meta-box {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	background-color: #dce8f7;
+	border: 1px solid #b8cfe8;
+	padding: 16px 20px;
+	align-items: start;
+}
+
+.aorm-roster-heading__fields {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 13px;
+	color: #1d2327;
+	line-height: 1.5;
+	font-weight: 600;
+}
+
+.aorm-roster-heading__field {
+	margin: 0;
+}
+
+.aorm-roster-heading__field-label {
+	/*  */
+}
+
+.aorm-roster-heading__mdp-link {
+	flex-shrink: 0;
+}

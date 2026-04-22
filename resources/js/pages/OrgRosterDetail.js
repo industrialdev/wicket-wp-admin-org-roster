@@ -16,6 +16,7 @@ import { __ } from '@wordpress/i18n';
 import { Notice, Spinner, TabPanel } from '@wordpress/components';
 
 import { useRestApi } from '../hooks/useRestApi';
+import RosterHeading from '../components/RosterHeading';
 import RosterAssignment from '../components/RosterAssignment';
 import RosterUpload from '../components/RosterUpload';
 import RosterActivity from '../components/RosterActivity';
@@ -23,9 +24,9 @@ import RosterActivity from '../components/RosterActivity';
 export default function OrgRosterDetail() {
 	// org_uuid and membership_uuid are read from $_GET in PHP (Assets.php) and
 	// injected here via wp_localize_script → window.aormContext.
-	const settings       = window.aormContext ?? {};
-	const orgUuid        = settings.orgUuid        ?? null;
-	const membershipUuid = settings.membershipUuid ?? null;
+	const context        = window.aormContext ?? {};
+	const orgUuid        = context.orgUuid        ?? null;
+	const membershipUuid = context.membershipUuid ?? null;
 
 	const { data: roster, isLoading, error } = useRestApi(
 		orgUuid && membershipUuid
@@ -104,49 +105,3 @@ export default function OrgRosterDetail() {
 	);
 }
 
-/**
- * Heading block — always visible above the tabs (AORM-4).
- * Displays org + membership metadata from the REST response.
- */
-function RosterHeading( { roster } ) {
-	if ( ! roster ) {
-		return null;
-	}
-
-	return (
-		<div className="aorm-roster-heading">
-			<h1 className="aorm-roster-heading__org-name">
-				{ roster.org_name }
-			</h1>
-			<dl className="aorm-roster-heading__meta">
-				<dt>{ __( 'Org ID', 'wicket-aorm' ) }</dt>
-				<dd>{ roster.org_id }</dd>
-
-				<dt>{ __( 'Organization Type', 'wicket-aorm' ) }</dt>
-				<dd>{ roster.org_type }</dd>
-
-				<dt>{ __( 'Membership Tier', 'wicket-aorm' ) }</dt>
-				<dd>{ roster.membership_tier }</dd>
-
-				<dt>{ __( 'Membership Owner', 'wicket-aorm' ) }</dt>
-				<dd>{ roster.membership_owner }</dd>
-
-				<dt>{ __( 'Roster Count', 'wicket-aorm' ) }</dt>
-				<dd>
-					{ roster.assigned_count } / { roster.max_count }
-				</dd>
-
-				<dt>{ __( 'MDP Record', 'wicket-aorm' ) }</dt>
-				<dd>
-					<a
-						href={ roster.mdp_url }
-						target="_blank"
-						rel="noreferrer"
-					>
-						{ __( 'View in MDP', 'wicket-aorm' ) }
-					</a>
-				</dd>
-			</dl>
-		</div>
-	);
-}

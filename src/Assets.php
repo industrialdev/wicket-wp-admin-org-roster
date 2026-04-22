@@ -107,6 +107,12 @@ class Assets
             $data['orgUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['org_uuid'] ?? '')));
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
             $data['membershipUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['membership_uuid'] ?? '')));
+
+            // MDP admin base URL used by RosterHeading to build the external link.
+            // get_wicket_settings() is provided by wicket-wp-base-plugin; guard so
+            // the page still loads when the base plugin is inactive.
+            $wicketSettings      = function_exists('get_wicket_settings') ? (array) get_wicket_settings() : [];
+            $data['appEndpoint'] = esc_url_raw(rtrim((string) ($wicketSettings['wicket_admin'] ?? ''), '/'));
         }
 
         return $data;
