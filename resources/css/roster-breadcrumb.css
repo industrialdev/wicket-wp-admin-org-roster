@@ -1,0 +1,28 @@
+/* ==========================================================================
+   RosterBreadcrumb — AORM-4.4
+   ========================================================================== */
+
+.aorm-breadcrumb {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 25px;
+	margin-top: 20px;
+	font-size: 15px;
+	color: #50575e;
+}
+
+.aorm-breadcrumb a {
+	color: #2271b1;
+	text-decoration: none;
+}
+
+.aorm-breadcrumb a:hover {
+	color: #135e96;
+	text-decoration: underline;
+}
+
+.aorm-breadcrumb [aria-current="page"] {
+	color: #1d2327;
+	font-weight: 600;
+}

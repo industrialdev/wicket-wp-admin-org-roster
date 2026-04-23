@@ -113,6 +113,9 @@ class Assets
             // the page still loads when the base plugin is inactive.
             $wicketSettings      = function_exists('get_wicket_settings') ? (array) get_wicket_settings() : [];
             $data['appEndpoint'] = esc_url_raw(rtrim((string) ($wicketSettings['wicket_admin'] ?? ''), '/'));
+
+            // List page URL used by RosterBreadcrumb to render the back-link (AORM-4.4).
+            $data['rosterListUrl'] = esc_url(admin_url('admin.php?page=' . MenuPage::MENU_SLUG));
         }
 
         return $data;

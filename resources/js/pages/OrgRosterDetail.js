@@ -16,6 +16,7 @@ import { __ } from '@wordpress/i18n';
 import { Notice, Spinner, TabPanel } from '@wordpress/components';
 
 import { useRestApi } from '../hooks/useRestApi';
+import RosterBreadcrumb from '../components/RosterBreadcrumb';
 import RosterHeading from '../components/RosterHeading';
 import RosterAssignment from '../components/RosterAssignment';
 import RosterUpload from '../components/RosterUpload';
@@ -46,19 +47,26 @@ export default function OrgRosterDetail() {
 	}
 
 	if ( isLoading ) {
-		return <Spinner />;
+		return (
+			<>
+				<Spinner />
+			</>
+		);
 	}
 
 	if ( error ) {
 		return (
-			<Notice status="error" isDismissible={ false }>
-				{ error }
-			</Notice>
+			<>
+				<Notice status="error" isDismissible={ false }>
+					{ error }
+				</Notice>
+			</>
 		);
 	}
 
 	return (
 		<div className="aorm-page aorm-page--roster-detail">
+			<RosterBreadcrumb orgName={ roster?.org_name } />
 			<RosterHeading roster={ roster } />
 
 			<TabPanel
