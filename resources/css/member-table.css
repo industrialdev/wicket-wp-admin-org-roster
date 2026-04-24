@@ -1,0 +1,40 @@
+/* ==========================================================================
+   MemberTable — AORM-4.5
+   ========================================================================== */
+
+/* Ensure the checkmark SVG renders above the checkbox background.
+   WP admin CSS can create a stacking context that hides the SVG otherwise. */
+.aorm-member-table .components-checkbox-control__input-container svg {
+	z-index: 1;
+}
+
+.aorm-member-table .components-base-control {
+   margin-left: 8px;
+}
+
+/* ── Membership owner row ──────────────────────────────────────────────── */
+
+.aorm-member-table__row--owner {
+	background-color: #f0f6fc;
+}
+
+.aorm-member-table__name {
+	margin-right: 6px;
+}
+
+.aorm-member-table__owner-badge {
+	display: inline-block;
+	padding: 1px 7px;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1.6;
+	color: #1d5291;
+	background-color: #c8dff7;
+	border-radius: 3px;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.aorm-member-table__col--action {
+   text-align: center;
+}

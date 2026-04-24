@@ -1,23 +1,53 @@
 /**
  * Roster Assignment tab — AORM-4, Tab 1.
  *
- * Table of current roster members with bulk and per-row actions.
- * Columns: name, email, relationship/assignment type, roles, status.
- *
- * Bulk actions: Remove person(s), Add role(s), Remove role(s).
- * Per-row: "Edit Permissions" opens a Modal with CheckboxControls.
+ * Fetches the list of people currently assigned to the roster via the
+ * GET /wicket-aorm/v1/rosters/{org_uuid}/{membership_uuid}/members endpoint
+ * (AORM-4.5) and renders a MemberTable with row-level checkboxes for
+ * future bulk-action selection (AORM-4.8).
  *
  * @param {{ orgUuid: string, membershipUuid: string }} props
  */
 
+import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Notice } from '@wordpress/components';
+import { Notice, Spinner } from '@wordpress/components';
+
+import { useRestApi } from '../hooks/useRestApi';
+import MemberTable from './MemberTable';
 
 export default function RosterAssignment( { orgUuid, membershipUuid } ) {
-	// TODO (AORM-4.3 – 4.9): implement member table, bulk actions, Edit Permissions modal.
+	const [ selectedIds, setSelectedIds ] = useState( new Set() );
+
+	const PER_PAGE = 10;
+
+	const { data, isLoading, error } = useRestApi(
+		orgUuid && membershipUuid
+			? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/members?per_page=${ PER_PAGE }`
+			: null
+	);
+
+	if ( isLoading ) {
+		return <Spinner />;
+	}
+
+	if ( error ) {
+		return (
+			<Notice status="error" isDismissible={ false }>
+				{ error }
+			</Notice>
+		);
+	}
+
+	const members = data?.members ?? [];
+
 	return (
-		<Notice status="info" isDismissible={ false }>
-			{ __( 'Roster Assignment — coming in AORM-4.', 'wicket-aorm' ) }
-		</Notice>
+		<div className="aorm-assignment">
+			<MemberTable
+				members={ members }
+				selectedIds={ selectedIds }
+				onSelectionChange={ setSelectedIds }
+			/>
+		</div>
 	);
 }

@@ -157,6 +157,176 @@ class MdpClient
     }
 
     /**
+     * Fetch the list of people assigned to an org roster.
+     *
+     * Calls the `organization_memberships/{membership_uuid}/person_memberships`
+     * JSON:API endpoint. Includes `person` and `person.phones` so name, email,
+     * title, phone number, and role names (available directly as
+     * `person.attributes.role_names`) are all resolved in a single request.
+     *
+     * Returns an empty result structure when `wicket_api_client()` is
+     * unavailable or the request throws, so callers never need to handle null.
+     *
+     * @param array{
+     *   page?: int,
+     *   per_page?: int,
+     * } $args
+     *
+     * @return array{
+     *   members: list<array{
+     *     person_uuid: string,
+     *     name: string,
+     *     email: string,
+     *     title: string,
+     *     phone: string,
+     *     roles: list<string>,
+     *   }>,
+     *   total: int,
+     *   total_pages: int,
+     * }
+     */
+    public function getRosterMembers(string $org_uuid, string $membership_uuid, array $args = []): array
+    {
+        $empty = ['members' => [], 'total' => 0, 'total_pages' => 0];
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return $empty;
+        }
+
+        $queryParams = [
+            'include' => 'person,membership,organization_membership',
+            'sort'    => 'person_family_name',
+            'page'    => [
+                'size'   => max(1, (int) ($args['per_page'] ?? 10)),
+                'number' => max(1, (int) ($args['page'] ?? 1)),
+            ],
+        ];
+
+        $query = (string) preg_replace(
+            '/\%5B\d+\%5D/',
+            '%5B%5D',
+            http_build_query($queryParams),
+        );
+
+        $endpoint = 'organization_memberships/' . $membership_uuid . '/person_memberships?' . $query;
+
+        try {
+            $response = $client->get($endpoint);
+
+            if (! is_array($response)) {
+                return $empty;
+            }
+
+            return $this->normalizeRosterMembers($response);
+        } catch (\Exception $e) {
+            return $empty;
+        }
+    }
+
+    /**
+     * Normalize a person_memberships JSON:API response into flat member records.
+     *
+     * The `person` and `organization_membership` resources are included so name,
+     * email, title, role names, and owner status are all resolved in one request.
+     * The roster owner is identified via the `owner` relationship on the included
+     * `organization_memberships` record — the person whose UUID matches that
+     * relationship's `data.id` receives `is_owner: true`.
+     * Phone is always returned as an empty string — phone lookup via the MDP
+     * API requires further investigation (see TODO).
+     *
+     * Pagination totals are read from `meta.page.total_items` and
+     * `meta.page.total_pages` — the nested structure the MDP returns for this
+     * endpoint.
+     *
+     * @param array{
+     *   data?: list<array<string,mixed>>,
+     *   included?: list<array<string,mixed>>,
+     *   meta?: array{page?: array<string,mixed>},
+     * } $response
+     *
+     * @return array{
+     *   members: list<array{
+     *     person_uuid: string,
+     *     name: string,
+     *     email: string,
+     *     title: string,
+     *     phone: string,
+     *     roles: list<string>,
+     *     is_owner: bool,
+     *   }>,
+     *   total: int,
+     *   total_pages: int,
+     * }
+     */
+    private function normalizeRosterMembers(array $response): array
+    {
+        $data = $response['data'] ?? [];
+
+        // Index included resources by type:id for O(1) lookup.
+        $included = [];
+
+        foreach ($response['included'] ?? [] as $item) {
+            $type = (string) ($item['type'] ?? '');
+            $id   = (string) ($item['id'] ?? '');
+
+            if ($type !== '' && $id !== '') {
+                $included[$type . ':' . $id] = $item;
+            }
+        }
+
+        // Resolve the owner person UUID from the included organization_membership.
+        // The API returns the owner as a `relationships.owner.data.id` (type: people)
+        // on the organization_memberships resource.
+        $ownerPersonUuid = '';
+
+        foreach ($included as $key => $item) {
+            if (str_starts_with($key, 'organization_memberships:')) {
+                $ownerPersonUuid = (string) ($item['relationships']['owner']['data']['id'] ?? '');
+                break;
+            }
+        }
+
+        $members = [];
+
+        foreach ($data as $personMembership) {
+            // Resolve the related person resource.
+            $personRelId = (string) ($personMembership['relationships']['person']['data']['id'] ?? '');
+            $personItem  = $included['people:' . $personRelId] ?? [];
+            $personAttrs = $personItem['attributes'] ?? [];
+
+            // Role names are a direct attribute on the person resource —
+            // no need to traverse a nested roles relationship.
+            $roles = array_values(array_filter(
+                (array) ($personAttrs['role_names'] ?? []),
+                fn ($r): bool => is_string($r) && $r !== '',
+            ));
+
+            $members[] = [
+                'person_uuid' => $personRelId,
+                'name'        => (string) ($personAttrs['full_name'] ?? ''),
+                'email'       => (string) ($personAttrs['primary_email_address'] ?? ''),
+                'title'       => (string) ($personAttrs['job_title'] ?? ''),
+                'phone'       => '', // TODO: clarify MDP phone endpoint — left empty for now
+                'roles'       => $roles,
+                'is_owner'    => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
+            ];
+        }
+
+        // Pagination: meta.page.total_items / meta.page.total_pages
+        $pageMeta   = $response['meta']['page'] ?? [];
+        $total      = (int) ($pageMeta['total_items'] ?? count($members));
+        $totalPages = (int) ($pageMeta['total_pages'] ?? 1);
+
+        return [
+            'members'     => $members,
+            'total'       => $total,
+            'total_pages' => $totalPages,
+        ];
+    }
+
+    /**
      * Normalize a single-record organization_memberships JSON:API response.
      *
      * Indexes the `included` array by `{type}:{id}` for O(1) resolution,
