@@ -117,7 +117,7 @@ class MdpClient
      *   unlimited_assignments: bool,
      * }|array{}
      */
-    public function getOrgMembershipDetail(string $org_uuid, string $membership_uuid): array
+    public function getOrgMembershipDetail(string $membership_uuid): array
     {
         $client = wicket_api_client();
 
@@ -125,26 +125,10 @@ class MdpClient
             return [];
         }
 
-        $queryParams = [
-            'filter'  => [
-                'organization_uuid_eq' => $org_uuid,
-                'uuid_eq'              => $membership_uuid,
-            ],
-            'include' => 'organization,membership,people',
-            'page'    => [
-                'size'   => 1,
-                'number' => 1,
-            ],
-        ];
-
-        $query = (string) preg_replace(
-            '/\%5B\d+\%5D/',
-            '%5B%5D',
-            http_build_query($queryParams),
-        );
+        $query = http_build_query(['include' => 'organization,membership,people,owner']);
 
         try {
-            $response = $client->get('organization_memberships?' . $query);
+            $response = $client->get('organization_memberships/' . $membership_uuid . '?' . $query);
 
             if (! is_array($response) || empty($response['data'])) {
                 return [];
@@ -219,7 +203,7 @@ class MdpClient
                 return $empty;
             }
 
-            return $this->normalizeRosterMembers($response);
+            return $this->normalizeRosterMembers($response, $org_uuid, $membership_uuid);
         } catch (\Exception $e) {
             return $empty;
         }
@@ -255,12 +239,13 @@ class MdpClient
      *     phone: string,
      *     roles: list<string>,
      *     is_owner: bool,
+     *     membership_details_page_url: string,
      *   }>,
      *   total: int,
      *   total_pages: int,
      * }
      */
-    private function normalizeRosterMembers(array $response): array
+    private function normalizeRosterMembers(array $response, string $org_uuid = '', string $membership_uuid = ''): array
     {
         $data = $response['data'] ?? [];
 
@@ -304,13 +289,16 @@ class MdpClient
             ));
 
             $members[] = [
-                'person_uuid' => $personRelId,
-                'name'        => (string) ($personAttrs['full_name'] ?? ''),
-                'email'       => (string) ($personAttrs['primary_email_address'] ?? ''),
-                'title'       => (string) ($personAttrs['job_title'] ?? ''),
-                'phone'       => '', // TODO: clarify MDP phone endpoint — left empty for now
-                'roles'       => $roles,
-                'is_owner'    => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
+                'person_uuid'                => $personRelId,
+                'name'                       => (string) ($personAttrs['full_name'] ?? ''),
+                'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
+                'title'                      => (string) ($personAttrs['job_title'] ?? ''),
+                'phone'                      => '', // TODO: clarify MDP phone endpoint — left empty for now
+                'roles'                      => $roles,
+                'is_owner'                   => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
+                'membership_details_page_url' => admin_url(
+                    'admin.php?page=wicket_org_member_edit&id=' . $org_uuid . '&membership_uuid=' . $membership_uuid
+                ),
             ];
         }
 
@@ -353,7 +341,7 @@ class MdpClient
      */
     private function normalizeOrgMembershipDetail(array $response): array
     {
-        $record = $response['data'][0] ?? [];
+        $record = $response['data'] ?? [];
 
         if (empty($record)) {
             return [];

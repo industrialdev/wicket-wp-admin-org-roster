@@ -109,7 +109,7 @@ class RosterController extends RestController
         $membershipUuid = (string) $request->get_param('membership_uuid');
 
         $client = $this->mdpClient ?? new MdpClient();
-        $data   = $client->getOrgMembershipDetail($orgUuid, $membershipUuid);
+        $data   = $client->getOrgMembershipDetail($membershipUuid);
 
         if (empty($data)) {
             return new \WP_REST_Response(['message' => 'Roster not found.'], 404);

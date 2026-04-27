@@ -163,6 +163,19 @@ export default function MemberTable( {
 								>
 									{ __( 'Edit Permissions', 'wicket-aorm' ) }
 								</Button>
+								{ isOwner &&
+									<>
+										&nbsp;
+										<Button
+											variant="secondary"
+											size="small"
+											href={ member.membership_details_page_url }
+											target="_blank"
+										>
+											{ __( 'Change Owner', 'wicket-aorm' ) }
+										</Button>
+									</>
+								}
 							</td>
 							<td className="aorm-member-table__col--action">
 								<Button

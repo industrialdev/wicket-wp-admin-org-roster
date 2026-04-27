@@ -36,5 +36,28 @@
 }
 
 .aorm-member-table__col--action {
-   text-align: center;
+	text-align: center;
+}
+
+/* ── Pagination bar ────────────────────────────────────────────────────── */
+
+.aorm-assignment__pagination {
+	/*  */
+}
+
+.aorm-assignment__pagination .tablenav-pages {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.aorm-assignment__pagination .pagination-links {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.aorm-assignment__pagination .paging-input {
+	margin: 0 4px;
+	font-size: 13px;
 }
