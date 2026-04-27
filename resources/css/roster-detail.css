@@ -1,0 +1,7 @@
+.aorm-roster-tabs .components-tab-panel__tabs {
+  margin-bottom: 5px;
+}
+
+.aorm-roster-tabs .components-tab-panel__tabs-item.is-active:after {
+  outline-offset: 0;
+}

@@ -22,6 +22,7 @@ import RosterHeading from '../components/RosterHeading';
 import RosterAssignment from '../components/RosterAssignment';
 import RosterUpload from '../components/RosterUpload';
 import RosterActivity from '../components/RosterActivity';
+import '../../css/roster-detail.css';
 
 export default function OrgRosterDetail() {
 	// org_uuid and membership_uuid are read from $_GET in PHP (Assets.php) and
