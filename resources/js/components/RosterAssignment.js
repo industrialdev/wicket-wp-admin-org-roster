@@ -3,19 +3,26 @@
  *
  * Fetches the list of people currently assigned to the roster via the
  * GET /wicket-aorm/v1/rosters/{org_uuid}/{membership_uuid}/members endpoint
- * (AORM-4.5) and renders a MemberTable with row-level checkboxes for
- * future bulk-action selection (AORM-4.8).
+ * (AORM-4.5) and renders a MemberTable with row-level checkboxes.
+ *
+ * When one or more rows are selected a BulkActionToolbar (AORM-4.8) appears
+ * above the table offering Remove from Roster, Add Role(s), and Remove
+ * Role(s) actions.  The callback props are optional stubs; actual REST calls
+ * and modal flows are wired in later tickets (AORM-4.9, 4.10, 4.13).
  *
  * When the roster has no members (total === 0) an empty state is shown
  * with a CTA directing the admin to the Roster Upload tab (AORM-4.7).
  *
  * Pagination is handled client-side via page state; each page change
- * triggers a new REST request.
+ * triggers a new REST request and clears the current selection.
  *
  * @param {{
  *   orgUuid: string,
  *   membershipUuid: string,
  *   onGoToUpload?: function(): void,
+ *   onBulkRemoveFromRoster?: function(selectedIds: Set<string>): void,
+ *   onBulkAddRoles?: function(selectedIds: Set<string>): void,
+ *   onBulkRemoveRoles?: function(selectedIds: Set<string>): void,
  * }} props
  */
 
@@ -24,11 +31,19 @@ import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 
 import { useRestApi } from '../hooks/useRestApi';
+import BulkActionToolbar from './BulkActionToolbar';
 import MemberTable from './MemberTable';
 
 const PER_PAGE = 10;
 
-export default function RosterAssignment( { orgUuid, membershipUuid, onGoToUpload } ) {
+export default function RosterAssignment( {
+	orgUuid,
+	membershipUuid,
+	onGoToUpload,
+	onBulkRemoveFromRoster,
+	onBulkAddRoles,
+	onBulkRemoveRoles,
+} ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
 
@@ -84,6 +99,13 @@ export default function RosterAssignment( { orgUuid, membershipUuid, onGoToUploa
 
 		{ ! isLoading && ! error && total > 0 && (
 				<>
+					<BulkActionToolbar
+						selectedCount={ selectedIds.size }
+						onRemoveFromRoster={ () => onBulkRemoveFromRoster?.( selectedIds ) }
+						onAddRoles={ () => onBulkAddRoles?.( selectedIds ) }
+						onRemoveRoles={ () => onBulkRemoveRoles?.( selectedIds ) }
+					/>
+
 					<MemberTable
 						members={ members }
 						selectedIds={ selectedIds }

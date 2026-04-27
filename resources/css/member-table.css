@@ -71,6 +71,33 @@
 	font-size: 13px;
 }
 
+/* ── Bulk action toolbar (AORM-4.8) ───────────────────────────────────── */
+
+.aorm-bulk-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 8px 12px;
+	margin-bottom: 4px;
+	background-color: #f0f6fc;
+	border: 1px solid #c8dff7;
+	border-radius: 3px;
+}
+
+.aorm-bulk-toolbar__count {
+	font-size: 13px;
+	font-weight: 600;
+	color: #1d2327;
+	white-space: nowrap;
+}
+
+.aorm-bulk-toolbar__actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
 /* ── Pagination bar ────────────────────────────────────────────────────── */
 
 .aorm-assignment__pagination {
