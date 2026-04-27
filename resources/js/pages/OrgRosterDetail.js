@@ -12,6 +12,7 @@
  *   3. Roster Activity    — scoped audit trail (nice-to-have, AORM-4)
  */
 
+import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { Notice, Spinner, TabPanel } from '@wordpress/components';
 
@@ -28,6 +29,15 @@ export default function OrgRosterDetail() {
 	const context        = window.aormContext ?? {};
 	const orgUuid        = context.orgUuid        ?? null;
 	const membershipUuid = context.membershipUuid ?? null;
+
+	// tabNav drives programmatic tab switching (AORM-4.7).
+	// Incrementing `key` forces TabPanel to remount with a fresh
+	// `initialTabName`, because TabPanel is an uncontrolled component.
+	const [ tabNav, setTabNav ] = useState( { tab: 'assignment', key: 0 } );
+
+	function goToTab( name ) {
+		setTabNav( ( prev ) => ( { tab: name, key: prev.key + 1 } ) );
+	}
 
 	const { data: roster, isLoading, error } = useRestApi(
 		orgUuid && membershipUuid
@@ -70,7 +80,9 @@ export default function OrgRosterDetail() {
 			<RosterHeading roster={ roster } />
 
 			<TabPanel
+				key={ tabNav.key }
 				className="aorm-roster-tabs"
+				initialTabName={ tabNav.tab }
 				tabs={ [
 					{
 						name:  'assignment',
@@ -92,6 +104,7 @@ export default function OrgRosterDetail() {
 							<RosterAssignment
 								orgUuid={ orgUuid }
 								membershipUuid={ membershipUuid }
+								onGoToUpload={ () => goToTab( 'upload' ) }
 							/>
 						) }
 						{ tab.name === 'upload' && (

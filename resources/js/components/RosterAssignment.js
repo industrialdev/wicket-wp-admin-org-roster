@@ -6,10 +6,17 @@
  * (AORM-4.5) and renders a MemberTable with row-level checkboxes for
  * future bulk-action selection (AORM-4.8).
  *
+ * When the roster has no members (total === 0) an empty state is shown
+ * with a CTA directing the admin to the Roster Upload tab (AORM-4.7).
+ *
  * Pagination is handled client-side via page state; each page change
  * triggers a new REST request.
  *
- * @param {{ orgUuid: string, membershipUuid: string }} props
+ * @param {{
+ *   orgUuid: string,
+ *   membershipUuid: string,
+ *   onGoToUpload?: function(): void,
+ * }} props
  */
 
 import { useState } from '@wordpress/element';
@@ -21,7 +28,7 @@ import MemberTable from './MemberTable';
 
 const PER_PAGE = 10;
 
-export default function RosterAssignment( { orgUuid, membershipUuid } ) {
+export default function RosterAssignment( { orgUuid, membershipUuid, onGoToUpload } ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
 
@@ -51,7 +58,31 @@ export default function RosterAssignment( { orgUuid, membershipUuid } ) {
 				</Notice>
 			) }
 
-			{ ! isLoading && ! error && (
+			{ ! isLoading && ! error && total === 0 && (
+				<div className="aorm-assignment__empty-state">
+					<span
+						className="dashicons dashicons-upload aorm-assignment__empty-state-icon"
+						aria-hidden="true"
+					/>
+					<h3 className="aorm-assignment__empty-state-heading">
+						{ __( 'No members assigned yet', 'wicket-aorm' ) }
+					</h3>
+					<p className="aorm-assignment__empty-state-message">
+						{ __(
+							'Upload a CSV or add members individually to get started.',
+							'wicket-aorm'
+						) }
+					</p>
+					<Button
+						variant="primary"
+						onClick={ onGoToUpload }
+					>
+						{ __( 'Go to Roster Upload', 'wicket-aorm' ) }
+					</Button>
+				</div>
+			) }
+
+		{ ! isLoading && ! error && total > 0 && (
 				<>
 					<MemberTable
 						members={ members }

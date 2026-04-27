@@ -39,6 +39,38 @@
 	text-align: center;
 }
 
+/* ── Empty state (AORM-4.7) ───────────────────────────────────────────── */
+
+.aorm-assignment__empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 48px 24px;
+	text-align: center;
+}
+
+.aorm-assignment__empty-state-icon {
+	font-size: 48px;
+	color: #a7aaad;
+	margin-bottom: 16px;
+	width: 48px;
+  height: 48px;
+}
+
+.aorm-assignment__empty-state-heading {
+	margin: 0 0 8px;
+	font-size: 16px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.aorm-assignment__empty-state-message {
+	margin: 0 0 20px;
+	color: #50575e;
+	font-size: 13px;
+}
+
 /* ── Pagination bar ────────────────────────────────────────────────────── */
 
 .aorm-assignment__pagination {
