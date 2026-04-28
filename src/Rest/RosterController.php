@@ -7,10 +7,12 @@ namespace WicketAORM\Rest;
 use WicketAORM\Services\MdpClient;
 
 /**
- * Roster list/detail endpoints.
+ * Roster list/detail/members endpoints.
  *
  * Routes registered under the wicket-aorm/v1 namespace:
- *   GET /rosters/{org_uuid}/{membership_uuid}  — org+membership detail (AORM-4.1)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}         — org+membership detail (AORM-4.1)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}/members — paginated member list (AORM-4.5)
+ *   DELETE /rosters/{org_uuid}/{membership_uuid}/members — bulk remove members   (AORM-4.9)
  */
 class RosterController extends RestController
 {
@@ -54,6 +56,7 @@ class RosterController extends RestController
             $this->namespace,
             '/rosters/(?P<org_uuid>' . self::UUID_PATTERN . ')/(?P<membership_uuid>' . self::UUID_PATTERN . ')/members',
             [
+                // GET — paginated member list (AORM-4.5)
                 [
                     'methods'             => \WP_REST_Server::READABLE,
                     'callback'            => [$this, 'get_members'],
@@ -76,6 +79,33 @@ class RosterController extends RestController
                             'required'          => false,
                             'sanitize_callback' => 'absint',
                             'default'           => 25,
+                        ],
+                    ],
+                ],
+                // DELETE — bulk remove members (AORM-4.9)
+                [
+                    'methods'             => \WP_REST_Server::DELETABLE,
+                    'callback'            => [$this, 'delete_members'],
+                    'permission_callback' => [$this, 'delete_members_permissions_check'],
+                    'args'                => [
+                        'org_uuid'        => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'membership_uuid' => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'person_uuids'    => [
+                            'required'          => true,
+                            'type'              => 'array',
+                            'items'             => ['type' => 'string'],
+                            'sanitize_callback' => static function (mixed $value): array {
+                                return array_values(array_filter(
+                                    array_map('sanitize_text_field', (array) $value),
+                                    fn (string $v): bool => $v !== '',
+                                ));
+                            },
                         ],
                     ],
                 ],
@@ -148,6 +178,50 @@ class RosterController extends RestController
             'page'     => $page,
             'per_page' => $perPage,
         ]);
+
+        return new \WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Permission check for DELETE /rosters/{org_uuid}/{membership_uuid}/members.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function delete_members_permissions_check($request): bool
+    {
+        return current_user_can('manage_options');
+    }
+
+    /**
+     * Handle DELETE /rosters/{org_uuid}/{membership_uuid}/members.
+     *
+     * Accepts a JSON body with a `person_uuids` array.  Delegates to
+     * MdpClient::removeRosterMembers() which removes each person's
+     * person_membership record and strips any configured security roles
+     * scoped to the roster org.
+     *
+     * Returns 400 when `person_uuids` is absent or empty.
+     * Returns 200 with `{removed, failed}` lists on success (partial
+     * successes are allowed — callers should inspect `failed` and retry
+     * or surface errors to the admin).
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function delete_members($request): \WP_REST_Response
+    {
+        $orgUuid        = (string) $request->get_param('org_uuid');
+        $membershipUuid = (string) $request->get_param('membership_uuid');
+        $personUuids    = (array) ($request->get_param('person_uuids') ?? []);
+
+        if (empty($personUuids)) {
+            return new \WP_REST_Response(
+                ['message' => 'person_uuids must be a non-empty array.'],
+                400,
+            );
+        }
+
+        $client = $this->mdpClient ?? new MdpClient();
+        $result = $client->removeRosterMembers($orgUuid, $membershipUuid, $personUuids);
 
         return new \WP_REST_Response($result, 200);
     }

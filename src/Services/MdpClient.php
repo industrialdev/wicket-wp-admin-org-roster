@@ -210,6 +210,197 @@ class MdpClient
     }
 
     /**
+     * Remove people from an org roster by deleting their person_membership records
+     * and stripping any configured security roles scoped to the roster org.
+     *
+     * Steps per person UUID:
+     *   1. Look up the person_membership ID via a filtered list request.
+     *   2. DELETE person_memberships/{id} to remove them from the roster.
+     *   3. For each configured security role, remove any matching touch-point
+     *      scoped to the roster org via DELETE touch_points/{id}.
+     *
+     * Returns an `{removed, failed}` summary rather than throwing, so the
+     * caller can return a partial-success response to the React client.
+     *
+     * @param string   $orgUuid        Organization UUID.
+     * @param string   $membershipUuid Organization membership UUID.
+     * @param string[] $personUuids    Person UUIDs to remove.
+     *
+     * @return array{
+     *   removed: list<string>,
+     *   failed:  list<string>,
+     * }
+     */
+    public function removeRosterMembers(string $orgUuid, string $membershipUuid, array $personUuids): array
+    {
+        $removed = [];
+        $failed  = [];
+
+        if (empty($personUuids)) {
+            return ['removed' => $removed, 'failed' => $failed];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return ['removed' => [], 'failed' => array_values($personUuids)];
+        }
+
+        // Build a map of person_uuid => person_membership_id so we can delete
+        // the right record without an extra round-trip per person.
+        $personMembershipMap = $this->fetchPersonMembershipIds($client, $membershipUuid, $personUuids);
+
+        // Configured security roles to strip from the org (may be empty).
+        $securityRoles = $this->getConfiguredSecurityRoles();
+
+        foreach ($personUuids as $personUuid) {
+            $personMembershipId = $personMembershipMap[$personUuid] ?? null;
+
+            if ($personMembershipId === null) {
+                $failed[] = $personUuid;
+                continue;
+            }
+
+            try {
+                // Remove person from the roster.
+                $client->delete('person_memberships/' . $personMembershipId);
+
+                // Strip configured security roles scoped to this org.
+                if (! empty($securityRoles)) {
+                    $this->removeOrgRoles($client, $orgUuid, $personUuid, $securityRoles);
+                }
+
+                $removed[] = $personUuid;
+            } catch (\Exception $e) {
+                $failed[] = $personUuid;
+            }
+        }
+
+        return ['removed' => $removed, 'failed' => $failed];
+    }
+
+    /**
+     * Fetch a map of person_uuid => person_membership_id for the given person UUIDs.
+     *
+     * Calls the `person_memberships` sub-endpoint with a Ransack
+     * `person_uuid_in` filter so we can resolve IDs without a separate
+     * request per person.
+     *
+     * @param object   $client         MDP API client (must be non-null).
+     * @param string   $membershipUuid Organization membership UUID.
+     * @param string[] $personUuids    Person UUIDs to look up.
+     *
+     * @return array<string, string>   Map of person_uuid => person_membership_id.
+     */
+    private function fetchPersonMembershipIds(object $client, string $membershipUuid, array $personUuids): array
+    {
+        $map = [];
+
+        $queryParams = [
+            'filter' => [
+                'person_uuid_in' => $personUuids,
+            ],
+            'page' => [
+                'size' => count($personUuids),
+            ],
+        ];
+
+        $query = (string) preg_replace(
+            '/\%5B\d+\%5D/',
+            '%5B%5D',
+            http_build_query($queryParams),
+        );
+
+        $endpoint = 'organization_memberships/' . $membershipUuid . '/person_memberships?' . $query;
+
+        try {
+            $response = $client->get($endpoint);
+
+            if (! is_array($response)) {
+                return $map;
+            }
+
+            foreach ($response['data'] ?? [] as $item) {
+                $id         = (string) ($item['id'] ?? '');
+                $personUuid = (string) ($item['relationships']['person']['data']['id'] ?? '');
+
+                if ($id !== '' && $personUuid !== '') {
+                    $map[$personUuid] = $id;
+                }
+            }
+        } catch (\Exception $e) {
+            // Return empty map on error — callers will record affected
+            // person UUIDs as failed.
+        }
+
+        return $map;
+    }
+
+    /**
+     * Remove security roles scoped to an org for a given person.
+     *
+     * Fetches the person's touch-points filtered to the roster org UUID,
+     * then deletes any whose `role_slug` attribute matches the configured list.
+     *
+     * Failures here are intentionally swallowed — role removal is best-effort
+     * so that a transient API error does not block the person from being
+     * removed from the roster altogether.
+     *
+     * @param object   $client      MDP API client (must be non-null).
+     * @param string   $orgUuid     Organization UUID.
+     * @param string   $personUuid  Person UUID.
+     * @param string[] $roleSlugs   Role slugs configured in plugin settings.
+     */
+    private function removeOrgRoles(object $client, string $orgUuid, string $personUuid, array $roleSlugs): void
+    {
+        $query    = http_build_query(['filter' => ['organization_uuid_eq' => $orgUuid]]);
+        $endpoint = 'people/' . $personUuid . '/touch_points?' . $query;
+
+        try {
+            $response = $client->get($endpoint);
+
+            if (! is_array($response)) {
+                return;
+            }
+
+            foreach ($response['data'] ?? [] as $touchPoint) {
+                $roleSlug = (string) ($touchPoint['attributes']['role_slug'] ?? '');
+
+                if (! in_array($roleSlug, $roleSlugs, true)) {
+                    continue;
+                }
+
+                $tpId = (string) ($touchPoint['id'] ?? '');
+
+                if ($tpId !== '') {
+                    $client->delete('touch_points/' . $tpId);
+                }
+            }
+        } catch (\Exception $e) {
+            // Best-effort — silently ignore role removal failures.
+        }
+    }
+
+    /**
+     * Read the configured security role slugs from plugin settings.
+     *
+     * Admins configure these in the AORM Settings page under
+     * `wicket_aorm_settings[security_roles]`. Empty array when unconfigured.
+     *
+     * @return string[]
+     */
+    private function getConfiguredSecurityRoles(): array
+    {
+        $settings = (array) get_option('wicket_aorm_settings', []);
+        $roles    = $settings['security_roles'] ?? [];
+
+        return array_values(array_filter(
+            array_map('strval', is_array($roles) ? $roles : []),
+            fn (string $r): bool => $r !== '',
+        ));
+    }
+
+    /**
      * Normalize a person_memberships JSON:API response into flat member records.
      *
      * The `person` and `organization_membership` resources are included so name,
