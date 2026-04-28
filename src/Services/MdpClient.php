@@ -382,6 +382,179 @@ class MdpClient
     }
 
     /**
+     * Bulk add or remove role touch-points for a list of people scoped to a roster org.
+     *
+     * Iterates over each person UUID and, depending on `$action`:
+     *   - `add`:    POST `people/{uuid}/roles` once per role name, with the org as
+     *               the `resource` relationship.
+     *   - `remove`: GET `people/{uuid}/roles`, resolve IDs matching the requested names
+     *               scoped to the org, then DELETE `people/{uuid}/relationships/roles`
+     *               with those IDs in a single batch request.
+     *
+     * Returns an `{updated, failed}` summary so the controller can return a
+     * partial-success response — callers should inspect `failed` and surface
+     * errors to the admin.
+     *
+     * @param string   $orgUuid        Organization UUID.
+     * @param string   $membershipUuid Organization membership UUID (unused in MDP calls
+     *                                 but kept for symmetry with other MdpClient methods).
+     * @param string[] $personUuids    Person UUIDs to process.
+     * @param string   $action         Either 'add' or 'remove'.
+     * @param string[] $roleSlugs      Role slugs to apply.
+     *
+     * @return array{
+     *   updated: list<string>,
+     *   failed:  list<string>,
+     * }
+     */
+    public function updateMemberRoles(
+        string $orgUuid,
+        string $membershipUuid,
+        array $personUuids,
+        string $action,
+        array $roleSlugs,
+    ): array {
+        $updated = [];
+        $failed  = [];
+
+        if (empty($personUuids) || empty($roleSlugs)) {
+            return ['updated' => $updated, 'failed' => $failed];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return ['updated' => [], 'failed' => array_values($personUuids)];
+        }
+
+        foreach ($personUuids as $personUuid) {
+            try {
+                if ($action === 'add') {
+                    $this->addPersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+                } else {
+                    $this->removePersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+                }
+
+                $updated[] = $personUuid;
+            } catch (\Exception $e) {
+                $failed[] = $personUuid;
+            }
+        }
+
+        return ['updated' => $updated, 'failed' => $failed];
+    }
+
+    /**
+     * Add roles for a person scoped to an org.
+     *
+     * POSTs one `roles` resource per role name to
+     * `people/{person_uuid}/roles`, linking the person to the organisation
+     * for each requested role via the `resource` relationship.
+     *
+     * MDP payload shape (per role):
+     * ```json
+     * {"data":{"type":"roles","attributes":{"name":"<role_name>"},
+     *   "relationships":{"resource":{"data":{"type":"organizations","id":"<org_uuid>"}}}}}
+     * ```
+     *
+     * Throws on the first API error so the caller can record the person as failed.
+     *
+     * @param object   $client     MDP API client (must be non-null).
+     * @param string   $orgUuid    Organization UUID.
+     * @param string   $personUuid Person UUID.
+     * @param string[] $roleSlugs  Role names to assign.
+     *
+     * @throws \Exception When any MDP POST call fails.
+     */
+    private function addPersonOrgRoles(object $client, string $orgUuid, string $personUuid, array $roleSlugs): void
+    {
+        foreach ($roleSlugs as $roleSlug) {
+            $payload = [
+                'data' => [
+                    'type'          => 'roles',
+                    'attributes'    => ['name' => $roleSlug],
+                    'relationships' => [
+                        'resource' => [
+                            'data' => [
+                                'type' => 'organizations',
+                                'id'   => $orgUuid,
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+
+            $client->post('people/' . $personUuid . '/roles', ['json' => $payload]);
+        }
+    }
+
+    /**
+     * Remove roles for a person scoped to an org.
+     *
+     * Steps:
+     *   1. GET `people/{person_uuid}/roles` to list the person's current roles.
+     *   2. Filter to entries whose `attributes.name` is in `$roleSlugs` AND whose
+     *      `relationships.resource.data.id` matches `$orgUuid`.
+     *   3. If any matching role IDs are found, issue a single
+     *      DELETE `people/{person_uuid}/relationships/roles` with the ID list.
+     *
+     * MDP DELETE payload shape:
+     * ```json
+     * {"data":[{"type":"roles","id":"<role_id>"},...]}
+     * ```
+     *
+     * Throws on GET or DELETE errors so the caller can record the person as
+     * failed (unlike the best-effort {@see removeOrgRoles()} used when
+     * removing members from a roster).
+     *
+     * @param object   $client     MDP API client (must be non-null).
+     * @param string   $orgUuid    Organization UUID.
+     * @param string   $personUuid Person UUID.
+     * @param string[] $roleSlugs  Role names to remove.
+     *
+     * @throws \Exception When any MDP call fails.
+     */
+    private function removePersonOrgRoles(object $client, string $orgUuid, string $personUuid, array $roleSlugs): void
+    {
+        $response = $client->get('people/' . $personUuid . '/roles');
+
+        if (! is_array($response)) {
+            return;
+        }
+
+        // Collect IDs of roles that match the requested names AND belong to this org.
+        $roleIds = [];
+
+        foreach ($response['data'] ?? [] as $role) {
+            $roleName   = (string) ($role['attributes']['name'] ?? '');
+            $resourceId = (string) ($role['relationships']['resource']['data']['id'] ?? '');
+
+            if (! in_array($roleName, $roleSlugs, true) || $resourceId !== $orgUuid) {
+                continue;
+            }
+
+            $roleId = (string) ($role['id'] ?? '');
+
+            if ($roleId !== '') {
+                $roleIds[] = $roleId;
+            }
+        }
+
+        if (empty($roleIds)) {
+            return;
+        }
+
+        $payload = [
+            'data' => array_map(
+                static fn (string $id): array => ['type' => 'roles', 'id' => $id],
+                $roleIds,
+            ),
+        ];
+
+        $client->delete('people/' . $personUuid . '/relationships/roles', ['json' => $payload]);
+    }
+
+    /**
      * Read the configured security role slugs from plugin settings.
      *
      * Admins configure these in the AORM Settings page under

@@ -13,6 +13,7 @@ use WicketAORM\Services\MdpClient;
  *   GET    /rosters/{org_uuid}/{membership_uuid}         — org+membership detail (AORM-4.1)
  *   GET    /rosters/{org_uuid}/{membership_uuid}/members — paginated member list (AORM-4.5)
  *   DELETE /rosters/{org_uuid}/{membership_uuid}/members — bulk remove members   (AORM-4.9)
+ *   POST   /rosters/{org_uuid}/{membership_uuid}/roles   — bulk add/remove roles (AORM-4.10)
  */
 class RosterController extends RestController
 {
@@ -24,6 +25,11 @@ class RosterController extends RestController
     public function __construct(private readonly ?MdpClient $mdpClient = null)
     {
     }
+
+    /**
+     * Valid values for the `action` parameter on the /roles endpoint.
+     */
+    private const VALID_ROLE_ACTIONS = ['add', 'remove'];
 
     /**
      * Register all roster routes.
@@ -103,6 +109,55 @@ class RosterController extends RestController
                             'sanitize_callback' => static function (mixed $value): array {
                                 return array_values(array_filter(
                                     array_map('sanitize_text_field', (array) $value),
+                                    fn (string $v): bool => $v !== '',
+                                ));
+                            },
+                        ],
+                    ],
+                ],
+            ],
+        );
+
+        register_rest_route(
+            $this->namespace,
+            '/rosters/(?P<org_uuid>' . self::UUID_PATTERN . ')/(?P<membership_uuid>' . self::UUID_PATTERN . ')/roles',
+            [
+                // POST — bulk add/remove roles (AORM-4.10)
+                [
+                    'methods'             => \WP_REST_Server::CREATABLE,
+                    'callback'            => [$this, 'update_member_roles'],
+                    'permission_callback' => [$this, 'update_member_roles_permissions_check'],
+                    'args'                => [
+                        'org_uuid'        => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'membership_uuid' => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'person_uuids'    => [
+                            'required'          => true,
+                            'type'              => 'array',
+                            'items'             => ['type' => 'string'],
+                            'sanitize_callback' => static function (mixed $value): array {
+                                return array_values(array_filter(
+                                    array_map('sanitize_text_field', (array) $value),
+                                    fn (string $v): bool => $v !== '',
+                                ));
+                            },
+                        ],
+                        'action'          => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'role_slugs'      => [
+                            'required'          => true,
+                            'type'              => 'array',
+                            'items'             => ['type' => 'string'],
+                            'sanitize_callback' => static function (mixed $value): array {
+                                return array_values(array_filter(
+                                    array_map('sanitize_key', (array) $value),
                                     fn (string $v): bool => $v !== '',
                                 ));
                             },
@@ -222,6 +277,65 @@ class RosterController extends RestController
 
         $client = $this->mdpClient ?? new MdpClient();
         $result = $client->removeRosterMembers($orgUuid, $membershipUuid, $personUuids);
+
+        return new \WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Permission check for POST /rosters/{org_uuid}/{membership_uuid}/roles.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function update_member_roles_permissions_check($request): bool
+    {
+        return current_user_can('manage_options');
+    }
+
+    /**
+     * Handle POST /rosters/{org_uuid}/{membership_uuid}/roles.
+     *
+     * Accepts a JSON body with `person_uuids` (array), `action` ('add'|'remove'),
+     * and `role_slugs` (array).  Delegates to MdpClient::updateMemberRoles()
+     * which adds or removes touch-point role assignments scoped to the roster org.
+     *
+     * Returns 400 when required params are absent/empty or when `action` is
+     * not 'add' or 'remove'.
+     * Returns 200 with `{updated, failed}` lists on success (partial successes
+     * are allowed — callers should inspect `failed` and surface errors to the admin).
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function update_member_roles($request): \WP_REST_Response
+    {
+        $orgUuid        = (string) $request->get_param('org_uuid');
+        $membershipUuid = (string) $request->get_param('membership_uuid');
+        $personUuids    = (array) ($request->get_param('person_uuids') ?? []);
+        $action         = (string) ($request->get_param('action') ?? '');
+        $roleSlugs      = (array) ($request->get_param('role_slugs') ?? []);
+
+        if (empty($personUuids)) {
+            return new \WP_REST_Response(
+                ['message' => 'person_uuids must be a non-empty array.'],
+                400,
+            );
+        }
+
+        if (empty($roleSlugs)) {
+            return new \WP_REST_Response(
+                ['message' => 'role_slugs must be a non-empty array.'],
+                400,
+            );
+        }
+
+        if (! in_array($action, self::VALID_ROLE_ACTIONS, true)) {
+            return new \WP_REST_Response(
+                ['message' => 'action must be one of: ' . implode(', ', self::VALID_ROLE_ACTIONS) . '.'],
+                400,
+            );
+        }
+
+        $client = $this->mdpClient ?? new MdpClient();
+        $result = $client->updateMemberRoles($orgUuid, $membershipUuid, $personUuids, $action, $roleSlugs);
 
         return new \WP_REST_Response($result, 200);
     }
