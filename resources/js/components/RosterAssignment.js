@@ -21,8 +21,8 @@
  *   membershipUuid: string,
  *   onGoToUpload?: function(): void,
  *   onBulkRemoveFromRoster?: function(selectedIds: Set<string>): void,
- *   onBulkAddRoles?: function(selectedIds: Set<string>): void,
- *   onBulkRemoveRoles?: function(selectedIds: Set<string>): void,
+ *   onBulkAddRoles?: function(selectedIds: Set<string>, roleSlugs: string[]): void,
+ *   onBulkRemoveRoles?: function(selectedIds: Set<string>, roleSlugs: string[]): void,
  * }} props
  */
 
@@ -32,6 +32,7 @@ import { Button, Notice, Spinner } from '@wordpress/components';
 
 import { useRestApi } from '../hooks/useRestApi';
 import BulkActionToolbar from './BulkActionToolbar';
+import EditPermissionsModal from './EditPermissionsModal';
 import MemberTable from './MemberTable';
 
 const PER_PAGE = 10;
@@ -46,6 +47,32 @@ export default function RosterAssignment( {
 } ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
+
+	// Edit-Permissions modal state (AORM-4.11).
+	// pendingIds holds the selection snapshot at the moment the modal opened.
+	const [ permissionsModal, setPermissionsModal ] = useState( {
+		isOpen: false,
+		mode:   'add',   // 'add' | 'remove'
+		ids:    new Set(),
+	} );
+
+	function openPermissionsModal( mode ) {
+		setPermissionsModal( { isOpen: true, mode, ids: new Set( selectedIds ) } );
+	}
+
+	function closePermissionsModal() {
+		setPermissionsModal( ( prev ) => ( { ...prev, isOpen: false } ) );
+	}
+
+	function handlePermissionsSave( roleSlugs ) {
+		const { mode, ids } = permissionsModal;
+		closePermissionsModal();
+		if ( mode === 'add' ) {
+			onBulkAddRoles?.( ids, roleSlugs );
+		} else {
+			onBulkRemoveRoles?.( ids, roleSlugs );
+		}
+	}
 
 	const { data, isLoading, error } = useRestApi(
 		orgUuid && membershipUuid
@@ -102,8 +129,8 @@ export default function RosterAssignment( {
 					<BulkActionToolbar
 						selectedCount={ selectedIds.size }
 						onRemoveFromRoster={ () => onBulkRemoveFromRoster?.( selectedIds ) }
-						onAddRoles={ () => onBulkAddRoles?.( selectedIds ) }
-						onRemoveRoles={ () => onBulkRemoveRoles?.( selectedIds ) }
+						onAddRoles={ () => openPermissionsModal( 'add' ) }
+						onRemoveRoles={ () => openPermissionsModal( 'remove' ) }
 					/>
 
 					<MemberTable
@@ -164,6 +191,13 @@ export default function RosterAssignment( {
 					) }
 				</>
 			) }
+
+		<EditPermissionsModal
+			isOpen={ permissionsModal.isOpen }
+			mode={ permissionsModal.mode }
+			onSave={ handlePermissionsSave }
+			onClose={ closePermissionsModal }
+		/>
 		</div>
 	);
 }
