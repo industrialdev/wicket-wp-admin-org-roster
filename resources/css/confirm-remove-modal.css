@@ -1,0 +1,15 @@
+/**
+ * ConfirmRemoveModal styles — AORM-4.13.
+ */
+
+.aorm-confirm-remove-modal__message {
+	margin: 0 0 1.5em;
+	font-size: 14px;
+	line-height: 1.5;
+}
+
+.aorm-confirm-remove-modal__actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-start;
+}

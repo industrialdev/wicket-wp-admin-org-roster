@@ -20,11 +20,14 @@
  * POST /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/roles (AORM-4.12).
  * On success the member list is refreshed and the selection is cleared.
  *
+ * The "Remove from Roster" bulk action opens a ConfirmRemoveModal (AORM-4.13)
+ * before issuing DELETE /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/members.
+ * On success the member list is refreshed and the selection is cleared.
+ *
  * @param {{
- *   orgUuid: string,
+ *   orgUuid:        string,
  *   membershipUuid: string,
- *   onGoToUpload?: function(): void,
- *   onBulkRemoveFromRoster?: function(selectedIds: Set<string>): void,
+ *   onGoToUpload?:  function(): void,
  * }} props
  */
 
@@ -35,6 +38,7 @@ import { Button, Notice, Spinner } from '@wordpress/components';
 import { apiFetch } from '../utils/apiFetch';
 import { useRestApi } from '../hooks/useRestApi';
 import BulkActionToolbar from './BulkActionToolbar';
+import ConfirmRemoveModal from './ConfirmRemoveModal';
 import EditPermissionsModal from './EditPermissionsModal';
 import MemberTable from './MemberTable';
 
@@ -44,7 +48,6 @@ export default function RosterAssignment( {
 	orgUuid,
 	membershipUuid,
 	onGoToUpload,
-	onBulkRemoveFromRoster,
 } ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
@@ -57,9 +60,16 @@ export default function RosterAssignment( {
 		ids:    new Set(),
 	} );
 
-	// Role-update state (AORM-4.12).
+	// Confirm-Remove modal state (AORM-4.13).
+	// ids holds the selection snapshot at the moment the modal opened.
+	const [ confirmRemoveModal, setConfirmRemoveModal ] = useState( {
+		isOpen: false,
+		ids:    new Set(),
+	} );
+
+	// Submission state shared by roles (AORM-4.12) and remove (AORM-4.13).
 	const [ isSubmitting, setIsSubmitting ]   = useState( false );
-	const [ actionNotice, setActionNotice ]   = useState( null ); // { status: 'success'|'error', message: string } | null
+	const [ actionNotice, setActionNotice ]   = useState( null ); // { status: 'success'|'warning'|'error', message: string } | null
 
 	function openPermissionsModal( mode ) {
 		setPermissionsModal( { isOpen: true, mode, ids: new Set( selectedIds ) } );
@@ -67,6 +77,83 @@ export default function RosterAssignment( {
 
 	function closePermissionsModal() {
 		setPermissionsModal( ( prev ) => ( { ...prev, isOpen: false } ) );
+	}
+
+	// ---------------------------------------------------------------------------
+	// Confirm-Remove modal handlers (AORM-4.13)
+	// ---------------------------------------------------------------------------
+
+	function openConfirmRemoveModal() {
+		setConfirmRemoveModal( { isOpen: true, ids: new Set( selectedIds ) } );
+	}
+
+	function closeConfirmRemoveModal() {
+		setConfirmRemoveModal( ( prev ) => ( { ...prev, isOpen: false } ) );
+	}
+
+	/**
+	 * Called by ConfirmRemoveModal when the admin clicks Remove.
+	 * DELETEs the snapshotted selection from the members endpoint and
+	 * refreshes the list on full or partial success.
+	 */
+	function handleConfirmRemove() {
+		const { ids } = confirmRemoveModal;
+		closeConfirmRemoveModal();
+		setActionNotice( null );
+		setIsSubmitting( true );
+
+		apiFetch( {
+			path:   `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/members`,
+			method: 'DELETE',
+			data:   { person_uuids: [ ...ids ] },
+		} )
+			.then( ( response ) => {
+				const removedCount = response?.removed?.length ?? 0;
+				const failedCount  = response?.failed?.length  ?? 0;
+
+				if ( failedCount > 0 && removedCount === 0 ) {
+					setActionNotice( {
+						status:  'error',
+						message: sprintf(
+							/* translators: %d: number of members that could not be removed */
+							__( 'Could not remove %d member(s) from the roster. Please try again.', 'wicket-aorm' ),
+							failedCount
+						),
+					} );
+				} else if ( failedCount > 0 ) {
+					setActionNotice( {
+						status:  'warning',
+						message: sprintf(
+							/* translators: 1: removed count, 2: failed count */
+							__( '%1$d member(s) removed; %2$d could not be removed.', 'wicket-aorm' ),
+							removedCount,
+							failedCount
+						),
+					} );
+					setSelectedIds( new Set() );
+					refresh();
+				} else {
+					setActionNotice( {
+						status:  'success',
+						message: sprintf(
+							/* translators: %d: number of members removed */
+							__( '%d member(s) removed from the roster.', 'wicket-aorm' ),
+							removedCount
+						),
+					} );
+					setSelectedIds( new Set() );
+					refresh();
+				}
+			} )
+			.catch( ( err ) => {
+				setActionNotice( {
+					status:  'error',
+					message: err?.message ?? __( 'An unexpected error occurred. Please try again.', 'wicket-aorm' ),
+				} );
+			} )
+			.finally( () => {
+				setIsSubmitting( false );
+			} );
 	}
 
 	/**
@@ -203,7 +290,7 @@ export default function RosterAssignment( {
 				<>
 					<BulkActionToolbar
 						selectedCount={ selectedIds.size }
-						onRemoveFromRoster={ () => onBulkRemoveFromRoster?.( selectedIds ) }
+						onRemoveFromRoster={ isSubmitting ? undefined : openConfirmRemoveModal }
 						onAddRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'add' ) }
 						onRemoveRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'remove' ) }
 					/>
@@ -266,6 +353,13 @@ export default function RosterAssignment( {
 					) }
 				</>
 			) }
+
+		<ConfirmRemoveModal
+			isOpen={ confirmRemoveModal.isOpen }
+			memberCount={ confirmRemoveModal.ids.size }
+			onConfirm={ handleConfirmRemove }
+			onClose={ closeConfirmRemoveModal }
+		/>
 
 		<EditPermissionsModal
 			isOpen={ permissionsModal.isOpen }
