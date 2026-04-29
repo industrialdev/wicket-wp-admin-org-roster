@@ -16,20 +16,23 @@
  * Pagination is handled client-side via page state; each page change
  * triggers a new REST request and clears the current selection.
  *
+ * EditPermissionsModal save is wired directly to the MDP roles endpoint
+ * POST /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/roles (AORM-4.12).
+ * On success the member list is refreshed and the selection is cleared.
+ *
  * @param {{
  *   orgUuid: string,
  *   membershipUuid: string,
  *   onGoToUpload?: function(): void,
  *   onBulkRemoveFromRoster?: function(selectedIds: Set<string>): void,
- *   onBulkAddRoles?: function(selectedIds: Set<string>, roleSlugs: string[]): void,
- *   onBulkRemoveRoles?: function(selectedIds: Set<string>, roleSlugs: string[]): void,
  * }} props
  */
 
 import { useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 
+import { apiFetch } from '../utils/apiFetch';
 import { useRestApi } from '../hooks/useRestApi';
 import BulkActionToolbar from './BulkActionToolbar';
 import EditPermissionsModal from './EditPermissionsModal';
@@ -42,8 +45,6 @@ export default function RosterAssignment( {
 	membershipUuid,
 	onGoToUpload,
 	onBulkRemoveFromRoster,
-	onBulkAddRoles,
-	onBulkRemoveRoles,
 } ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
@@ -56,6 +57,10 @@ export default function RosterAssignment( {
 		ids:    new Set(),
 	} );
 
+	// Role-update state (AORM-4.12).
+	const [ isSubmitting, setIsSubmitting ]   = useState( false );
+	const [ actionNotice, setActionNotice ]   = useState( null ); // { status: 'success'|'error', message: string } | null
+
 	function openPermissionsModal( mode ) {
 		setPermissionsModal( { isOpen: true, mode, ids: new Set( selectedIds ) } );
 	}
@@ -64,17 +69,76 @@ export default function RosterAssignment( {
 		setPermissionsModal( ( prev ) => ( { ...prev, isOpen: false } ) );
 	}
 
+	/**
+	 * Called by EditPermissionsModal when the admin clicks Save.
+	 * POSTs to the roles endpoint and refreshes the member list on success.
+	 *
+	 * @param {string[]} roleSlugs
+	 */
 	function handlePermissionsSave( roleSlugs ) {
 		const { mode, ids } = permissionsModal;
 		closePermissionsModal();
-		if ( mode === 'add' ) {
-			onBulkAddRoles?.( ids, roleSlugs );
-		} else {
-			onBulkRemoveRoles?.( ids, roleSlugs );
-		}
+		setActionNotice( null );
+		setIsSubmitting( true );
+
+		apiFetch( {
+			path:   `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/roles`,
+			method: 'POST',
+			data:   {
+				person_uuids: [ ...ids ],
+				role_slugs:   roleSlugs,
+				action:       mode,
+			},
+		} )
+			.then( ( response ) => {
+				const updatedCount = response?.updated?.length ?? 0;
+				const failedCount  = response?.failed?.length  ?? 0;
+
+				if ( failedCount > 0 && updatedCount === 0 ) {
+					setActionNotice( {
+						status:  'error',
+						message: sprintf(
+							/* translators: %d: number of members that could not be updated */
+							__( 'Could not update roles for %d member(s). Please try again.', 'wicket-aorm' ),
+							failedCount
+						),
+					} );
+				} else if ( failedCount > 0 ) {
+					setActionNotice( {
+						status:  'warning',
+						message: sprintf(
+							/* translators: 1: updated count, 2: failed count */
+							__( 'Roles updated for %1$d member(s); %2$d could not be updated.', 'wicket-aorm' ),
+							updatedCount,
+							failedCount
+						),
+					} );
+				} else {
+					setActionNotice( {
+						status:  'success',
+						message: sprintf(
+							/* translators: %d: number of members updated */
+							__( 'Roles updated for %d member(s).', 'wicket-aorm' ),
+							updatedCount
+						),
+					} );
+					// Clear selection and refresh list on full success.
+					setSelectedIds( new Set() );
+					refresh();
+				}
+			} )
+			.catch( ( err ) => {
+				setActionNotice( {
+					status:  'error',
+					message: err?.message ?? __( 'An unexpected error occurred. Please try again.', 'wicket-aorm' ),
+				} );
+			} )
+			.finally( () => {
+				setIsSubmitting( false );
+			} );
 	}
 
-	const { data, isLoading, error } = useRestApi(
+	const { data, isLoading, error, refresh } = useRestApi(
 		orgUuid && membershipUuid
 			? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/members?per_page=${ PER_PAGE }&page=${ page }`
 			: null
@@ -97,6 +161,17 @@ export default function RosterAssignment( {
 			{ ! isLoading && error && (
 				<Notice status="error" isDismissible={ false }>
 					{ error }
+				</Notice>
+			) }
+
+			{ actionNotice && (
+				<Notice
+					status={ actionNotice.status }
+					isDismissible={ true }
+					onRemove={ () => setActionNotice( null ) }
+					className="aorm-assignment__action-notice"
+				>
+					{ actionNotice.message }
 				</Notice>
 			) }
 
@@ -129,8 +204,8 @@ export default function RosterAssignment( {
 					<BulkActionToolbar
 						selectedCount={ selectedIds.size }
 						onRemoveFromRoster={ () => onBulkRemoveFromRoster?.( selectedIds ) }
-						onAddRoles={ () => openPermissionsModal( 'add' ) }
-						onRemoveRoles={ () => openPermissionsModal( 'remove' ) }
+						onAddRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'add' ) }
+						onRemoveRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'remove' ) }
 					/>
 
 					<MemberTable
