@@ -67,26 +67,32 @@ export default function RosterHeading( { roster } ) {
 
 	const fields = [
 		{
+			slug: 'orgUuid',
 			label: __( 'Organization UUID', 'wicket-aorm' ),
 			value: roster.org_uuid,
 		},
 		{
+			slug: 'orgType',
 			label: __( 'Organization Type', 'wicket-aorm' ),
 			value: roster.org_type || '—',
 		},
 		{
+			slug: 'membershipUuid',
 			label: __( 'Membership UUID', 'wicket-aorm' ),
 			value: roster.membership_uuid || '—',
 		},
 		{
+			slug: 'membershipTier',
 			label: __( 'Membership Tier', 'wicket-aorm' ),
 			value: roster.membership_tier || '—',
 		},
 		{
+			slug: 'membershipOwner',
 			label: __( 'Membership Owner', 'wicket-aorm' ),
 			value: roster.membership_owner || '—',
 		},
 		{
+			slug: 'assignedCount',
 			label: __( 'Current Roster count', 'wicket-aorm' ),
 			value: formatRosterCount(
 				roster.assigned_count,
@@ -98,22 +104,14 @@ export default function RosterHeading( { roster } ) {
 
 	return (
 		<div className="aorm-roster-heading">
-			<div className="aorm-roster-heading__org-name">
-				<Heading>
-					{ roster.org_name }
-				</Heading>
-			</div>
-
-			<div className="aorm-roster-heading__meta-box">
-				<div className="aorm-roster-heading__fields">
-					{ fields.map( ( { label, value } ) => (
-						<p key={ label } className="aorm-roster-heading__field">
-							<span className="aorm-roster-heading__field-label">
-								{ label }:
-							</span>{ ' ' }
-							{ value }
-						</p>
-					) ) }
+			<div className="aorm-roster-heading-top">
+				<div>
+					<div className="aorm-roster-heading__org-name">
+						<Heading>
+							{ roster.org_name }
+						</Heading>
+					</div>
+					<p>{ __( 'Organization Roster Details', 'wicket-aorm' ) }</p>
 				</div>
 
 				{ mdpUrl && (
@@ -128,6 +126,23 @@ export default function RosterHeading( { roster } ) {
 						</Button>
 					</div>
 				) }
+			</div>
+
+			<div className="aorm-roster-heading__meta-box">
+				<div className="aorm-roster-heading__fields">
+					{ fields.map( ( { slug, label, value } ) => (
+						<div key={ label } className={ "aorm-roster-heading__field " + slug }>
+							<span className="aorm-roster-heading__field-label">
+								{ label }:
+							</span>{ ' ' }
+							<div>
+								<span className="aorm-roster-heading__field-value">
+									{ value }
+								</span>
+							</div>
+						</div>
+					) ) }
+				</div>
 			</div>
 		</div>
 	);

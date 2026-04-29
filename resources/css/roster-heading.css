@@ -3,43 +3,79 @@
    ========================================================================== */
 
 .aorm-roster-heading {
-	margin-bottom: 24px;
-	padding: 15px;
-	background: white;
-	max-width: 900px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 20px;
+  max-width: 900px;
+}
+
+.aorm-roster-heading-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  border-bottom: 1px solid #edf1f7;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
 }
 
 .aorm-roster-heading__org-name {
-	margin: 0 0 10px;
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
 .aorm-roster-heading__meta-box {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 24px;
-	background-color: #dce8f7;
-	border: 1px solid #b8cfe8;
-	padding: 16px 20px;
-	align-items: start;
 }
 
 .aorm-roster-heading__fields {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	font-size: 13px;
-	color: #203B95;
-	line-height: 1.5;
-	font-weight: 600;
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  row-gap: 10px;
+  column-gap: 16px;
+  margin: 0;
 }
 
 .aorm-roster-heading__field {
-	margin: 0;
+	display: contents;
 }
 
 .aorm-roster-heading__field-label {
-	/*  */
+  color: #64748b;
+  font-size: 13px;
+}
+
+.aorm-roster-heading__field.orgUuid .aorm-roster-heading__field-value,
+.aorm-roster-heading__field.membershipUuid .aorm-roster-heading__field-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.aorm-roster-heading__field.membershipOwner .aorm-roster-heading__field-value {
+  color: #172033;
+  font-size: 14px;
+	font-weight: 600;
+}
+
+.aorm-roster-heading__field.membershipTier .aorm-roster-heading__field-value {
+  display: inline-flex;
+  border-radius: 999px;
+  background: #eef6ff;
+  color: #075985;
+  padding: 3px 8px;
+  font-size: 13px;
+	font-weight: 500;
+}
+
+.aorm-roster-heading__field.assignedCount .aorm-roster-heading__field-value {
+  display: inline-flex;
+  border-radius: 999px;
+  background: #F3F8F1;
+  color: #276748;
+  padding: 3px 8px;
+  font-size: 13px;
+	font-weight: 500;
 }
 
 .aorm-roster-heading__mdp-link {
