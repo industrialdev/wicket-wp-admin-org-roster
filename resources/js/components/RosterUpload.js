@@ -1,20 +1,128 @@
 /**
- * Roster Upload tab — AORM-4, Tab 2.
+ * Roster Upload tab wizard — AORM-4.14.
  *
- * Houses the multi-step bulk upload wizard (AORM-6 – 9) and individual
- * add flow (AORM-5). Steps: file drop → validation review → sync.
+ * Orchestrates the multi-step bulk upload + individual add flows.
+ * State lives here; each step is a self-contained component that
+ * receives goToStep / shared session props and renders its own UI.
+ *
+ * Steps
+ * -----
+ * landing           — choose "Add Individual" or "Bulk CSV Upload"
+ * individual-form   — individual add form          (AORM-5)
+ * upload-file       — CSV file drop / picker       (AORM-6 step 1)
+ * action-select     — add-to-roster vs replace     (AORM-6 step 2)
+ * csv-validation    — local CSV row validation     (AORM-6 step 3)
+ * matching-progress — MDP background matching      (AORM-7)
+ * validation-review — accordion review screen      (AORM-8)
+ * sync-progress     — commit & sync progress       (AORM-9)
+ *
+ * Exported constants
+ * ------------------
+ * WIZARD_STEPS — ordered array of all step names (useful for tests).
  *
  * @param {{ orgUuid: string, membershipUuid: string }} props
  */
 
-import { __ } from '@wordpress/i18n';
-import { Notice } from '@wordpress/components';
+import { useState, useCallback } from '@wordpress/element';
+
+import WizardLanding        from './upload/WizardLanding';
+import IndividualAddForm    from './upload/IndividualAddForm';
+import UploadFileStep       from './upload/UploadFileStep';
+import ActionSelectStep     from './upload/ActionSelectStep';
+import CsvValidationStep    from './upload/CsvValidationStep';
+import MatchingProgressStep from './upload/MatchingProgressStep';
+import ValidationReviewStep from './upload/ValidationReviewStep';
+import SyncProgressStep     from './upload/SyncProgressStep';
+
+import '../../css/roster-upload.css';
+
+/** Ordered list of all wizard step names. */
+export const WIZARD_STEPS = [
+	'landing',
+	'individual-form',
+	'upload-file',
+	'action-select',
+	'csv-validation',
+	'matching-progress',
+	'validation-review',
+	'sync-progress',
+];
 
 export default function RosterUpload( { orgUuid, membershipUuid } ) {
-	// TODO (AORM-5 – 9): implement upload wizard (DropZone → validation → sync).
+	/**
+	 * Active wizard step.
+	 * @type {[string, Function]}
+	 */
+	const [ step, setStep ] = useState( 'landing' );
+
+	/**
+	 * Active upload session ID (set after a CSV upload or individual add
+	 * creates a staged-records session on the server).
+	 * @type {[string|null, Function]}
+	 */
+	const [ sessionId, setSessionId ] = useState( null );
+
+	/**
+	 * Bulk-upload action chosen by the admin: 'add' (default) or 'replace'.
+	 * @type {[string, Function]}
+	 */
+	const [ uploadAction, setUploadAction ] = useState( 'add' );
+
+	/** Navigate to any named step. */
+	const goToStep = useCallback( ( nextStep ) => {
+		setStep( nextStep );
+	}, [] );
+
+	/** Record the upload session ID returned by the server after CSV upload. */
+	const startNewSession = useCallback( ( newSessionId ) => {
+		setSessionId( newSessionId );
+	}, [] );
+
+	/** Return the wizard to its initial state (landing + cleared session). */
+	const resetWizard = useCallback( () => {
+		setStep( 'landing' );
+		setSessionId( null );
+		setUploadAction( 'add' );
+	}, [] );
+
+	/** Props forwarded to every step component. */
+	const sharedProps = {
+		orgUuid,
+		membershipUuid,
+		sessionId,
+		uploadAction,
+		goToStep,
+		startNewSession,
+		setUploadAction,
+		resetWizard,
+	};
+
 	return (
-		<Notice status="info" isDismissible={ false }>
-			{ __( 'Roster Upload wizard — coming in AORM-5 through 9.', 'wicket-aorm' ) }
-		</Notice>
+		<div className="aorm-upload-wizard" data-step={ step }>
+			{ step === 'landing' && (
+				<WizardLanding { ...sharedProps } />
+			) }
+			{ step === 'individual-form' && (
+				<IndividualAddForm { ...sharedProps } />
+			) }
+			{ step === 'upload-file' && (
+				<UploadFileStep { ...sharedProps } />
+			) }
+			{ step === 'action-select' && (
+				<ActionSelectStep { ...sharedProps } />
+			) }
+			{ step === 'csv-validation' && (
+				<CsvValidationStep { ...sharedProps } />
+			) }
+			{ step === 'matching-progress' && (
+				<MatchingProgressStep { ...sharedProps } />
+			) }
+			{ step === 'validation-review' && (
+				<ValidationReviewStep { ...sharedProps } />
+			) }
+			{ step === 'sync-progress' && (
+				<SyncProgressStep { ...sharedProps } />
+			) }
+		</div>
 	);
 }

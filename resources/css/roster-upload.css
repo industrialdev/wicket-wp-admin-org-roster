@@ -1,0 +1,62 @@
+/* Roster Upload wizard — AORM-4.14 */
+
+/* -----------------------------------------------------------------------
+   Wizard container
+   ----------------------------------------------------------------------- */
+
+.aorm-upload-wizard {
+	padding: 24px 0;
+}
+
+/* -----------------------------------------------------------------------
+   Landing screen
+   ----------------------------------------------------------------------- */
+
+.aorm-wizard-landing__title {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.aorm-wizard-landing__description {
+	color: #646970;
+	margin-bottom: 24px;
+}
+
+.aorm-wizard-landing__paths {
+	display: flex;
+	gap: 24px;
+	flex-wrap: wrap;
+}
+
+.aorm-wizard-landing__path {
+	flex: 1 1 260px;
+	padding: 24px;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.aorm-wizard-landing__path-title {
+	margin-top: 0;
+	font-size: 1em;
+	font-weight: 600;
+}
+
+.aorm-wizard-landing__path-description {
+	color: #646970;
+	margin-bottom: 16px;
+	min-height: 2.5em; /* keep cards the same height when descriptions differ */
+}
+
+/* -----------------------------------------------------------------------
+   Generic step wrapper
+   ----------------------------------------------------------------------- */
+
+.aorm-wizard-step {
+	padding: 0;
+}
+
+.aorm-wizard-step__back {
+	margin-bottom: 16px;
+}
