@@ -1,21 +1,67 @@
 /**
- * Roster Activity tab — AORM-4, Tab 3 (nice-to-have).
+ * Roster Activity tab — AORM-4.16.
  *
- * Scoped audit trail for this org membership. Read-only, paginated.
- * Columns: date/time, actor, activity type, summary, status.
- * Filters: activity type, date range, actor, status.
+ * Fetches the scoped audit log for this org membership via
+ * GET /wicket-aorm/v1/rosters/{org_uuid}/{membership_uuid}/activity
+ * (endpoint built in AORM-4.18) and renders a read-only ActivityTable.
+ *
+ * States:
+ *   - Missing params → error Notice
+ *   - Loading        → Spinner
+ *   - Error          → error Notice with the server message
+ *   - Empty          → ActivityTable (shows its own empty-state row)
+ *   - Populated      → ActivityTable with one row per log entry
  *
  * @param {{ orgUuid: string, membershipUuid: string }} props
  */
 
 import { __ } from '@wordpress/i18n';
-import { Notice } from '@wordpress/components';
+import { Notice, Spinner } from '@wordpress/components';
+
+import { useRestApi } from '../hooks/useRestApi';
+import ActivityTable from './ActivityTable';
 
 export default function RosterActivity( { orgUuid, membershipUuid } ) {
-	// TODO (AORM-4, nice-to-have): implement scoped activity log.
+	const hasParams = !! orgUuid && !! membershipUuid;
+
+	const path = hasParams
+		? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/activity`
+		: null;
+
+	const { data, isLoading, error } = useRestApi( path );
+
+	// ── Guard — missing route params ─────────────────────────────────────────
+	if ( ! hasParams ) {
+		return (
+			<Notice status="error" isDismissible={ false }>
+				{ __(
+					'Missing organisation or membership UUID.',
+					'wicket-aorm'
+				) }
+			</Notice>
+		);
+	}
+
+	// ── Loading ───────────────────────────────────────────────────────────────
+	if ( isLoading ) {
+		return <Spinner />;
+	}
+
+	// ── Error ─────────────────────────────────────────────────────────────────
+	if ( error ) {
+		return (
+			<Notice status="error" isDismissible={ false }>
+				{ error }
+			</Notice>
+		);
+	}
+
+	// ── Data ──────────────────────────────────────────────────────────────────
+	const entries = data?.entries ?? [];
+
 	return (
-		<Notice status="info" isDismissible={ false }>
-			{ __( 'Roster Activity log — coming soon.', 'wicket-aorm' ) }
-		</Notice>
+		<div className="aorm-activity">
+			<ActivityTable entries={ entries } />
+		</div>
 	);
 }

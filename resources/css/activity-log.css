@@ -1,0 +1,71 @@
+/**
+ * Roster Activity tab styles — AORM-4.16.
+ *
+ * Scoped to .aorm-activity and .aorm-activity-table to avoid leaking
+ * into other WP admin list tables.
+ */
+
+/* ── Table wrapper ────────────────────────────────────────────────────── */
+
+.aorm-activity {
+	margin-top: 16px;
+}
+
+/* ── Date/Time column ─────────────────────────────────────────────────── */
+
+.aorm-activity-table__col--datetime {
+	white-space: nowrap;
+	min-width: 160px;
+}
+
+/* ── Status badge pill ────────────────────────────────────────────────── */
+
+.aorm-activity-table__status {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 0.8em;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
+}
+
+.aorm-activity-table__status--info {
+	background: #d7e8f7;
+	color: #0a4a7e;
+}
+
+.aorm-activity-table__status--warning {
+	background: #fef3cd;
+	color: #7a5c00;
+}
+
+.aorm-activity-table__status--error {
+	background: #fde8e8;
+	color: #8b1d1d;
+}
+
+.aorm-activity-table__status--debug {
+	background: #f0f0f0;
+	color: #555555;
+}
+
+/* ── Row-level level tinting (subtle left border) ─────────────────────── */
+
+.aorm-activity-table__row--warning td:first-child {
+	border-left: 3px solid #f0b429;
+}
+
+.aorm-activity-table__row--error td:first-child {
+	border-left: 3px solid #d63638;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+
+.aorm-activity-table__empty {
+	text-align: center;
+	color: #757575;
+	padding: 24px !important;
+	font-style: italic;
+}
