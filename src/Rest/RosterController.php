@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace WicketAORM\Rest;
 
+use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\MdpClient;
 
 /**
@@ -14,6 +15,10 @@ use WicketAORM\Services\MdpClient;
  *   GET    /rosters/{org_uuid}/{membership_uuid}/members — paginated member list (AORM-4.5)
  *   DELETE /rosters/{org_uuid}/{membership_uuid}/members — bulk remove members   (AORM-4.9)
  *   POST   /rosters/{org_uuid}/{membership_uuid}/roles   — bulk add/remove roles (AORM-4.10)
+ *
+ * Logging (AORM-4.15): every mutating operation (delete_members, update_member_roles)
+ * calls ActivityLogger::logRosterAction() to write an audit entry and keep the
+ * wp_wicket_aorm_roster_meta row current.
  */
 class RosterController extends RestController
 {
@@ -22,8 +27,10 @@ class RosterController extends RestController
      */
     private const UUID_PATTERN = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
-    public function __construct(private readonly ?MdpClient $mdpClient = null)
-    {
+    public function __construct(
+        private readonly ?MdpClient $mdpClient = null,
+        private readonly ?ActivityLogger $activityLogger = null,
+    ) {
     }
 
     /**
@@ -278,6 +285,29 @@ class RosterController extends RestController
         $client = $this->mdpClient ?? new MdpClient();
         $result = $client->removeRosterMembers($orgUuid, $membershipUuid, $personUuids);
 
+        // ── Audit log + roster_meta update (AORM-4.15) ───────────────────
+        $removedCount = count($result['removed']);
+        $failedCount  = count($result['failed']);
+        $rosterStatus = $failedCount > 0 ? 'has_failures' : 'idle';
+        $message      = sprintf(
+            '%d member(s) removed from roster%s.',
+            $removedCount,
+            $failedCount > 0 ? ", {$failedCount} failed" : '',
+        );
+
+        $logger = $this->activityLogger ?? new ActivityLogger();
+        $logger->logRosterAction(
+            $orgUuid,
+            $membershipUuid,
+            'members_removed',
+            $message,
+            [
+                'removed' => $result['removed'],
+                'failed'  => $result['failed'],
+            ],
+            $rosterStatus,
+        );
+
         return new \WP_REST_Response($result, 200);
     }
 
@@ -336,6 +366,33 @@ class RosterController extends RestController
 
         $client = $this->mdpClient ?? new MdpClient();
         $result = $client->updateMemberRoles($orgUuid, $membershipUuid, $personUuids, $action, $roleSlugs);
+
+        // ── Audit log + roster_meta update (AORM-4.15) ───────────────────
+        $updatedCount = count($result['updated']);
+        $failedCount  = count($result['failed']);
+        $rosterStatus = $failedCount > 0 ? 'has_failures' : 'idle';
+        $actionLabel  = $action === 'add' ? 'added' : 'removed';
+        $message      = sprintf(
+            'Role(s) %s for %d member(s)%s.',
+            $actionLabel,
+            $updatedCount,
+            $failedCount > 0 ? ", {$failedCount} failed" : '',
+        );
+
+        $logger = $this->activityLogger ?? new ActivityLogger();
+        $logger->logRosterAction(
+            $orgUuid,
+            $membershipUuid,
+            "roles_{$actionLabel}",
+            $message,
+            [
+                'action'     => $action,
+                'role_slugs' => $roleSlugs,
+                'updated'    => $result['updated'],
+                'failed'     => $result['failed'],
+            ],
+            $rosterStatus,
+        );
 
         return new \WP_REST_Response($result, 200);
     }
