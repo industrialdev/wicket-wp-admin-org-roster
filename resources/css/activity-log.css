@@ -1,5 +1,5 @@
 /**
- * Roster Activity tab styles — AORM-4.16.
+ * Roster Activity tab styles — AORM-4.16 / AORM-4.17.
  *
  * Scoped to .aorm-activity and .aorm-activity-table to avoid leaking
  * into other WP admin list tables.
@@ -67,5 +67,80 @@
 	text-align: center;
 	color: #757575;
 	padding: 24px !important;
+	font-style: italic;
+}
+
+/* ── Expand toggle column ─────────────────────────────────────────────── */
+
+.aorm-activity-table__col--toggle {
+	width: 32px;
+	padding: 0 4px !important;
+}
+
+.aorm-activity-table__toggle {
+	padding: 2px 4px !important;
+	min-height: unset !important;
+	line-height: 1 !important;
+}
+
+.aorm-activity-table__toggle-icon {
+	display: inline-block;
+	font-size: 0.65em;
+	transition: transform 0.15s ease;
+	transform: rotate( 0deg );
+}
+
+.aorm-activity-table__toggle-icon.is-expanded {
+	transform: rotate( 90deg );
+}
+
+/* ── Detail row ───────────────────────────────────────────────────────── */
+
+.aorm-activity-table__detail-row {
+	background: #f6f7f7 !important;
+}
+
+.aorm-activity-table__detail-cell {
+	padding: 12px 16px !important;
+	border-top: none !important;
+}
+
+.aorm-activity-detail {
+	font-size: 0.875em;
+}
+
+/* ── Context definition list ──────────────────────────────────────────── */
+
+.aorm-activity-detail__context {
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 24px;
+}
+
+.aorm-activity-detail__context-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.aorm-activity-detail__context-key {
+	font-weight: 600;
+	color: #3c434a;
+	white-space: nowrap;
+}
+
+.aorm-activity-detail__context-key::after {
+	content: ':';
+}
+
+.aorm-activity-detail__context-value {
+	color: #50575e;
+	word-break: break-all;
+	margin: 0;
+}
+
+.aorm-activity-detail__no-context {
+	color: #757575;
 	font-style: italic;
 }

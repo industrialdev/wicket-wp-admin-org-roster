@@ -1,9 +1,10 @@
 /**
- * ActivityTable — AORM-4.16.
+ * ActivityTable — AORM-4.16 / AORM-4.17.
  *
- * Read-only audit log table for a single org roster.
+ * Read-only audit log table for a single org roster. Each row can be
+ * expanded in-place to reveal a context detail panel (AORM-4.17).
  *
- * Columns: Date/Time | Actor Name | Actor Type | Activity Type | Summary | Status
+ * Columns: (expand) | Date/Time | Actor Name | Actor Type | Activity Type | Summary | Status
  *
  * Data shape expected per entry (matches the AORM-4.18 REST response):
  *   id         {number}  — unique log row ID
@@ -12,6 +13,7 @@
  *   action     {string}  — slug e.g. "members_removed", "roles_added"
  *   message    {string}  — human-readable summary
  *   level      {string}  — "info" | "warning" | "error" | "debug"
+ *   context    {Object}  — optional metadata object (shown in detail panel)
  *
  * @param {{
  *   entries: Array<{
@@ -21,11 +23,16 @@
  *     action:     string,
  *     message:    string,
  *     level:      string,
+ *     context?:   Object,
  *   }>,
  * }} props
  */
 
+import { useState } from '@wordpress/element';
+import { Button } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
+
+import ActivityDetailRow from './ActivityDetailRow';
 import '../../css/activity-log.css';
 
 // ---------------------------------------------------------------------------
@@ -132,12 +139,37 @@ export function formatStatus( level ) {
 // ---------------------------------------------------------------------------
 
 export default function ActivityTable( { entries = [] } ) {
-	const TOTAL_COLS = 6;
+	// IDs of currently expanded rows.
+	const [ expandedIds, setExpandedIds ] = useState( new Set() );
+
+	// Total column count: 1 toggle + 6 data columns.
+	const TOTAL_COLS = 7;
+
+	function toggleRow( id ) {
+		setExpandedIds( ( prev ) => {
+			const next = new Set( prev );
+			if ( next.has( id ) ) {
+				next.delete( id );
+			} else {
+				next.add( id );
+			}
+			return next;
+		} );
+	}
 
 	return (
 		<table className="wp-list-table widefat fixed striped aorm-activity-table">
 			<thead>
 				<tr>
+					{ /* Expand-toggle column — no visible header text */ }
+					<th
+						scope="col"
+						className="aorm-activity-table__col--toggle"
+					>
+						<span className="screen-reader-text">
+							{ __( 'Details', 'wicket-aorm' ) }
+						</span>
+					</th>
 					<th scope="col">
 						{ __( 'Date / Time', 'wicket-aorm' ) }
 					</th>
@@ -159,27 +191,61 @@ export default function ActivityTable( { entries = [] } ) {
 				</tr>
 			</thead>
 			<tbody>
-				{ entries.map( ( entry ) => (
-					<tr
-						key={ entry.id }
-						className={ `aorm-activity-table__row aorm-activity-table__row--${ entry.level }` }
-					>
-						<td className="aorm-activity-table__col--datetime">
-							{ formatDateTime( entry.created_at ) }
-						</td>
-						<td>{ entry.actor || '—' }</td>
-						<td>{ resolveActorType( entry.actor ) }</td>
-						<td>{ formatActivityType( entry.action ) }</td>
-						<td>{ entry.message || '—' }</td>
-						<td>
-							<span
-								className={ `aorm-activity-table__status aorm-activity-table__status--${ entry.level }` }
+				{ entries.map( ( entry ) => {
+					const isExpanded = expandedIds.has( entry.id );
+
+					return (
+						<>
+							<tr
+								key={ `row-${ entry.id }` }
+								className={ `aorm-activity-table__row aorm-activity-table__row--${ entry.level }` }
 							>
-								{ formatStatus( entry.level ) }
-							</span>
-						</td>
-					</tr>
-				) ) }
+								<td className="aorm-activity-table__col--toggle">
+									<Button
+										variant="tertiary"
+										isSmall
+										className={ `aorm-activity-table__toggle${ isExpanded ? ' is-expanded' : '' }` }
+										aria-expanded={ isExpanded }
+										aria-label={
+											isExpanded
+												? __( 'Collapse details', 'wicket-aorm' )
+												: __( 'Expand details', 'wicket-aorm' )
+										}
+										onClick={ () => toggleRow( entry.id ) }
+									>
+										<span
+											className={ `aorm-activity-table__toggle-icon${ isExpanded ? ' is-expanded' : '' }` }
+											aria-hidden="true"
+										>
+											▶
+										</span>
+									</Button>
+								</td>
+								<td className="aorm-activity-table__col--datetime">
+									{ formatDateTime( entry.created_at ) }
+								</td>
+								<td>{ entry.actor || '—' }</td>
+								<td>{ resolveActorType( entry.actor ) }</td>
+								<td>{ formatActivityType( entry.action ) }</td>
+								<td>{ entry.message || '—' }</td>
+								<td>
+									<span
+										className={ `aorm-activity-table__status aorm-activity-table__status--${ entry.level }` }
+									>
+										{ formatStatus( entry.level ) }
+									</span>
+								</td>
+							</tr>
+							{ isExpanded && (
+								<ActivityDetailRow
+									key={ `detail-${ entry.id }` }
+									entry={ entry }
+									colSpan={ TOTAL_COLS }
+								/>
+							) }
+						</>
+					);
+				} ) }
 				{ entries.length === 0 && (
 					<tr>
 						<td
