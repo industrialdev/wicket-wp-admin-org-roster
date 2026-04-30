@@ -202,8 +202,6 @@ export default function ActivityTable( { entries = [] } ) {
 							>
 								<td className="aorm-activity-table__col--toggle">
 									<Button
-										variant="tertiary"
-										isSmall
 										className={ `aorm-activity-table__toggle${ isExpanded ? ' is-expanded' : '' }` }
 										aria-expanded={ isExpanded }
 										aria-label={

@@ -37,6 +37,8 @@ class ActivityLogger
      * @param string               $message        Human-readable summary written to the log message column.
      * @param array<string, mixed> $context        Arbitrary payload stored as JSON in the context column.
      * @param string               $rosterStatus   ENUM value to write to roster_status ('idle', 'has_failures', …).
+     * 
+     * @return void
      */
     public function logRosterAction(
         string $orgUuid,
@@ -66,6 +68,17 @@ class ActivityLogger
                 'message'     => $message,
                 'context'     => json_encode($context),
                 'created_at'  => $now,
+            ],
+            [
+                '%s', // org_uuid
+                '%d', // user_id
+                '%s', // level
+                '%s', // action
+                '%s', // object_type
+                '%s', // object_id
+                '%s', // message
+                '%s', // context
+                '%s', // created_at
             ],
         );
 

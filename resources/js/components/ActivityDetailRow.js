@@ -84,19 +84,7 @@ export default function ActivityDetailRow( { entry, colSpan = 7 } ) {
 				<div className="aorm-activity-detail">
 					{ hasContext ? (
 						<dl className="aorm-activity-detail__context">
-							{ Object.entries( context ).map( ( [ key, value ] ) => (
-								<div
-									key={ key }
-									className="aorm-activity-detail__context-item"
-								>
-									<dt className="aorm-activity-detail__context-key">
-										{ formatContextKey( key ) }
-									</dt>
-									<dd className="aorm-activity-detail__context-value">
-										{ formatContextValue( value ) }
-									</dd>
-								</div>
-							) ) }
+							{ JSON.stringify( context, null, 2 ) }
 						</dl>
 					) : (
 						<span className="aorm-activity-detail__no-context">

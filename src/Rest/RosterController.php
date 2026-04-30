@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace WicketAORM\Rest;
 
+use WicketAORM\Database\ActivityLogTable;
 use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\MdpClient;
 
@@ -11,10 +12,11 @@ use WicketAORM\Services\MdpClient;
  * Roster list/detail/members endpoints.
  *
  * Routes registered under the wicket-aorm/v1 namespace:
- *   GET    /rosters/{org_uuid}/{membership_uuid}         — org+membership detail (AORM-4.1)
- *   GET    /rosters/{org_uuid}/{membership_uuid}/members — paginated member list (AORM-4.5)
- *   DELETE /rosters/{org_uuid}/{membership_uuid}/members — bulk remove members   (AORM-4.9)
- *   POST   /rosters/{org_uuid}/{membership_uuid}/roles   — bulk add/remove roles (AORM-4.10)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}          — org+membership detail (AORM-4.1)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}/members  — paginated member list (AORM-4.5)
+ *   DELETE /rosters/{org_uuid}/{membership_uuid}/members  — bulk remove members   (AORM-4.9)
+ *   POST   /rosters/{org_uuid}/{membership_uuid}/roles    — bulk add/remove roles (AORM-4.10)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}/activity — paginated activity log (AORM-4.18)
  *
  * Logging (AORM-4.15): every mutating operation (delete_members, update_member_roles)
  * calls ActivityLogger::logRosterAction() to write an audit entry and keep the
@@ -30,6 +32,7 @@ class RosterController extends RestController
     public function __construct(
         private readonly ?MdpClient $mdpClient = null,
         private readonly ?ActivityLogger $activityLogger = null,
+        private readonly ?ActivityLogTable $activityLogTable = null,
     ) {
     }
 
@@ -168,6 +171,55 @@ class RosterController extends RestController
                                     fn (string $v): bool => $v !== '',
                                 ));
                             },
+                        ],
+                    ],
+                ],
+            ],
+        );
+
+        register_rest_route(
+            $this->namespace,
+            '/rosters/(?P<org_uuid>' . self::UUID_PATTERN . ')/(?P<membership_uuid>' . self::UUID_PATTERN . ')/activity',
+            [
+                // GET — paginated activity log (AORM-4.18)
+                [
+                    'methods'             => \WP_REST_Server::READABLE,
+                    'callback'            => [$this, 'get_activity'],
+                    'permission_callback' => [$this, 'get_activity_permissions_check'],
+                    'args'                => [
+                        'org_uuid'        => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'membership_uuid' => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'page'            => [
+                            'required'          => false,
+                            'sanitize_callback' => 'absint',
+                            'default'           => 1,
+                        ],
+                        'per_page'        => [
+                            'required'          => false,
+                            'sanitize_callback' => 'absint',
+                            'default'           => 20,
+                        ],
+                        'action'          => [
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'level'           => [
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'date_from'       => [
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                        'date_to'         => [
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
                         ],
                     ],
                 ],
@@ -393,6 +445,52 @@ class RosterController extends RestController
             ],
             $rosterStatus,
         );
+
+        return new \WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Permission check for GET /rosters/{org_uuid}/{membership_uuid}/activity.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function get_activity_permissions_check($request): bool
+    {
+        return current_user_can('manage_options');
+    }
+
+    /**
+     * Handle GET /rosters/{org_uuid}/{membership_uuid}/activity.
+     *
+     * Returns a paginated, optionally filtered list of audit log entries for
+     * the given roster. Entries are sourced from wp_wicket_aorm_logs and
+     * normalised into a flat JSON-friendly shape. Results are ordered newest
+     * first.
+     *
+     * Supported query parameters:
+     *   page      — 1-based page number (default 1).
+     *   per_page  — rows per page (default 20).
+     *   action    — filter by exact action slug (e.g. 'members_removed').
+     *   level     — filter by log level ('info', 'warning', 'error', 'debug').
+     *   date_from — lower bound date (YYYY-MM-DD).
+     *   date_to   — upper bound date (YYYY-MM-DD).
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function get_activity($request): \WP_REST_Response
+    {
+        $orgUuid        = (string) $request->get_param('org_uuid');
+        $membershipUuid = (string) $request->get_param('membership_uuid');
+
+        $logTable = $this->activityLogTable ?? new ActivityLogTable();
+        $result   = $logTable->getEntries($orgUuid, $membershipUuid, [
+            'page'      => max(1, (int) ($request->get_param('page') ?? 1)),
+            'per_page'  => max(1, (int) ($request->get_param('per_page') ?? 20)),
+            'action'    => (string) ($request->get_param('action') ?? ''),
+            'level'     => (string) ($request->get_param('level') ?? ''),
+            'date_from' => (string) ($request->get_param('date_from') ?? ''),
+            'date_to'   => (string) ($request->get_param('date_to') ?? ''),
+        ]);
 
         return new \WP_REST_Response($result, 200);
     }
