@@ -1,5 +1,5 @@
 /**
- * Roster Activity tab styles — AORM-4.16 / AORM-4.17 / AORM-4.19.
+ * Roster Activity tab styles — AORM-4.16 / AORM-4.17 / AORM-4.19 / AORM-4.20.
  *
  * Scoped to .aorm-activity and .aorm-activity-table to avoid leaking
  * into other WP admin list tables.
@@ -193,4 +193,38 @@
 .aorm-activity-detail__no-context {
 	color: #757575;
 	font-style: italic;
+}
+
+/* ── Pagination bar (AORM-4.20) ───────────────────────────────────────── */
+
+.aorm-activity__pagination {
+	margin-top: 8px;
+}
+
+.aorm-activity__pagination .tablenav-pages {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.aorm-activity__pagination .displaying-num {
+	color: #646970;
+	font-size: 13px;
+}
+
+.aorm-activity__per-page {
+	font-size: 13px;
+}
+
+.aorm-activity__pagination .pagination-links {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.aorm-activity__pagination .paging-input {
+	margin: 0 4px;
+	font-size: 13px;
+	white-space: nowrap;
 }
