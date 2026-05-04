@@ -92,3 +92,20 @@
 	display: flex;
 	gap: 8px;
 }
+
+/* -----------------------------------------------------------------------
+   Individual add form — validation errors — AORM-5.2
+   ----------------------------------------------------------------------- */
+
+.aorm-individual-form__field--error .components-text-control__input,
+.aorm-individual-form__field--error .components-textarea-control__input {
+	border-color: #cc1818;
+	box-shadow: 0 0 0 1px #cc1818;
+}
+
+.aorm-individual-form__error {
+	display: block;
+	color: #cc1818;
+	font-size: 12px;
+	margin-top: 4px;
+}
