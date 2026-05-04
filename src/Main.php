@@ -57,6 +57,7 @@ final class Main
     public function registerRestRoutes(): void
     {
         (new Rest\RosterController())->register_routes();
+        (new Rest\IndividualController())->register_routes();
         (new Rest\UploadController())->register_routes();
         (new Rest\StagedRecordController())->register_routes();
         (new Rest\SyncController())->register_routes();
