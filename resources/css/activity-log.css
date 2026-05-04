@@ -1,5 +1,5 @@
 /**
- * Roster Activity tab styles — AORM-4.16 / AORM-4.17.
+ * Roster Activity tab styles — AORM-4.16 / AORM-4.17 / AORM-4.19.
  *
  * Scoped to .aorm-activity and .aorm-activity-table to avoid leaking
  * into other WP admin list tables.
@@ -9,6 +9,55 @@
 
 .aorm-activity {
 	margin-top: 16px;
+}
+
+/* ── Filter bar (AORM-4.19) ───────────────────────────────────────────── */
+
+.aorm-activity-filters {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 12px 16px;
+	margin-bottom: 16px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 3px;
+}
+
+.aorm-activity-filters__fields {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px 20px;
+	align-items: flex-end;
+}
+
+.aorm-activity-filters__field {
+	flex: 1 1 160px;
+	min-width: 140px;
+}
+
+/* Date inputs — match @wordpress/components TextControl look */
+
+.aorm-activity-filters__label {
+	display: block;
+	margin-bottom: 4px;
+	font-size: 11px;
+	font-weight: 500;
+	text-transform: uppercase;
+	color: #1e1e1e;
+}
+
+.aorm-activity-filters__date-input {
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* Actions row */
+
+.aorm-activity-filters__actions {
+	display: flex;
+	gap: 8px;
+	align-items: center;
 }
 
 /* ── Date/Time column ─────────────────────────────────────────────────── */
@@ -78,7 +127,8 @@
 }
 
 .aorm-activity-table__toggle {
-	padding: 2px 4px !important;
+	padding: 10px !important;
+	font-size: 15px;
 	min-height: unset !important;
 	line-height: 1 !important;
 }
