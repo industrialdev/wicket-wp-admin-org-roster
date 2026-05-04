@@ -60,3 +60,35 @@
 .aorm-wizard-step__back {
 	margin-bottom: 16px;
 }
+
+/* -----------------------------------------------------------------------
+   Individual add form — AORM-5.1
+   ----------------------------------------------------------------------- */
+
+.aorm-individual-form__heading {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.aorm-individual-form__description {
+	color: #646970;
+	margin-bottom: 24px;
+}
+
+.aorm-individual-form__fields {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 480px;
+	margin-bottom: 24px;
+}
+
+.aorm-individual-form__field {
+	margin-bottom: 0;
+}
+
+.aorm-individual-form__actions {
+	display: flex;
+	gap: 8px;
+}
