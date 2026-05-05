@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\ValidationService;
 
 /**
  * Individual add endpoint.
@@ -12,8 +13,9 @@ use WicketAORM\Database\StagedRecordsTable;
  * Routes registered under the wicket-aorm/v1 namespace:
  *   POST /rosters/{org_uuid}/{membership_uuid}/individual — add a single person (AORM-5)
  *
- * The handler gate-checks for an active staged-records session first (AORM-5.3).
- * Subsequent subtasks add validation (AORM-5.4) and DB insertion (AORM-5.5).
+ * The handler gate-checks for an active staged-records session first (AORM-5.3),
+ * then validates the submitted fields against the shared roster row rules (AORM-5.4).
+ * Record insertion is added in AORM-5.5.
  */
 class IndividualController extends RestController
 {
@@ -24,6 +26,7 @@ class IndividualController extends RestController
 
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
+        private readonly ?ValidationService $validationService = null,
     ) {
     }
 
@@ -88,12 +91,10 @@ class IndividualController extends RestController
     /**
      * Handle POST /rosters/{org_uuid}/{membership_uuid}/individual.
      *
-     * Gate-checks for an active staged-records session (AORM-5.3).  If one
-     * already exists for this org + membership, the request is rejected with
-     * 409 Conflict so the admin resolves the pending session first.
-     *
-     * Validation (AORM-5.4) and record insertion (AORM-5.5) are added in
-     * subsequent subtasks.
+     * Processing order:
+     *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
+     *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
+     *   3. TODO AORM-5.5: create session + insert staged record.
      *
      * @param \WP_REST_Request $request
      */
@@ -102,6 +103,7 @@ class IndividualController extends RestController
         $orgUuid        = (string) $request->get_param('org_uuid');
         $membershipUuid = (string) $request->get_param('membership_uuid');
 
+        // AORM-5.3: reject when an active upload session already exists.
         $table = $this->stagedRecordsTable ?? new StagedRecordsTable();
 
         if ($table->hasActiveSession($orgUuid, $membershipUuid)) {
@@ -114,7 +116,20 @@ class IndividualController extends RestController
             );
         }
 
-        // TODO AORM-5.4: run field validation (required fields, email format, phone format).
+        // AORM-5.4: validate fields using the same rules applied to CSV rows.
+        $validator = $this->validationService ?? new ValidationService();
+
+        $errors = $validator->validateRow([
+            'first_name'   => (string) ($request->get_param('first_name') ?? ''),
+            'last_name'    => (string) ($request->get_param('last_name') ?? ''),
+            'email'        => (string) ($request->get_param('email') ?? ''),
+            'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+        ]);
+
+        if (! empty($errors)) {
+            return new \WP_REST_Response(['errors' => $errors], 422);
+        }
+
         // TODO AORM-5.5: create session + insert staged record.
 
         return new \WP_REST_Response(['accepted' => true], 200);
