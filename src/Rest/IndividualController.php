@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\ValidationService;
 
 /**
@@ -16,7 +17,10 @@ use WicketAORM\Services\ValidationService;
  * Processing order enforced by add_individual():
  *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
  *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
- *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5) — 200 with session_id + record_id.
+ *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5).
+ *   4. Run synchronous MDP matching for the single row (AORM-5.6) — updates the staged record
+ *      with match_count, matched_persons, match_details, record_status, and category.
+ *      Returns 200 with session_id, record_id, and match_category.
  */
 class IndividualController extends RestController
 {
@@ -28,6 +32,7 @@ class IndividualController extends RestController
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?ValidationService $validationService = null,
+        private readonly ?MatchingService $matchingService = null,
     ) {
     }
 
@@ -95,7 +100,9 @@ class IndividualController extends RestController
      * Processing order:
      *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
      *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
-     *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5) — 200 with session_id + record_id.
+     *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5).
+     *   4. Run synchronous MDP matching for the single row (AORM-5.6) — update staged record
+     *      with match results; return 200 with session_id, record_id, and match_category.
      *
      * @param \WP_REST_Request $request
      */
@@ -160,10 +167,35 @@ class IndividualController extends RestController
             'updated_at'        => $now,
         ]);
 
+        // AORM-5.6: run synchronous MDP matching for the single inserted record.
+        $matcher    = $this->matchingService ?? new MatchingService();
+        $matchResult = $matcher->matchRow(
+            [
+                'first_name'   => (string) ($request->get_param('first_name') ?? ''),
+                'last_name'    => (string) ($request->get_param('last_name') ?? ''),
+                'email'        => (string) ($request->get_param('email') ?? ''),
+                'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+                'title'        => (string) ($request->get_param('title') ?? ''),
+            ],
+            $orgUuid,
+            $membershipUuid,
+        );
+
+        // Persist match results back to the staged record.
+        $table->updateRecord($recordId, [
+            'match_count'     => $matchResult['match_count'],
+            'matched_persons' => $matchResult['matched_persons'],
+            'match_details'   => $matchResult['match_details'],
+            'record_status'   => $matchResult['record_status'],
+            'category'        => $matchResult['category'],
+            'updated_at'      => $matchResult['updated_at'],
+        ]);
+
         return new \WP_REST_Response(
             [
-                'session_id' => $sessionId,
-                'record_id'  => $recordId,
+                'session_id'     => $sessionId,
+                'record_id'      => $recordId,
+                'match_category' => $matchResult['category'],
             ],
             200,
         );

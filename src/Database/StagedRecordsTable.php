@@ -57,6 +57,25 @@ class StagedRecordsTable
     }
 
     /**
+     * Update an existing row in wp_wicket_aorm_staged_records.
+     *
+     * Used by IndividualController (AORM-5.6) to persist MDP match results
+     * back onto the staged record after synchronous matching has completed.
+     * The `$data` array keys must correspond to actual column names.
+     *
+     * @param int                  $recordId The auto-increment ID of the row to update.
+     * @param array<string, mixed> $data     Column → value map for the UPDATE.
+     */
+    public function updateRecord(int $recordId, array $data): void
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $wpdb->update($table, $data, ['id' => $recordId]);
+    }
+
+    /**
      * Insert a new row into wp_wicket_aorm_staged_records.
      *
      * Accepts a pre-built data array whose keys match the table columns.

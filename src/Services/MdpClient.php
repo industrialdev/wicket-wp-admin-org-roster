@@ -555,6 +555,174 @@ class MdpClient
     }
 
     /**
+     * Search MDP for people by exact primary email address.
+     *
+     * Uses the `people` endpoint with a Ransack `primary_email_address_eq` filter.
+     * Returns a normalised list of candidate records suitable for MatchingService
+     * scoring. Returns an empty array when `wicket_api_client()` is unavailable,
+     * no results are found, or the request throws.
+     *
+     * @param string $email The email address to match.
+     *
+     * @return list<array{
+     *   uuid:        string,
+     *   name:        string,
+     *   email:       string,
+     *   given_name:  string,
+     *   family_name: string,
+     * }>
+     */
+    public function searchPersonsByEmail(string $email): array
+    {
+        if ($email === '') {
+            return [];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return [];
+        }
+
+        $query = http_build_query([
+            'filter' => ['emails_address_eq' => $email, 'emails_primary_eq' => true],
+            'page'   => ['size' => 10],
+        ]);
+
+        try {
+            $response = $client->get('people?' . $query);
+
+            return $this->normalizePeopleSearchResults($response);
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Search MDP for people by exact first name and last name.
+     *
+     * Uses Ransack `given_name_eq` + `family_name_eq` filters on the `people`
+     * endpoint. Returns a normalised list of candidate records. Returns an
+     * empty array when `wicket_api_client()` is unavailable, no results are
+     * found, or the request throws.
+     *
+     * @param string $firstName Given name to match.
+     * @param string $lastName  Family name to match.
+     *
+     * @return list<array{
+     *   uuid:        string,
+     *   name:        string,
+     *   email:       string,
+     *   given_name:  string,
+     *   family_name: string,
+     * }>
+     */
+    public function searchPersonsByName(string $firstName, string $lastName): array
+    {
+        if ($firstName === '' || $lastName === '') {
+            return [];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return [];
+        }
+
+        $query = http_build_query([
+            'filter' => [
+                'given_name_eq'  => $firstName,
+                'family_name_eq' => $lastName,
+            ],
+            'page' => ['size' => 10],
+        ]);
+
+        try {
+            $response = $client->get('people?' . $query);
+
+            return $this->normalizePeopleSearchResults($response);
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Check whether a person is currently a member of a given org roster.
+     *
+     * Queries `organization_memberships/{membership_uuid}/person_memberships`
+     * filtered by `person_uuid_eq`. Returns true when at least one row exists,
+     * false otherwise (including on API error or unavailable client).
+     *
+     * @param string $personUuid     Person UUID to look up.
+     * @param string $membershipUuid Org-membership UUID to scope the search.
+     */
+    public function isPersonOnRoster(string $personUuid, string $membershipUuid): bool
+    {
+        if ($personUuid === '' || $membershipUuid === '') {
+            return false;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return false;
+        }
+
+        $query    = http_build_query(['filter' => ['person_uuid_eq' => $personUuid]]);
+        $endpoint = 'organization_memberships/' . $membershipUuid . '/person_memberships?' . $query;
+
+        try {
+            $response = $client->get($endpoint);
+
+            return is_array($response) && ! empty($response['data']);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Normalize a JSON:API `people` list response into a flat candidate array
+     * suitable for MatchingService scoring.
+     *
+     * @param mixed $response Raw API response.
+     *
+     * @return list<array{
+     *   uuid:        string,
+     *   name:        string,
+     *   email:       string,
+     *   given_name:  string,
+     *   family_name: string,
+     * }>
+     */
+    private function normalizePeopleSearchResults(mixed $response): array
+    {
+        if (! is_array($response) || empty($response['data'])) {
+            return [];
+        }
+
+        $results = [];
+
+        foreach ($response['data'] as $item) {
+            $uuid  = (string) ($item['id'] ?? '');
+            $attrs = $item['attributes'] ?? [];
+
+            if ($uuid === '') {
+                continue;
+            }
+
+            $results[] = [
+                'uuid'        => $uuid,
+                'name'        => (string) ($attrs['full_name'] ?? ''),
+                'email'       => (string) ($attrs['primary_email_address'] ?? ''),
+                'given_name'  => (string) ($attrs['given_name'] ?? ''),
+                'family_name' => (string) ($attrs['family_name'] ?? ''),
+            ];
+        }
+
+        return $results;
+    }
+
+    /**
      * Read the configured security role slugs from plugin settings.
      *
      * Admins configure these in the AORM Settings page under
