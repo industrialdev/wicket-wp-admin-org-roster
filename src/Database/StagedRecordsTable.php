@@ -55,4 +55,29 @@ class StagedRecordsTable
 
         return (int) $wpdb->get_var($sql) > 0;
     }
+
+    /**
+     * Insert a new row into wp_wicket_aorm_staged_records.
+     *
+     * Accepts a pre-built data array whose keys match the table columns.
+     * The caller is responsible for providing all NOT NULL columns that do
+     * not have database-level defaults.
+     *
+     * Returns the auto-incremented ID of the newly inserted row so the
+     * REST handler can include it in the response as `record_id`.  Returns 0
+     * if the insert fails (mirrors $wpdb->insert_id behaviour on failure).
+     *
+     * @param array<string, mixed> $data  Column → value map for the INSERT.
+     * @return int  The new row's auto-increment ID; 0 on failure.
+     */
+    public function insertRecord(array $data): int
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $wpdb->insert($table, $data);
+
+        return (int) $wpdb->insert_id;
+    }
 }

@@ -13,9 +13,10 @@ use WicketAORM\Services\ValidationService;
  * Routes registered under the wicket-aorm/v1 namespace:
  *   POST /rosters/{org_uuid}/{membership_uuid}/individual — add a single person (AORM-5)
  *
- * The handler gate-checks for an active staged-records session first (AORM-5.3),
- * then validates the submitted fields against the shared roster row rules (AORM-5.4).
- * Record insertion is added in AORM-5.5.
+ * Processing order enforced by add_individual():
+ *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
+ *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
+ *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5) — 200 with session_id + record_id.
  */
 class IndividualController extends RestController
 {
@@ -94,7 +95,7 @@ class IndividualController extends RestController
      * Processing order:
      *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
      *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
-     *   3. TODO AORM-5.5: create session + insert staged record.
+     *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5) — 200 with session_id + record_id.
      *
      * @param \WP_REST_Request $request
      */
@@ -130,8 +131,41 @@ class IndividualController extends RestController
             return new \WP_REST_Response(['errors' => $errors], 422);
         }
 
-        // TODO AORM-5.5: create session + insert staged record.
+        // AORM-5.5: create a new upload session and insert the staged record.
+        $sessionId = wp_generate_uuid4();
+        $now       = current_time('mysql');
+        $userId    = get_current_user_id();
 
-        return new \WP_REST_Response(['accepted' => true], 200);
+        $rawData = json_encode([
+            'first_name'   => (string) ($request->get_param('first_name') ?? ''),
+            'last_name'    => (string) ($request->get_param('last_name') ?? ''),
+            'email'        => (string) ($request->get_param('email') ?? ''),
+            'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+            'title'        => (string) ($request->get_param('title') ?? ''),
+        ]);
+
+        $recordId = $table->insertRecord([
+            'upload_session_id' => $sessionId,
+            'action_type'       => 'add',
+            'org_uuid'          => $orgUuid,
+            'membership_uuid'   => $membershipUuid,
+            'raw_data'          => $rawData,
+            'validation_status' => 'valid',
+            'category'          => 'ready_to_sync',
+            'record_status'     => 'new_record',
+            'match_count'       => 0,
+            'sync_status'       => 'pending',
+            'uploaded_by'       => $userId,
+            'created_at'        => $now,
+            'updated_at'        => $now,
+        ]);
+
+        return new \WP_REST_Response(
+            [
+                'session_id' => $sessionId,
+                'record_id'  => $recordId,
+            ],
+            200,
+        );
     }
 }
