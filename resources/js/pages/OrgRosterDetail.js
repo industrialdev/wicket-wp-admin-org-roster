@@ -93,10 +93,10 @@ export default function OrgRosterDetail() {
 						name:  'upload',
 						title: __( 'Roster Upload', 'wicket-aorm' ),
 					},
-					{
-						name:  'activity',
-						title: __( 'Roster Activity', 'wicket-aorm' ),
-					},
+					// {
+					// 	name:  'activity',
+					// 	title: __( 'Roster Activity', 'wicket-aorm' ),
+					// },
 				] }
 			>
 				{ ( tab ) => (
