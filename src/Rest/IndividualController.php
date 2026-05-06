@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace WicketAORM\Rest;
 
-use WicketAORM\Database\RosterMetaTable;
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\ValidationService;
 
@@ -19,7 +19,8 @@ use WicketAORM\Services\ValidationService;
  *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
  *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
  *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5).
- *   4. Set roster_status = 'in_progress' on wp_wicket_aorm_roster_meta (AORM-5.9).
+ *   4. Log the individual add to wp_wicket_aorm_logs and update wp_wicket_aorm_roster_meta
+ *      (roster_status = 'in_progress', last_updated_at, last_updated_by) via ActivityLogger (AORM-5.10).
  *   5. Run synchronous MDP matching for the single row (AORM-5.6) — updates the staged record
  *      with match_count, matched_persons, match_details, record_status, and category.
  *      Returns 200 with session_id, record_id, and match_category.
@@ -35,7 +36,7 @@ class IndividualController extends RestController
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?ValidationService $validationService = null,
         private readonly ?MatchingService $matchingService = null,
-        private readonly ?RosterMetaTable $rosterMetaTable = null,
+        private readonly ?ActivityLogger $activityLogger = null,
     ) {
     }
 
@@ -104,7 +105,7 @@ class IndividualController extends RestController
      *   1. Gate-check for an active staged-records session (AORM-5.3) — 409 if found.
      *   2. Validate submitted fields against the shared roster row rules (AORM-5.4) — 422 if invalid.
      *   3. Generate a new upload session UUID, insert the staged record (AORM-5.5).
-     *   4. Set roster_status = 'in_progress' on wp_wicket_aorm_roster_meta (AORM-5.9).
+     *   4. Log the add to wp_wicket_aorm_logs and update wp_wicket_aorm_roster_meta (AORM-5.10).
      *   5. Run synchronous MDP matching for the single row (AORM-5.6) — update staged record
      *      with match results; return 200 with session_id, record_id, and match_category.
      *
@@ -171,10 +172,26 @@ class IndividualController extends RestController
             'updated_at'        => $now,
         ]);
 
-        // AORM-5.9: mark the roster as in_progress so the list view reflects the pending work.
-        $actor    = $this->resolveActorName($userId);
-        $metaTable = $this->rosterMetaTable ?? new RosterMetaTable();
-        $metaTable->upsertRosterStatus($orgUuid, $membershipUuid, 'in_progress', $actor, $now);
+        // AORM-5.10: log the individual add and keep wp_wicket_aorm_roster_meta current.
+        // ActivityLogger writes one row to wp_wicket_aorm_logs and then issues an
+        // INSERT … ON DUPLICATE KEY UPDATE on wp_wicket_aorm_roster_meta so both
+        // the audit trail and the list-view status are updated in a single call.
+        $logger    = $this->activityLogger ?? new ActivityLogger();
+        $firstName = (string) ($request->get_param('first_name') ?? '');
+        $lastName  = (string) ($request->get_param('last_name') ?? '');
+        $email     = (string) ($request->get_param('email') ?? '');
+
+        $logger->logRosterAction(
+            $orgUuid,
+            $membershipUuid,
+            'individual_added',
+            sprintf('Individual member added: %s %s <%s>.', $firstName, $lastName, $email),
+            [
+                'record_id'  => $recordId,
+                'session_id' => $sessionId,
+            ],
+            'in_progress',
+        );
 
         // AORM-5.6: run synchronous MDP matching for the single inserted record.
         $matcher    = $this->matchingService ?? new MatchingService();
@@ -208,31 +225,5 @@ class IndividualController extends RestController
             ],
             200,
         );
-    }
-
-    /**
-     * Resolve a display name for the acting WordPress user.
-     *
-     * Matches the convention used by ActivityLogger so roster_meta rows written
-     * by IndividualController are consistent with those written during bulk
-     * assignment operations.
-     *
-     * Preference order: user_email → "user:{id}" → "system".
-     *
-     * @param int $userId WordPress user ID (0 means unauthenticated).
-     */
-    private function resolveActorName(int $userId): string
-    {
-        if ($userId <= 0) {
-            return 'system';
-        }
-
-        $user = get_userdata($userId);
-
-        if ($user !== false && ! empty($user->user_email)) {
-            return (string) $user->user_email;
-        }
-
-        return "user:{$userId}";
     }
 }
