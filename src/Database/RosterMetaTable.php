@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace WicketAORM\Database;
 
 /**
- * Read operations for the wp_wicket_aorm_roster_meta table.
+ * Read/write operations for the wp_wicket_aorm_roster_meta table.
  *
  * Provides a single indexed lookup per row so the org roster list view can
  * enrich MDP data with locally-stored roster state without scanning
  * staged_records or logs for each row.
  *
+ * Also exposes upsertRosterStatus() so any workflow that changes the roster's
+ * lifecycle state (individual add, bulk upload, sync) can keep the meta row
+ * current in a single round-trip.
+ *
  * @see AORM-3.3
+ * @see AORM-5.9
  */
 class RosterMetaTable
 {
@@ -68,5 +73,51 @@ class RosterMetaTable
         }
 
         return $indexed;
+    }
+
+    /**
+     * Create or update the roster meta row for a given org + membership.
+     *
+     * Issues an INSERT … ON DUPLICATE KEY UPDATE so callers do not need to
+     * check whether a row already exists.  The unique key on `membership_uuid`
+     * guarantees at most one meta row per roster.
+     *
+     * Called by IndividualController (AORM-5.9) immediately after a staged
+     * record is inserted so the roster list view reflects the new status
+     * without waiting for a separate logging call.
+     *
+     * @param string $orgUuid        Organisation UUID.
+     * @param string $membershipUuid Membership UUID (natural key for the table).
+     * @param string $status         ENUM value to write to roster_status
+     *                               ('idle', 'in_progress', 'syncing', 'has_failures', 'synced').
+     * @param string $actor          Display name of the acting user (email, "user:{id}", or "system").
+     * @param string $timestamp      MySQL DATETIME string for last_updated_at.
+     */
+    public function upsertRosterStatus(
+        string $orgUuid,
+        string $membershipUuid,
+        string $status,
+        string $actor,
+        string $timestamp,
+    ): void {
+        $table = $this->wpdb->prefix . 'wicket_aorm_roster_meta';
+
+        $this->wpdb->query(
+            $this->wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "INSERT INTO {$table}
+                   (org_uuid, membership_uuid, roster_status, last_updated_at, last_updated_by)
+                 VALUES (%s, %s, %s, %s, %s)
+                 ON DUPLICATE KEY UPDATE
+                   roster_status   = VALUES(roster_status),
+                   last_updated_at = VALUES(last_updated_at),
+                   last_updated_by = VALUES(last_updated_by)",
+                $orgUuid,
+                $membershipUuid,
+                $status,
+                $timestamp,
+                $actor,
+            ),
+        );
     }
 }
