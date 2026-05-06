@@ -1,5 +1,5 @@
 /**
- * Individual add form — AORM-5.1 / AORM-5.2 / AORM-5.7.
+ * Individual add form — AORM-5.1 / AORM-5.2 / AORM-5.7 / AORM-5.8.
  *
  * Renders a form for adding a single member to the roster. The form collects
  * five fields — first_name, last_name, and email are required; mobile_phone
@@ -13,6 +13,9 @@
  * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
  * session_id via startNewSession(), stores match_category via setMatchCategory(),
  * and surfaces server-side 409 / 422 errors back to the form inline.
+ *
+ * On success (AORM-5.8), navigates to the validation-review step via goToStep()
+ * so the admin can see the newly added record and its match category.
  *
  * @param {{
  *   goToStep:          (step: string) => void,
@@ -181,6 +184,12 @@ export default function IndividualAddForm( {
 
 			if ( typeof setMatchCategory === 'function' ) {
 				setMatchCategory( response.match_category );
+			}
+
+			// AORM-5.8: Navigate to the validation-review step so the admin can
+			// see the newly added record and its match category.
+			if ( typeof goToStep === 'function' ) {
+				goToStep( 'validation-review' );
 			}
 		} catch ( err ) {
 			// 422 — server-side field validation errors: merge into inline errors.
