@@ -1,5 +1,5 @@
 /**
- * Individual add form — AORM-5.1 / AORM-5.2.
+ * Individual add form — AORM-5.1 / AORM-5.2 / AORM-5.7.
  *
  * Renders a form for adding a single member to the roster. The form collects
  * five fields — first_name, last_name, and email are required; mobile_phone
@@ -10,28 +10,24 @@
  *   - email must match EMAIL_REGEX.
  *   - mobile_phone, when provided, must match PHONE_REGEX.
  *
- * Only calls `onSubmit( fields )` when all validation passes, so downstream
- * REST submission steps (AORM-5.3 – 5.10) can be wired in without changes.
+ * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
+ * session_id via startNewSession(), stores match_category via setMatchCategory(),
+ * and surfaces server-side 409 / 422 errors back to the form inline.
  *
  * @param {{
- *   goToStep:         (step: string) => void,
- *   resetWizard:      () => void,
- *   orgUuid:          string,
- *   membershipUuid:   string,
- *   startNewSession:  (id: string) => void,
- *   onSubmit:         (fields: {
- *     first_name:    string,
- *     last_name:     string,
- *     email:         string,
- *     mobile_phone:  string,
- *     title:         string,
- *   }) => void,
+ *   goToStep:          (step: string) => void,
+ *   resetWizard:       () => void,
+ *   orgUuid:           string,
+ *   membershipUuid:    string,
+ *   startNewSession:   (id: string) => void,
+ *   setMatchCategory:  (category: string) => void,
  * }} props
  */
 
 import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, TextControl } from '@wordpress/components';
+import { Button, Notice, Spinner, TextControl } from '@wordpress/components';
+import { apiFetch } from '../../utils/apiFetch';
 import '../../../css/roster-upload.css';
 
 // ---------------------------------------------------------------------------
@@ -121,10 +117,15 @@ const EMPTY_FIELDS = {
 
 export default function IndividualAddForm( {
 	goToStep,
-	onSubmit,
+	orgUuid,
+	membershipUuid,
+	startNewSession,
+	setMatchCategory,
 } ) {
-	const [ fields, setFields ] = useState( { ...EMPTY_FIELDS } );
-	const [ errors, setErrors ] = useState( {} );
+	const [ fields, setFields ]       = useState( { ...EMPTY_FIELDS } );
+	const [ errors, setErrors ]       = useState( {} );
+	const [ isSubmitting, setIsSubmitting ] = useState( false );
+	const [ serverError, setServerError ]   = useState( null );
 
 	/**
 	 * Update a single field by name and clear any existing error for it.
@@ -147,10 +148,14 @@ export default function IndividualAddForm( {
 	}
 
 	/**
-	 * Validate then forward field values to the parent via onSubmit.
-	 * Sets inline errors and aborts if validation fails.
+	 * Run client-side validation, then POST to the individual endpoint (AORM-5.7).
+	 *
+	 * On success  — stores the session ID and match_category in shared wizard state.
+	 * On 422      — merges server-returned field errors into inline error state.
+	 * On 409      — shows a session-conflict notice above the form.
+	 * On any other error — shows a generic error notice above the form.
 	 */
-	function handleSubmit() {
+	async function handleSubmit() {
 		const validationErrors = validateFields( fields );
 
 		if ( Object.keys( validationErrors ).length > 0 ) {
@@ -160,9 +165,41 @@ export default function IndividualAddForm( {
 		}
 
 		setErrors( {} );
+		setServerError( null );
+		setIsSubmitting( true );
 
-		if ( typeof onSubmit === 'function' ) {
-			onSubmit( { ...fields } );
+		try {
+			const response = await apiFetch( {
+				path:   `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/individual`,
+				method: 'POST',
+				data:   fields,
+			} );
+
+			if ( typeof startNewSession === 'function' ) {
+				startNewSession( response.session_id );
+			}
+
+			if ( typeof setMatchCategory === 'function' ) {
+				setMatchCategory( response.match_category );
+			}
+		} catch ( err ) {
+			// 422 — server-side field validation errors: merge into inline errors.
+			if ( err?.data?.status === 422 && err?.data?.errors ) {
+				setErrors( err.data.errors );
+			} else if ( err?.data?.status === 409 ) {
+				// 409 — an active session already exists for this roster.
+				setServerError(
+					err?.message
+						?? __( 'An active upload session already exists for this roster. Please resolve it before adding individual records.', 'wicket-aorm' )
+				);
+			} else {
+				// Unexpected error.
+				setServerError(
+					err?.message ?? __( 'An unexpected error occurred. Please try again.', 'wicket-aorm' )
+				);
+			}
+		} finally {
+			setIsSubmitting( false );
 		}
 	}
 
@@ -194,6 +231,7 @@ export default function IndividualAddForm( {
 				<Button
 					variant="tertiary"
 					onClick={ handleBack }
+					disabled={ isSubmitting }
 				>
 					{ __( '← Back', 'wicket-aorm' ) }
 				</Button>
@@ -211,6 +249,18 @@ export default function IndividualAddForm( {
 				) }
 			</p>
 
+			{ /* ── Server error notice ── */ }
+			{ serverError && (
+				<Notice
+					status="error"
+					isDismissible={ true }
+					onRemove={ () => setServerError( null ) }
+					className="aorm-individual-form__server-error"
+				>
+					{ serverError }
+				</Notice>
+			) }
+
 			{ /* ── Fields ── */ }
 			<div className="aorm-individual-form__fields">
 
@@ -221,6 +271,7 @@ export default function IndividualAddForm( {
 					value={ fields.first_name }
 					onChange={ ( value ) => handleChange( 'first_name', value ) }
 					autoComplete="given-name"
+					disabled={ isSubmitting }
 					aria-describedby={ errors.first_name ? 'aorm-error-first_name' : undefined }
 					help={
 						errors.first_name
@@ -236,6 +287,7 @@ export default function IndividualAddForm( {
 					value={ fields.last_name }
 					onChange={ ( value ) => handleChange( 'last_name', value ) }
 					autoComplete="family-name"
+					disabled={ isSubmitting }
 					aria-describedby={ errors.last_name ? 'aorm-error-last_name' : undefined }
 					help={
 						errors.last_name
@@ -252,6 +304,7 @@ export default function IndividualAddForm( {
 					value={ fields.email }
 					onChange={ ( value ) => handleChange( 'email', value ) }
 					autoComplete="email"
+					disabled={ isSubmitting }
 					aria-describedby={ errors.email ? 'aorm-error-email' : undefined }
 					help={
 						errors.email
@@ -267,6 +320,7 @@ export default function IndividualAddForm( {
 					value={ fields.mobile_phone }
 					onChange={ ( value ) => handleChange( 'mobile_phone', value ) }
 					autoComplete="tel"
+					disabled={ isSubmitting }
 					aria-describedby={ errors.mobile_phone ? 'aorm-error-mobile_phone' : undefined }
 					help={
 						errors.mobile_phone
@@ -280,6 +334,7 @@ export default function IndividualAddForm( {
 					label={ __( 'Title', 'wicket-aorm' ) }
 					value={ fields.title }
 					onChange={ ( value ) => handleChange( 'title', value ) }
+					disabled={ isSubmitting }
 				/>
 
 			</div>
@@ -289,8 +344,16 @@ export default function IndividualAddForm( {
 				<Button
 					variant="primary"
 					onClick={ handleSubmit }
+					disabled={ isSubmitting }
+					aria-disabled={ isSubmitting }
 				>
-					{ __( 'Add Member', 'wicket-aorm' ) }
+					{ isSubmitting
+						? <>
+							<Spinner />
+							{ __( 'Adding…', 'wicket-aorm' ) }
+						</>
+						: __( 'Add Member', 'wicket-aorm' )
+					}
 				</Button>
 			</div>
 

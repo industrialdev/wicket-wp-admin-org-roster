@@ -1,5 +1,5 @@
 /**
- * Roster Upload tab wizard — AORM-4.14.
+ * Roster Upload tab wizard — AORM-4.14 / AORM-5.7.
  *
  * Orchestrates the multi-step bulk upload + individual add flows.
  * State lives here; each step is a self-contained component that
@@ -68,6 +68,15 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 	 */
 	const [ uploadAction, setUploadAction ] = useState( 'add' );
 
+	/**
+	 * Match category returned by the individual add endpoint (AORM-5.7).
+	 * One of 'ready_to_sync' | 'probable_match' | 'possible_match' | null.
+	 * Set after a successful individual add; consumed by validation-review.
+	 *
+	 * @type {[string|null, Function]}
+	 */
+	const [ matchCategory, setMatchCategory ] = useState( null );
+
 	/** Navigate to any named step. */
 	const goToStep = useCallback( ( nextStep ) => {
 		setStep( nextStep );
@@ -83,6 +92,7 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 		setStep( 'landing' );
 		setSessionId( null );
 		setUploadAction( 'add' );
+		setMatchCategory( null );
 	}, [] );
 
 	/** Props forwarded to every step component. */
@@ -91,8 +101,10 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 		membershipUuid,
 		sessionId,
 		uploadAction,
+		matchCategory,
 		goToStep,
 		startNewSession,
+		setMatchCategory,
 		setUploadAction,
 		resetWizard,
 	};
