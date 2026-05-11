@@ -146,7 +146,12 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 ## Dependencies & Integrations
 
 - **wicket-wp-base-plugin**: Provides `wicket_api_client()`, `Wicket()` singleton, and MDP connection config. This plugin requires it to be active.
-- **wicket-lib-org-roster**: Reference for MDP API call patterns (`MemberService`, `OrganizationService`, `ConnectionService`, bulk upload flow). Use similar patterns in `MdpClient` and `SyncService`.
+- **wicket-lib-org-roster**: Direct runtime dependency (add to `composer.json`). The following services are consumed directly — do not reimplement this logic:
+  - `OrgManagement\Services\PersonService::createOrGetPerson()` — used in `SyncService` to find or create a person in MDP by email before syncing.
+  - `OrgManagement\Services\ConnectionService::ensurePersonConnection()` — used in `SyncService` to create a person-to-org relationship (AORM-9.6).
+  - `OrgManagement\Services\ConnectionService::endRelationshipToday()` and `endActivePersonOrganizationConnections()` — used in `SyncService` for Replace mode and relationship removal (AORM-9.9, AORM-9.15).
+  - CSV header-matching pattern (`getBulkColumnDefinitions()` + `resolveHeaderIndex()`) from `BulkMemberUploadService` — ported into `FileParserService` for flexible column aliasing (AORM-6.10).
+  - The lib's configuration is injected via the `wicket/acc/orgman/config` WordPress filter (registered in the active child theme). Services that call `OrgManConfig::get()` internally will pick up that config automatically.
 - **MDP API**: All person/org/relationship mutations go through the Wicket API via `wicket_api_client()`.
 
 ## Commit & Pull Request Guidelines
