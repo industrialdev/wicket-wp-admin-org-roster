@@ -1,5 +1,5 @@
 /**
- * CSV file upload step — AORM-6.2 / AORM-6.3.
+ * CSV file upload step — AORM-6.2 / AORM-6.3 / AORM-6.4.
  *
  * Provides two ways to select a CSV file:
  *   1. Drag-and-drop via @wordpress/components DropZone.
@@ -10,8 +10,12 @@
  * The URL is read from window.aormContext.templateDownloadUrl (injected by
  * Assets::buildLocalizationData()).
  *
- * Only .csv files are accepted. Full client-side validation (size, MIME)
- * is added in AORM-6.4. Session existence gate is added in AORM-6.7.
+ * Client-side validation (AORM-6.4):
+ *   - File must have a .csv extension (case-insensitive). MIME type is not
+ *     checked here because browsers report CSV MIME inconsistently.
+ *   - File must be ≤ MAX_FILE_SIZE bytes (1 MB).
+ *
+ * Session existence gate is added in AORM-6.7.
  * Actual upload + parse is wired in AORM-6.5 / AORM-6.10.
  *
  * On success: navigates to the action-select step (AORM-6.11).
@@ -32,18 +36,62 @@ import { Button, DropZone, FormFileUpload } from '@wordpress/components';
 const ACCEPTED_EXTENSION = '.csv';
 
 /**
+ * Maximum allowed file size in bytes (1 MB).
+ * Exported so tests and other modules can reference the same threshold.
+ *
+ * @type {number}
+ */
+export const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1 048 576 bytes
+
+/**
  * Returns true when the given File has a .csv extension (case-insensitive).
  *
- * MIME type is intentionally not checked here — browsers and operating
- * systems report CSV files inconsistently (text/csv, text/plain,
+ * MIME type is intentionally not checked — browsers and operating systems
+ * report CSV MIME types inconsistently (text/csv, text/plain,
  * application/vnd.ms-excel, or an empty string). Extension matching is
- * the most reliable client-side gate; AORM-6.4 adds a richer check.
+ * the most reliable client-side gate.
  *
  * @param {File} file
  * @returns {boolean}
  */
-function isCsvFile( file ) {
+export function isCsvFile( file ) {
 	return file.name.toLowerCase().endsWith( '.csv' );
+}
+
+/**
+ * Returns true when the given File's size is within the allowed limit.
+ *
+ * @param {File} file
+ * @returns {boolean}
+ */
+export function isFileSizeValid( file ) {
+	return file.size <= MAX_FILE_SIZE;
+}
+
+/**
+ * Validates a File for upload eligibility (AORM-6.4).
+ * Checks file type first, then file size.
+ *
+ * @param {File} file
+ * @returns {string} Non-empty error message when the file is invalid; empty
+ *   string when the file passes all checks.
+ */
+function validateFile( file ) {
+	if ( ! isCsvFile( file ) ) {
+		return sprintf(
+			// translators: %s is the file name.
+			__( '"%s" is not a CSV file. Please select a .csv file.', 'wicket-aorm' ),
+			file.name
+		);
+	}
+	if ( ! isFileSizeValid( file ) ) {
+		return sprintf(
+			// translators: %s is the file name.
+			__( '"%s" exceeds the 1 MB size limit. Please upload a smaller file.', 'wicket-aorm' ),
+			file.name
+		);
+	}
+	return '';
 }
 
 export default function UploadFileStep( {
@@ -74,7 +122,7 @@ export default function UploadFileStep( {
 
 	/**
 	 * Called by DropZone when files are dropped onto the zone.
-	 * Only the first file is used; non-CSV files are rejected with an error.
+	 * Only the first file is used; invalid files are rejected with an error.
 	 *
 	 * @param {File[]} files
 	 */
@@ -83,14 +131,9 @@ export default function UploadFileStep( {
 		if ( ! file ) {
 			return;
 		}
-		if ( ! isCsvFile( file ) ) {
-			setFileError(
-				sprintf(
-					// translators: %s is the dropped file name.
-					__( '"%s" is not a CSV file. Please select a .csv file.', 'wicket-aorm' ),
-					file.name
-				)
-			);
+		const error = validateFile( file );
+		if ( error ) {
+			setFileError( error );
 			return;
 		}
 		acceptFile( file );
@@ -98,6 +141,9 @@ export default function UploadFileStep( {
 
 	/**
 	 * Called by FormFileUpload when the admin picks a file via the OS dialog.
+	 * The <input accept> attribute restricts the picker on most browsers, but
+	 * we validate defensively in case the user bypassed it or the file is too
+	 * large.
 	 *
 	 * @param {React.ChangeEvent<HTMLInputElement>} event
 	 */
@@ -106,16 +152,9 @@ export default function UploadFileStep( {
 		if ( ! file ) {
 			return;
 		}
-		// The <input accept> attribute already restricts the picker on most
-		// browsers, but we validate defensively in case the user bypassed it.
-		if ( ! isCsvFile( file ) ) {
-			setFileError(
-				sprintf(
-					// translators: %s is the file name the user chose.
-					__( '"%s" is not a CSV file. Please select a .csv file.', 'wicket-aorm' ),
-					file.name
-				)
-			);
+		const error = validateFile( file );
+		if ( error ) {
+			setFileError( error );
 			return;
 		}
 		acceptFile( file );
