@@ -6,6 +6,12 @@ namespace WicketAORM\Rest;
 
 /**
  * File upload + parse to staged records endpoint.
+ *
+ * The downloadable CSV template is served as a static file from
+ * assets/roster-template.csv (AORM-6.3) — no endpoint needed.
+ *
+ * Routes:
+ *   POST /wicket-aorm/v1/uploads  — upload + parse CSV (AORM-6.5)
  */
 class UploadController extends RestController
 {
@@ -14,6 +20,6 @@ class UploadController extends RestController
      */
     public function register_routes(): void
     {
-        // TODO: Register POST /upload route.
+        // TODO: Register POST /uploads route (AORM-6.5).
     }
 }

@@ -157,6 +157,32 @@
 	margin: 0 0 16px;
 }
 
+/** Template download link — AORM-6.3 */
+.aorm-upload-file__template-link {
+	margin: 0 0 20px;
+}
+
+.aorm-upload-file__template-anchor {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 0.875em;
+	text-decoration: none;
+	color: #2271b1;
+}
+
+.aorm-upload-file__template-anchor:hover,
+.aorm-upload-file__template-anchor:focus {
+	color: #135e96;
+	text-decoration: underline;
+}
+
+.aorm-upload-file__template-anchor .dashicons {
+	font-size: 16px;
+	width: 16px;
+	height: 16px;
+}
+
 /** Continue button row */
 .aorm-upload-file__actions {
 	margin-top: 8px;

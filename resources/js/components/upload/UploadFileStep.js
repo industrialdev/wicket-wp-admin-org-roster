@@ -1,9 +1,14 @@
 /**
- * CSV file upload step — AORM-6.2.
+ * CSV file upload step — AORM-6.2 / AORM-6.3.
  *
  * Provides two ways to select a CSV file:
  *   1. Drag-and-drop via @wordpress/components DropZone.
  *   2. File picker via @wordpress/components FormFileUpload.
+ *
+ * Also renders a "Download template" link (AORM-6.3) so administrators can
+ * obtain an empty CSV with the correct column headers before uploading.
+ * The URL is read from window.aormContext.templateDownloadUrl (injected by
+ * Assets::buildLocalizationData()).
  *
  * Only .csv files are accepted. Full client-side validation (size, MIME)
  * is added in AORM-6.4. Session existence gate is added in AORM-6.7.
@@ -149,6 +154,23 @@ export default function UploadFileStep( {
 					'wicket-aorm'
 				) }
 			</p>
+
+			{ /* Template download link — AORM-6.3 */ }
+			{ window.aormContext?.templateDownloadUrl && (
+				<p className="aorm-upload-file__template-link">
+					<a
+						href={ window.aormContext.templateDownloadUrl }
+						className="aorm-upload-file__template-anchor"
+						download="roster-template.csv"
+					>
+						<span
+							className="dashicons dashicons-download"
+							aria-hidden="true"
+						/>
+						{ __( 'Download empty CSV template', 'wicket-aorm' ) }
+					</a>
+				</p>
+			) }
 
 			{ /* Drop zone — position:relative required for DropZone overlay */ }
 			<div

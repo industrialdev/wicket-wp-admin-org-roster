@@ -116,6 +116,10 @@ class Assets
 
             // List page URL used by RosterBreadcrumb to render the back-link (AORM-4.4).
             $data['rosterListUrl'] = esc_url(admin_url('admin.php?page=' . MenuPage::MENU_SLUG));
+
+            // CSV template download URL used by UploadFileStep (AORM-6.3).
+            // Served as a static plugin asset — no REST endpoint needed.
+            $data['templateDownloadUrl'] = esc_url(WICKET_AORM_URL . 'assets/roster-template.csv');
         }
 
         return $data;
