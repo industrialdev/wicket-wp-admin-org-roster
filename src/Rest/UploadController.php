@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace WicketAORM\Rest;
 
+use WicketAORM\Database\StagedRecordsTable;
+
 /**
  * File upload + parse to staged records endpoint.
  *
@@ -16,7 +18,7 @@ namespace WicketAORM\Rest;
  * Processing order enforced by upload():
  *   1. Validate file type (CSV) and size (max 1 MB) (AORM-6.6).
  *   2. Check for an active upload session for this membership_uuid (AORM-6.7)
- *      — return error with existing session ID if found.
+ *      — return 409 with {message, session_id} if found.
  *   3. Parse CSV using fgetcsv, validate required column headers exist (AORM-6.10).
  */
 class UploadController extends RestController
@@ -27,6 +29,11 @@ class UploadController extends RestController
      * Mirrors the client-side MAX_FILE_SIZE constant in UploadFileStep.js (AORM-6.4).
      */
     public const MAX_UPLOAD_SIZE = 1 * 1024 * 1024; // 1,048,576 bytes
+
+    public function __construct(
+        private readonly ?StagedRecordsTable $stagedRecordsTable = null,
+    ) {
+    }
 
     /**
      * Register routes for file upload.
@@ -74,7 +81,7 @@ class UploadController extends RestController
      *
      * Processing order:
      *   1. AORM-6.6 — Validate file type (.csv only) and size (max 1 MB).
-     *   2. AORM-6.7 — Active session gate (to be implemented).
+     *   2. AORM-6.7 — Active session gate: 409 with {message, session_id} if active session exists.
      *   3. AORM-6.10 — CSV parsing + column header validation (to be implemented).
      *
      * @param \WP_REST_Request $request
@@ -92,7 +99,21 @@ class UploadController extends RestController
             return $fileValidation;
         }
 
-        // AORM-6.7: active session gate goes here.
+        // AORM-6.7: reject if an active session already exists for this roster.
+        $table         = $this->stagedRecordsTable ?? new StagedRecordsTable();
+        $existingSession = $table->getActiveSessionId($orgUuid, $membershipUuid);
+
+        if ($existingSession !== null) {
+            return new \WP_REST_Response(
+                [
+                    'message'    => 'An active upload session already exists for this roster. '
+                        . 'Please resolve the pending session before uploading a new file.',
+                    'session_id' => $existingSession,
+                ],
+                409,
+            );
+        }
+
         // AORM-6.10: CSV parsing + column header validation goes here.
 
         return new \WP_REST_Response(

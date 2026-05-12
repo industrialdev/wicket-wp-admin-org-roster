@@ -57,6 +57,48 @@ class StagedRecordsTable
     }
 
     /**
+     * Return the upload_session_id of the most-recently-created active session
+     * for the given org + membership combination, or null if no active session
+     * exists.
+     *
+     * "Active" uses the same definition as hasActiveSession(): at least one row
+     * with a sync_status of 'pending' or 'ready_to_sync'.  The method returns
+     * the session UUID so callers can include it in a 409 response body, letting
+     * the client surface a direct link to the in-progress session.
+     *
+     * @param string $orgUuid        The organisation UUID.
+     * @param string $membershipUuid The membership UUID.
+     * @return string|null The upload_session_id UUID, or null if no active session.
+     */
+    public function getActiveSessionId(string $orgUuid, string $membershipUuid): ?string
+    {
+        global $wpdb;
+
+        $table      = $wpdb->prefix . 'wicket_aorm_staged_records';
+        $statusList = implode(
+            ', ',
+            array_map(static fn (string $s): string => "'{$s}'", self::ACTIVE_SYNC_STATUSES),
+        );
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $sql = $wpdb->prepare(
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            "SELECT upload_session_id FROM {$table}
+             WHERE org_uuid = %s
+               AND membership_uuid = %s
+               AND sync_status IN ({$statusList})
+             ORDER BY created_at DESC
+             LIMIT 1",
+            $orgUuid,
+            $membershipUuid,
+        );
+
+        $result = $wpdb->get_var($sql);
+
+        return is_string($result) && $result !== '' ? $result : null;
+    }
+
+    /**
      * Update an existing row in wp_wicket_aorm_staged_records.
      *
      * Used by IndividualController (AORM-5.6) to persist MDP match results
