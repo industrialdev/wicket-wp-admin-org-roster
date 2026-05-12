@@ -62,6 +62,107 @@
 }
 
 /* -----------------------------------------------------------------------
+   Upload file step — AORM-6.2
+   ----------------------------------------------------------------------- */
+
+.aorm-upload-file__heading {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.aorm-upload-file__description {
+	color: #646970;
+	margin-bottom: 24px;
+	max-width: 560px;
+}
+
+/**
+ * Drop zone container.
+ * position:relative is required — DropZone renders its overlay inside the
+ * nearest positioned ancestor.
+ */
+.aorm-upload-file__drop-zone {
+	position: relative;
+	border: 2px dashed #c3c4c7;
+	border-radius: 4px;
+	background: #f6f7f7;
+	min-height: 180px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 32px 24px;
+	margin-bottom: 16px;
+	transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.aorm-upload-file__drop-zone:focus-within {
+	border-color: #2271b1;
+	background: #f0f6fc;
+}
+
+/** Inner content shown when no file is selected. */
+.aorm-upload-file__drop-zone-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+	text-align: center;
+}
+
+.aorm-upload-file__drop-icon {
+	font-size: 40px;
+	width: 40px;
+	height: 40px;
+	color: #646970;
+}
+
+.aorm-upload-file__drop-label {
+	margin: 0;
+	color: #3c434a;
+	font-size: 0.9375em;
+}
+
+.aorm-upload-file__drop-hint {
+	margin: 0;
+	color: #646970;
+	font-size: 0.8125em;
+}
+
+/** Selected file row shown after a file has been chosen. */
+.aorm-upload-file__selected-file {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.aorm-upload-file__file-icon {
+	font-size: 28px;
+	width: 28px;
+	height: 28px;
+	color: #1d7e4e; /* green to match spreadsheet icon convention */
+	flex-shrink: 0;
+}
+
+.aorm-upload-file__file-name {
+	font-weight: 500;
+	word-break: break-all;
+	flex: 1;
+}
+
+/** File type / validation error */
+.aorm-upload-file__error {
+	color: #cc1818;
+	font-size: 0.875em;
+	margin: 0 0 16px;
+}
+
+/** Continue button row */
+.aorm-upload-file__actions {
+	margin-top: 8px;
+}
+
+/* -----------------------------------------------------------------------
    Individual add form — AORM-5.1
    ----------------------------------------------------------------------- */
 
