@@ -21,6 +21,16 @@ class ValidationService
     public const EMAIL_REGEX = '/^[^\s@]+@[^\s@]+\.[^\s@]+$/';
 
     /**
+     * Human-readable validation label for rows that are missing one or more
+     * required fields (first_name, last_name, email_address).
+     *
+     * Stored in the validation_message column of wp_wicket_aorm_staged_records
+     * so the CSV validation review step can surface a consistent label to
+     * administrators.  Used by the bulk CSV upload flow (AORM-6.12).
+     */
+    public const VALIDATION_LABEL_MISSING_REQUIRED = 'Invalid – Missing Required Data';
+
+    /**
      * Phone format regex — matches the client-side PHONE_REGEX constant.
      *
      * Allows an optional leading +, then 7–20 characters consisting of
@@ -79,6 +89,27 @@ class ValidationService
         }
 
         return $errors;
+    }
+
+    /**
+     * Return true when the errors array from validateRow() contains at least
+     * one required-field error (first_name, last_name, or email).
+     *
+     * Used by the bulk CSV upload flow (AORM-6.12) to decide whether a staged
+     * record should be marked with VALIDATION_LABEL_MISSING_REQUIRED.
+     *
+     * @param array<string, string> $errors  Errors returned by validateRow().
+     * @return bool
+     */
+    public function hasMissingRequired(array $errors): bool
+    {
+        foreach (self::REQUIRED_FIELDS as $field) {
+            if (isset($errors[$field])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
