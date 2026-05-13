@@ -59,9 +59,11 @@ class UploadController extends RestController
                             'required'          => true,
                             'sanitize_callback' => 'sanitize_text_field',
                         ],
-                        'file'            => [
-                            'required' => true,
-                        ],
+                        // 'file' is validated in validateFile() via get_file_params().
+                        // WordPress cannot see $_FILES entries when checking 'required'
+                        // args, so we skip the required flag and handle the missing-file
+                        // case ourselves (returns 422 with a message).
+                        'file'            => [],
                     ],
                 ],
             ],
