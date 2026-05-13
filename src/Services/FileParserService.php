@@ -83,4 +83,155 @@ class FileParserService
             'header',
         );
     }
+
+    /**
+     * Column definitions with header aliases for flexible, case-insensitive matching.
+     *
+     * Extends COLUMN_DEFINITIONS with an 'aliases' key per entry. All values in
+     * 'aliases' are matched case-insensitively against actual CSV header cells.
+     * The canonical 'header' value is always included in the aliases list.
+     *
+     * Ported from OrgManagement\Services\BulkMemberUploadService (AORM-6.10).
+     *
+     * @return array<int, array{header: string, field: string, required: bool, aliases: string[]}>
+     */
+    public static function getBulkColumnDefinitions(): array
+    {
+        return [
+            [
+                'header'   => 'first_name',
+                'field'    => 'first_name',
+                'required' => true,
+                'aliases'  => ['first_name', 'first name', 'firstname', 'first', 'given_name', 'given name'],
+            ],
+            [
+                'header'   => 'last_name',
+                'field'    => 'last_name',
+                'required' => true,
+                'aliases'  => ['last_name', 'last name', 'lastname', 'last', 'surname', 'family_name', 'family name'],
+            ],
+            [
+                'header'   => 'email_address',
+                'field'    => 'email',
+                'required' => true,
+                'aliases'  => ['email_address', 'email address', 'email', 'e-mail', 'e_mail'],
+            ],
+            [
+                'header'   => 'phone_number',
+                'field'    => 'mobile_phone',
+                'required' => false,
+                'aliases'  => ['phone_number', 'phone number', 'phone', 'mobile', 'mobile_phone', 'mobile phone', 'cell', 'telephone'],
+            ],
+            [
+                'header'   => 'title',
+                'field'    => 'title',
+                'required' => false,
+                'aliases'  => ['title', 'job_title', 'job title', 'position'],
+            ],
+        ];
+    }
+
+    /**
+     * Find the 0-based index of a column in an actual CSV header row.
+     *
+     * Matching is case-insensitive and alias-aware: any value in $colDef['aliases']
+     * that matches (after lowercasing and trimming) a header cell in $csvHeaders is
+     * a hit. Falls back to matching the canonical 'header' value when 'aliases' is absent.
+     *
+     * @param string[]             $csvHeaders  Headers from the first CSV row (as-read by fgetcsv).
+     * @param array<string, mixed> $colDef      A column definition from getBulkColumnDefinitions().
+     * @return int|false  0-based index, or false if not found.
+     */
+    public static function resolveHeaderIndex(array $csvHeaders, array $colDef): int|false
+    {
+        $aliases = array_map('strtolower', $colDef['aliases'] ?? [$colDef['header']]);
+
+        foreach ($csvHeaders as $index => $header) {
+            if (in_array(strtolower(trim((string) $header)), $aliases, true)) {
+                return $index;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Open a CSV file, validate its header row, and return normalized data rows.
+     *
+     * Uses fgetcsv for RFC 4180 compliant reading. Performs case-insensitive,
+     * alias-aware column matching via resolveHeaderIndex(). Skips blank rows.
+     *
+     * @param string $filePath  Absolute path to the uploaded CSV file.
+     * @return array{
+     *   error?: string,
+     *   missing_headers?: string[],
+     *   rows?: array<int, array<string, string>>
+     * }
+     *   Success: ['rows' => [...]]  — each row keyed by internal field name.
+     *   Failure: ['error' => '...'] — optionally with 'missing_headers'.
+     */
+    public function parseFile(string $filePath): array
+    {
+        $handle = @fopen($filePath, 'r');
+
+        if ($handle === false) {
+            return ['error' => 'Unable to open the uploaded file.'];
+        }
+
+        try {
+            $rawHeaders = fgetcsv($handle);
+
+            if ($rawHeaders === false || $rawHeaders === null) {
+                return ['error' => 'The CSV file is empty or could not be read.'];
+            }
+
+            // Resolve each column definition against the actual CSV headers.
+            $headerMap = []; // field => csv_column_index
+            $missing   = [];
+
+            foreach (self::getBulkColumnDefinitions() as $colDef) {
+                $index = self::resolveHeaderIndex($rawHeaders, $colDef);
+
+                if ($index === false) {
+                    if ($colDef['required']) {
+                        $missing[] = $colDef['header'];
+                    }
+                    // Optional columns simply absent from this file — skip.
+                } else {
+                    $headerMap[$colDef['field']] = $index;
+                }
+            }
+
+            if (! empty($missing)) {
+                return [
+                    'error'           => sprintf(
+                        'Missing required column(s): %s.',
+                        implode(', ', $missing),
+                    ),
+                    'missing_headers' => $missing,
+                ];
+            }
+
+            // Parse data rows.
+            $rows = [];
+
+            while (($row = fgetcsv($handle)) !== false) {
+                if ($row === [null]) {
+                    continue; // Skip blank lines.
+                }
+
+                $normalized = [];
+
+                foreach ($headerMap as $field => $colIndex) {
+                    $normalized[$field] = trim((string) ($row[$colIndex] ?? ''));
+                }
+
+                $rows[] = $normalized;
+            }
+
+            return ['rows' => $rows];
+        } finally {
+            fclose($handle);
+        }
+    }
 }

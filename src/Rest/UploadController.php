@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\FileParserService;
 
 /**
  * File upload + parse to staged records endpoint.
@@ -32,6 +33,7 @@ class UploadController extends RestController
 
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
+        private readonly ?FileParserService $fileParserService = null,
     ) {
     }
 
@@ -82,7 +84,7 @@ class UploadController extends RestController
      * Processing order:
      *   1. AORM-6.6 — Validate file type (.csv only) and size (max 1 MB).
      *   2. AORM-6.7 — Active session gate: 409 with {message, session_id} if active session exists.
-     *   3. AORM-6.10 — CSV parsing + column header validation (to be implemented).
+     *   3. AORM-6.10 — CSV parsing + column header validation.
      *
      * @param \WP_REST_Request $request
      */
@@ -114,13 +116,24 @@ class UploadController extends RestController
             );
         }
 
-        // AORM-6.10: CSV parsing + column header validation goes here.
+        // AORM-6.10: Parse the CSV and validate required column headers exist.
+        $parser      = $this->fileParserService ?? new FileParserService();
+        $tmpPath     = (string) ($fileParams['file']['tmp_name'] ?? '');
+        $parseResult = $parser->parseFile($tmpPath);
+
+        if (isset($parseResult['error'])) {
+            return new \WP_REST_Response(
+                ['message' => $parseResult['error']],
+                422,
+            );
+        }
 
         return new \WP_REST_Response(
             [
                 'accepted'        => true,
                 'org_uuid'        => $orgUuid,
                 'membership_uuid' => $membershipUuid,
+                'row_count'       => count($parseResult['rows'] ?? []),
             ],
             200,
         );
