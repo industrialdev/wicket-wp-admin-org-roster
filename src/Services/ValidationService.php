@@ -50,12 +50,30 @@ class ValidationService
     public const VALIDATION_LABEL_INVALID_EMAIL = 'Invalid – Invalid Email Format';
 
     /**
-     * Phone format regex — matches the client-side PHONE_REGEX constant.
+     * Minimum number of digits in a valid phone number after stripping all
+     * non-numeric characters (AORM-6.14).
      *
-     * Allows an optional leading +, then 7–20 characters consisting of
-     * digits, spaces, hyphens, dots, and parentheses.
+     * Mirrors the MDP minimum length rule and the ITU-T recommendation for
+     * local subscriber numbers.
      */
-    public const PHONE_REGEX = '/^[+]?[\d\s\-().]{7,20}$/';
+    public const PHONE_MIN_DIGITS = 7;
+
+    /**
+     * Maximum number of digits in a valid phone number after stripping all
+     * non-numeric characters (AORM-6.14).
+     *
+     * Mirrors the E.164 international standard ceiling of 15 digits.
+     */
+    public const PHONE_MAX_DIGITS = 15;
+
+    /**
+     * Human-readable validation label for rows where the mobile_phone value is
+     * present but the digit count (after stripping non-numeric characters) falls
+     * outside PHONE_MIN_DIGITS–PHONE_MAX_DIGITS (AORM-6.14).
+     *
+     * Stored in the validation_message column of wp_wicket_aorm_staged_records.
+     */
+    public const VALIDATION_LABEL_INVALID_PHONE = 'Invalid – Phone Format';
 
     /**
      * Required person fields for roster records.
@@ -73,7 +91,8 @@ class ValidationService
      * Rules applied (same order as CSV validation):
      *   1. Required fields present and non-empty after trimming.
      *   2. Email format matches EMAIL_REGEX.
-     *   3. Phone format matches PHONE_REGEX (only when mobile_phone is provided).
+     *   3. Phone digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
+     *      stripping non-numeric characters (only when mobile_phone is provided).
      *
      * @param array<string, string> $fields Associative array of field values.
      * @return array<string, string> Field-keyed error messages (empty = valid).
@@ -110,10 +129,18 @@ class ValidationService
         }
 
         // 3. Phone format (optional field — only validate when provided).
+        //    AORM-6.14: strip all non-numeric characters first; the remaining
+        //    digit count must fall within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS
+        //    (MDP rules).  An absent or blank value is valid (empty is OK).
         $phone = trim((string) ($fields['mobile_phone'] ?? ''));
 
-        if ($phone !== '' && ! preg_match(self::PHONE_REGEX, $phone)) {
-            $errors['mobile_phone'] = 'Invalid phone number format.';
+        if ($phone !== '') {
+            $digits     = (string) preg_replace('/\D/', '', $phone);
+            $digitCount = strlen($digits);
+
+            if ($digitCount < self::PHONE_MIN_DIGITS || $digitCount > self::PHONE_MAX_DIGITS) {
+                $errors['mobile_phone'] = 'Invalid phone number format.';
+            }
         }
 
         return $errors;
