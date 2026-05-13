@@ -189,6 +189,112 @@
 }
 
 /* -----------------------------------------------------------------------
+   Action selection step — AORM-6.11
+   ----------------------------------------------------------------------- */
+
+.aorm-action-select__heading {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.aorm-action-select__description {
+	color: #646970;
+	margin-bottom: 24px;
+	max-width: 560px;
+}
+
+/** Radio option cards container. */
+.aorm-action-select__options {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	max-width: 560px;
+	margin-bottom: 24px;
+}
+
+/**
+ * Individual option card.
+ * Uses a <label> wrapping a hidden radio + visible content so the entire
+ * card is clickable. cursor:pointer is suppressed on disabled cards.
+ */
+.aorm-action-select__option {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 16px;
+	border: 2px solid #c3c4c7;
+	border-radius: 4px;
+	background: #fff;
+	cursor: pointer;
+	transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.aorm-action-select__option:hover:not(.aorm-action-select__option--disabled) {
+	border-color: #2271b1;
+	background: #f0f6fc;
+}
+
+.aorm-action-select__option--selected {
+	border-color: #2271b1;
+	background: #f0f6fc;
+}
+
+.aorm-action-select__option--disabled {
+	background: #f6f7f7;
+	border-color: #dcdcde;
+	color: #a7aaad;
+	cursor: not-allowed;
+}
+
+/** The actual <input type="radio"> — keep it visible but small. */
+.aorm-action-select__radio {
+	margin-top: 2px; /* align with first line of text */
+	flex-shrink: 0;
+	cursor: inherit;
+}
+
+/** Text column beside the radio. */
+.aorm-action-select__option-content {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.aorm-action-select__option-title {
+	font-size: 0.9375em;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.aorm-action-select__option-description {
+	font-size: 0.875em;
+	color: #646970;
+	line-height: 1.5;
+}
+
+.aorm-action-select__option--disabled .aorm-action-select__option-description {
+	color: #a7aaad;
+}
+
+/** Small note beneath the description (disabled reason or member count). */
+.aorm-action-select__option-note {
+	font-size: 0.8125em;
+	color: #cc1818; /* red for the "not available" message */
+	line-height: 1.4;
+	margin-top: 2px;
+}
+
+.aorm-action-select__option-note--count {
+	color: #646970; /* neutral for the member-count note */
+}
+
+/** Continue button row. */
+.aorm-action-select__actions {
+	margin-top: 8px;
+}
+
+/* -----------------------------------------------------------------------
    Individual add form — AORM-5.1
    ----------------------------------------------------------------------- */
 
