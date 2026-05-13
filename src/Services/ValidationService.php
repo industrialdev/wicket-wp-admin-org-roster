@@ -13,12 +13,22 @@ namespace WicketAORM\Services;
 class ValidationService
 {
     /**
-     * Email format regex — matches the client-side EMAIL_REGEX constant.
+     * Email format regex — enforces the rules introduced in AORM-6.13:
+     *   - Single @ (character class [^\s@] excludes a second @).
+     *   - Local part must start with an alphanumeric character (no leading punctuation).
+     *   - Local part must end with an alphanumeric character (no trailing punctuation).
+     *   - Domain must contain at least one dot.
+     *   - No whitespace anywhere.
      *
-     * Requires at least one non-whitespace/non-@ character before and after
-     * the @, and at least one dot after the @.
+     * The local-part group `([^\s@]*[a-zA-Z0-9])?` is optional so that
+     * single-character local parts (e.g. a@example.com) are accepted.
      */
-    public const EMAIL_REGEX = '/^[^\s@]+@[^\s@]+\.[^\s@]+$/';
+    public const EMAIL_REGEX = '/^[a-zA-Z0-9]([^\s@]*[a-zA-Z0-9])?@[^\s@]+\.[^\s@]+$/';
+
+    /**
+     * Maximum total length of a valid email address (RFC 5321).
+     */
+    public const EMAIL_MAX_LENGTH = 254;
 
     /**
      * Human-readable validation label for rows that are missing one or more
@@ -29,6 +39,15 @@ class ValidationService
      * administrators.  Used by the bulk CSV upload flow (AORM-6.12).
      */
     public const VALIDATION_LABEL_MISSING_REQUIRED = 'Invalid – Missing Required Data';
+
+    /**
+     * Human-readable validation label for rows where the email address is
+     * present but fails format validation (AORM-6.13).
+     *
+     * Applied when all required fields are present but the email value does
+     * not satisfy EMAIL_REGEX or exceeds EMAIL_MAX_LENGTH.
+     */
+    public const VALIDATION_LABEL_INVALID_EMAIL = 'Invalid – Invalid Email Format';
 
     /**
      * Phone format regex — matches the client-side PHONE_REGEX constant.
@@ -73,11 +92,20 @@ class ValidationService
         }
 
         // 2. Email format (only when not already flagged as missing).
+        //    AORM-6.13: length check runs before regex (cheaper); both enforce the
+        //    "no leading/trailing punctuation" and structural rules.
         if (! isset($errors['email'])) {
             $email = trim((string) ($fields['email'] ?? ''));
 
-            if ($email !== '' && ! preg_match(self::EMAIL_REGEX, $email)) {
-                $errors['email'] = 'Invalid email format.';
+            if ($email !== '') {
+                if (strlen($email) > self::EMAIL_MAX_LENGTH) {
+                    $errors['email'] = sprintf(
+                        'Email address must not exceed %d characters.',
+                        self::EMAIL_MAX_LENGTH,
+                    );
+                } elseif (! preg_match(self::EMAIL_REGEX, $email)) {
+                    $errors['email'] = 'Invalid email format.';
+                }
             }
         }
 

@@ -23,7 +23,7 @@ use WicketAORM\Services\ValidationService;
  *      — return 409 with {message, session_id} if found.
  *   3. Parse CSV using fgetcsv, validate required column headers exist (AORM-6.10).
  *   4. Validate each row for missing required fields; insert staged records with
- *      validation_status and validation_message set accordingly (AORM-6.12).
+ *      validation_status and validation_message set accordingly (AORM-6.12, AORM-6.13).
  */
 class UploadController extends RestController
 {
@@ -103,7 +103,7 @@ class UploadController extends RestController
      *   1. AORM-6.6  — Validate file type (.csv only) and size (max 1 MB).
      *   2. AORM-6.7  — Active session gate: 409 with {message, session_id} if active session exists.
      *   3. AORM-6.10 — CSV parsing + column header validation.
-     *   4. AORM-6.12 — Validate each row for missing required fields; insert staged records
+     *   4. AORM-6.12/6.13 — Validate each row (missing required fields, email format); insert staged records
      *                   with validation_status and validation_message; return session_id.
      *
      * @param \WP_REST_Request $request
@@ -160,12 +160,24 @@ class UploadController extends RestController
         $invalidCount = 0;
 
         foreach ($rows as $row) {
-            $errors            = $validator->validateRow($row);
-            $hasMissingRequired = $validator->hasMissingRequired($errors);
+            $errors       = $validator->validateRow($row);
+            $nameMissing  = isset($errors['first_name']) || isset($errors['last_name']);
+            $emailValue   = trim((string) ($row['email'] ?? ''));
+            $emailMissing = $emailValue === '';
+            // AORM-6.13: email is present but fails format/length rules (not a missing-data error).
+            $emailInvalid = isset($errors['email']) && ! $emailMissing;
 
-            if ($hasMissingRequired) {
+            if ($nameMissing || $emailMissing) {
+                // AORM-6.12: one or more required fields (first_name, last_name, or email) are absent.
+                // Name-missing takes priority over an email-format error on the same row.
                 $validationStatus  = 'invalid';
                 $validationMessage = ValidationService::VALIDATION_LABEL_MISSING_REQUIRED;
+                $category          = 'discard';
+                ++$invalidCount;
+            } elseif ($emailInvalid) {
+                // AORM-6.13: email is present but fails format/length validation.
+                $validationStatus  = 'invalid';
+                $validationMessage = ValidationService::VALIDATION_LABEL_INVALID_EMAIL;
                 $category          = 'discard';
                 ++$invalidCount;
             } else {
