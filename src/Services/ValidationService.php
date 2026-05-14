@@ -76,6 +76,18 @@ class ValidationService
     public const VALIDATION_LABEL_INVALID_PHONE = 'Invalid – Phone Format';
 
     /**
+     * Human-readable validation label for rows whose first_name + last_name +
+     * email combination appears more than once within the same import file
+     * (AORM-6.15).
+     *
+     * Applied to the second and all subsequent occurrences of a duplicate key.
+     * Comparison is case-insensitive and whitespace-trimmed on all three fields.
+     *
+     * Stored in the validation_message column of wp_wicket_aorm_staged_records.
+     */
+    public const VALIDATION_LABEL_DUPLICATE = 'Duplicate in Import File';
+
+    /**
      * Required person fields for roster records.
      *
      * @var string[]
@@ -165,6 +177,42 @@ class ValidationService
         }
 
         return false;
+    }
+
+    /**
+     * Identify rows that are duplicates within the same import batch.
+     *
+     * Two rows are considered duplicates when their first_name, last_name, and
+     * email values are identical after trimming whitespace and lowercasing.
+     * The first occurrence of any given key is kept; the second and all
+     * subsequent occurrences are returned as duplicates (AORM-6.15).
+     *
+     * The phone number and title fields are intentionally excluded from the
+     * duplicate key — only name + email uniqueness is checked.
+     *
+     * @param array<int, array<string, string>> $rows  Normalised rows from FileParserService::parseFile().
+     * @return int[]  0-based indices of rows that are duplicates.
+     */
+    public function detectDuplicates(array $rows): array
+    {
+        $seen       = [];
+        $duplicates = [];
+
+        foreach ($rows as $index => $row) {
+            $key = strtolower(trim((string) ($row['first_name'] ?? '')))
+                . '|'
+                . strtolower(trim((string) ($row['last_name'] ?? '')))
+                . '|'
+                . strtolower(trim((string) ($row['email'] ?? '')));
+
+            if (isset($seen[$key])) {
+                $duplicates[] = $index;
+            } else {
+                $seen[$key] = true;
+            }
+        }
+
+        return $duplicates;
     }
 
     /**
