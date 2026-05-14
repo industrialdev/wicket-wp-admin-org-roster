@@ -23,7 +23,7 @@ use WicketAORM\Services\ValidationService;
  *      — return 409 with {message, session_id} if found.
  *   3. Parse CSV using fgetcsv, validate required column headers exist (AORM-6.10).
  *   4. Validate each row for missing required fields; insert staged records with
- *      validation_status and validation_message set accordingly (AORM-6.12, AORM-6.13).
+ *      validation_status and validation_message set accordingly (AORM-6.12–6.16).
  */
 class UploadController extends RestController
 {
@@ -103,8 +103,12 @@ class UploadController extends RestController
      *   1. AORM-6.6  — Validate file type (.csv only) and size (max 1 MB).
      *   2. AORM-6.7  — Active session gate: 409 with {message, session_id} if active session exists.
      *   3. AORM-6.10 — CSV parsing + column header validation.
-     *   4. AORM-6.12/6.13 — Validate each row (missing required fields, email format); insert staged records
-     *                   with validation_status and validation_message; return session_id.
+     *   4. AORM-6.12–6.16 — Validate each row and set validation_status per row:
+     *                   • 'invalid' + reason  (missing required → AORM-6.12, email format → AORM-6.13,
+     *                                          phone format → AORM-6.14; priority in that order)
+     *                   • 'duplicate'          (identical first_name+last_name+email → AORM-6.15/6.16)
+     *                   • 'valid'              (passes all checks)
+     *                   Insert staged records; return session_id + per-status counts.
      *
      * @param \WP_REST_Request $request
      */
@@ -149,23 +153,32 @@ class UploadController extends RestController
             );
         }
 
-        // AORM-6.12: Validate each row for missing required fields and insert
-        // staged records with the appropriate validation_status.
+        // AORM-6.12/6.16: Validate each row and insert staged records with the
+        // appropriate validation_status and validation_message.
         $rows       = $parseResult['rows'] ?? [];
         $sessionId  = wp_generate_uuid4();
         $validator  = $this->validationService ?? new ValidationService();
         $now        = current_time('mysql');
         $uploadedBy = get_current_user_id();
-        $validCount   = 0;
-        $invalidCount = 0;
+        $validCount     = 0;
+        $invalidCount   = 0;
+        $duplicateCount = 0;
 
-        foreach ($rows as $row) {
+        // AORM-6.15/6.16: Detect duplicate rows across the entire import batch
+        // before entering the per-row loop so each row can be checked in O(1).
+        $duplicateIndices = array_flip($validator->detectDuplicates($rows));
+
+        foreach ($rows as $rowIndex => $row) {
             $errors       = $validator->validateRow($row);
             $nameMissing  = isset($errors['first_name']) || isset($errors['last_name']);
             $emailValue   = trim((string) ($row['email'] ?? ''));
             $emailMissing = $emailValue === '';
             // AORM-6.13: email is present but fails format/length rules (not a missing-data error).
             $emailInvalid = isset($errors['email']) && ! $emailMissing;
+            // AORM-6.14: phone is present but digit count is out of range.
+            $phoneInvalid = isset($errors['mobile_phone']);
+            // AORM-6.15/6.16: second (or later) occurrence of name+email key.
+            $isDuplicate  = isset($duplicateIndices[$rowIndex]);
 
             if ($nameMissing || $emailMissing) {
                 // AORM-6.12: one or more required fields (first_name, last_name, or email) are absent.
@@ -180,6 +193,19 @@ class UploadController extends RestController
                 $validationMessage = ValidationService::VALIDATION_LABEL_INVALID_EMAIL;
                 $category          = 'discard';
                 ++$invalidCount;
+            } elseif ($phoneInvalid) {
+                // AORM-6.14: phone is present but digit count is out of range.
+                $validationStatus  = 'invalid';
+                $validationMessage = ValidationService::VALIDATION_LABEL_INVALID_PHONE;
+                $category          = 'discard';
+                ++$invalidCount;
+            } elseif ($isDuplicate) {
+                // AORM-6.15/6.16: second or later occurrence of the same name+email key.
+                // Kept separate from 'invalid' so the review UI can surface a distinct badge.
+                $validationStatus  = 'duplicate';
+                $validationMessage = ValidationService::VALIDATION_LABEL_DUPLICATE;
+                $category          = 'discard';
+                ++$duplicateCount;
             } else {
                 $validationStatus  = 'valid';
                 $validationMessage = null;
@@ -214,6 +240,7 @@ class UploadController extends RestController
                 'row_count'       => count($rows),
                 'valid_count'     => $validCount,
                 'invalid_count'   => $invalidCount,
+                'duplicate_count' => $duplicateCount,
             ],
             200,
         );
