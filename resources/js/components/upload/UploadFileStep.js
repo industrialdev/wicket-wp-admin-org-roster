@@ -20,11 +20,16 @@
  *
  * On success: navigates to the action-select step (AORM-6.11).
  *
+ * The selectedFile and setSelectedFile props are lifted to RosterUpload (AORM-6.18)
+ * so CsvValidationStep can access the file when POSTing to the upload endpoint.
+ *
  * @param {{
  *   goToStep: (step: string) => void,
  *   orgUuid: string,
  *   membershipUuid: string,
  *   startNewSession: (id: string) => void,
+ *   selectedFile: File|null,
+ *   setSelectedFile: (file: File|null) => void,
  * }} props
  */
 
@@ -96,13 +101,12 @@ function validateFile( file ) {
 
 export default function UploadFileStep( {
 	goToStep,
-	orgUuid,       // eslint-disable-line no-unused-vars — forwarded in AORM-6.5
-	membershipUuid, // eslint-disable-line no-unused-vars — forwarded in AORM-6.5
-	startNewSession, // eslint-disable-line no-unused-vars — called in AORM-6.5
+	orgUuid,          // eslint-disable-line no-unused-vars — forwarded in AORM-6.5
+	membershipUuid,   // eslint-disable-line no-unused-vars — forwarded in AORM-6.5
+	startNewSession,  // eslint-disable-line no-unused-vars — called in AORM-6.5
+	selectedFile,     // lifted to RosterUpload — AORM-6.18
+	setSelectedFile,  // lifted to RosterUpload — AORM-6.18
 } ) {
-	/** The file the admin has chosen, or null when nothing is selected. */
-	const [ selectedFile, setSelectedFile ] = useState( null );
-
 	/** Non-empty string when the dropped / chosen file is not a CSV. */
 	const [ fileError, setFileError ] = useState( '' );
 

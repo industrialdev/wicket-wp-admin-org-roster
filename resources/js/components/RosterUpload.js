@@ -11,7 +11,7 @@
  * individual-form   — individual add form          (AORM-5)
  * upload-file       — CSV file drop / picker       (AORM-6 step 1)
  * action-select     — add-to-roster vs replace     (AORM-6 step 2)
- * csv-validation    — local CSV row validation     (AORM-6 step 3)
+ * csv-validation    — validation results screen     (AORM-6.18)
  * matching-progress — MDP background matching      (AORM-7)
  * validation-review — accordion review screen      (AORM-8)
  * sync-progress     — commit & sync progress       (AORM-9)
@@ -77,6 +77,15 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 	 */
 	const [ matchCategory, setMatchCategory ] = useState( null );
 
+	/**
+	 * The File object chosen by the admin in the upload-file step.
+	 * Lifted here (from UploadFileStep's local state) so CsvValidationStep
+	 * can access it when POSTing to the upload endpoint (AORM-6.18).
+	 *
+	 * @type {[File|null, Function]}
+	 */
+	const [ selectedFile, setSelectedFile ] = useState( null );
+
 	/** Navigate to any named step. */
 	const goToStep = useCallback( ( nextStep ) => {
 		setStep( nextStep );
@@ -93,6 +102,7 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 		setSessionId( null );
 		setUploadAction( 'add' );
 		setMatchCategory( null );
+		setSelectedFile( null );
 	}, [] );
 
 	/** Props forwarded to every step component. */
@@ -102,10 +112,12 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 		sessionId,
 		uploadAction,
 		matchCategory,
+		selectedFile,
 		goToStep,
 		startNewSession,
 		setMatchCategory,
 		setUploadAction,
+		setSelectedFile,
 		resetWizard,
 	};
 

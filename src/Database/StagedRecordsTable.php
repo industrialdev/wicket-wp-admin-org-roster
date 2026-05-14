@@ -141,4 +141,33 @@ class StagedRecordsTable
 
         return (int) $wpdb->insert_id;
     }
+
+    /**
+     * Return all staged records for a given upload session, ordered by
+     * insertion order (id ASC).
+     *
+     * Used by the REST staged-records endpoint (AORM-6.18) to supply the
+     * CSV validation review screen with the full list of rows, their
+     * validation status, and their raw parsed data.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array<int, array<string, mixed>>  Rows as associative arrays; empty array when none found.
+     */
+    public function getRecordsBySessionId(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT * FROM {$table} WHERE upload_session_id = %s ORDER BY id ASC",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        return is_array($rows) ? $rows : [];
+    }
 }

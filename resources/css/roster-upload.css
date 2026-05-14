@@ -327,6 +327,164 @@
 }
 
 /* -----------------------------------------------------------------------
+   CSV validation results step — AORM-6.18
+   ----------------------------------------------------------------------- */
+
+.aorm-csv-validation__heading {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+/** Loading spinner + label */
+.aorm-csv-validation__loading {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 24px 0;
+}
+
+.aorm-csv-validation__loading-text {
+	margin: 0;
+	color: #646970;
+}
+
+/** Status notice (warning / success) */
+.aorm-csv-validation__status-notice {
+	margin-bottom: 16px;
+}
+
+/* ── Counts summary bar ── */
+
+.aorm-csv-validation__summary {
+	display: flex;
+	gap: 0;
+	margin-bottom: 20px;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.aorm-csv-validation__summary-item {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 14px 8px;
+	border-right: 1px solid #c3c4c7;
+	background: #fff;
+	text-align: center;
+}
+
+.aorm-csv-validation__summary-item:last-child {
+	border-right: none;
+}
+
+.aorm-csv-validation__summary-count {
+	font-size: 1.75em;
+	font-weight: 700;
+	line-height: 1.1;
+}
+
+.aorm-csv-validation__summary-label {
+	font-size: 0.75em;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #646970;
+	margin-top: 4px;
+}
+
+/* Colour accents per status type */
+.aorm-csv-validation__summary-item--total .aorm-csv-validation__summary-count {
+	color: #1d2327;
+}
+
+.aorm-csv-validation__summary-item--valid .aorm-csv-validation__summary-count {
+	color: #1d7e4e;
+}
+
+.aorm-csv-validation__summary-item--invalid .aorm-csv-validation__summary-count {
+	color: #cc1818;
+}
+
+.aorm-csv-validation__summary-item--duplicate .aorm-csv-validation__summary-count {
+	color: #996800;
+}
+
+/* ── Per-row table ── */
+
+.aorm-csv-validation__table {
+	margin-bottom: 20px;
+	font-size: 0.875em;
+}
+
+.aorm-csv-validation__col-row {
+	width: 40px;
+	text-align: center;
+}
+
+.aorm-csv-validation__col-name {
+	width: 14%;
+}
+
+.aorm-csv-validation__col-email {
+	width: 22%;
+}
+
+.aorm-csv-validation__col-phone {
+	width: 14%;
+}
+
+.aorm-csv-validation__col-status {
+	width: 100px;
+}
+
+/** Subtle row tints for quick scanning */
+.aorm-csv-validation__row--invalid td {
+	background-color: #fdf4f4 !important; /* override WP striped */
+}
+
+.aorm-csv-validation__row--duplicate td {
+	background-color: #fdfaf0 !important;
+}
+
+/** Actions row */
+.aorm-csv-validation__actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+/* ── Status badges ── */
+
+.aorm-validation-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 0.8125em;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.aorm-validation-badge--valid {
+	background: #edfaef;
+	color: #1d7e4e;
+	border: 1px solid #b0e8bf;
+}
+
+.aorm-validation-badge--invalid {
+	background: #fdf4f4;
+	color: #cc1818;
+	border: 1px solid #f5bebe;
+}
+
+.aorm-validation-badge--duplicate {
+	background: #fdfaf0;
+	color: #996800;
+	border: 1px solid #f0dfa0;
+}
+
+/* -----------------------------------------------------------------------
    Individual add form — validation errors — AORM-5.2
    ----------------------------------------------------------------------- */
 
