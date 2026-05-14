@@ -1,5 +1,5 @@
 /**
- * CSV row validation results step — AORM-6.18.
+ * CSV row validation results step — AORM-6.18 / AORM-6.19.
  *
  * On mount this component either:
  *   a) POSTs the selected CSV file to POST /wicket-aorm/v1/uploads (when no
@@ -7,12 +7,19 @@
  *   b) Fetches staged records directly from GET /wicket-aorm/v1/staged-records/{id}
  *      when a session ID already exists (e.g. after navigating back and forward).
  *
+ * 409 conflict (AORM-6.7 session gate, e.g. after a page refresh):
+ *   When the upload attempt returns 409, the component shows an inline conflict
+ *   notice with two options:
+ *     - Resume    — loads the existing session's staged records.
+ *     - Start Fresh — calls DELETE /wicket-aorm/v1/uploads/{session_id} to remove
+ *                     the stuck session, then returns to the upload-file step.
+ *
  * Displays:
  *   - Counts summary bar: Total / Valid / Invalid / Duplicate.
  *   - Per-row table: row #, first name, last name, email, phone, status badge,
  *     and the validation reason for invalid or duplicate rows.
- *
- * Proceed / Re-upload action buttons are added in AORM-6.19.
+ *   - Proceed button (disabled when any rows are invalid/duplicate) — AORM-6.19.
+ *   - Re-upload button (calls DELETE on current session, returns to step 1) — AORM-6.19.
  *
  * @param {{
  *   goToStep:        (step: string) => void,
@@ -26,7 +33,7 @@
  * }} props
  */
 
-import { useState, useEffect, useRef } from '@wordpress/element';
+import { useState, useEffect, useRef, useCallback } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 import { apiFetch } from '../../utils/apiFetch';
@@ -53,6 +60,7 @@ const STATUS_CONFIG = {
 
 export default function CsvValidationStep( {
 	goToStep,
+	resetWizard,
 	orgUuid,
 	membershipUuid,
 	sessionId,
@@ -62,8 +70,17 @@ export default function CsvValidationStep( {
 } ) {
 	const [ isUploading, setIsUploading ] = useState( false );
 	const [ isFetching, setIsFetching ] = useState( false );
+	const [ isAbandoning, setIsAbandoning ] = useState( false );
 	const [ records, setRecords ] = useState( [] );
 	const [ error, setError ] = useState( null );
+
+	/**
+	 * Set when the upload returns 409 — holds the session_id of the existing
+	 * active session so the conflict UI can offer Resume / Start Fresh.
+	 *
+	 * @type {[string|null, Function]}
+	 */
+	const [ conflictSessionId, setConflictSessionId ] = useState( null );
 
 	// Guard against double-firing in React strict mode / HMR.
 	const hasRun = useRef( false );
@@ -98,15 +115,27 @@ export default function CsvValidationStep( {
 					formData.append( 'membership_uuid', membershipUuid );
 					formData.append( 'action_type', uploadAction || 'add' );
 
-					const uploadResult = await apiFetch( {
-						path: '/wicket-aorm/v1/uploads',
-						method: 'POST',
-						body: formData,
-					} );
+					let uploadResult;
+					try {
+						uploadResult = await apiFetch( {
+							path: '/wicket-aorm/v1/uploads',
+							method: 'POST',
+							body: formData,
+						} );
+					} catch ( uploadErr ) {
+						// 409: an active session already exists (e.g. after a page refresh).
+						// Surface the conflict UI instead of a generic error.
+						if ( uploadErr?.session_id ) {
+							setConflictSessionId( uploadErr.session_id );
+							return;
+						}
+						throw uploadErr;
+					} finally {
+						setIsUploading( false );
+					}
 
 					currentSessionId = uploadResult.session_id;
 					startNewSession( currentSessionId );
-					setIsUploading( false );
 				}
 
 				// ── Step 2: fetch staged records ───────────────────────────
@@ -132,13 +161,84 @@ export default function CsvValidationStep( {
 		run();
 	}, [] ); // eslint-disable-line react-hooks/exhaustive-deps -- intentional mount-only
 
+	/**
+	 * Resume the existing conflicted session: register its ID in wizard state
+	 * and fetch its staged records directly.
+	 */
+	const handleResume = useCallback( async () => {
+		const resumeId = conflictSessionId;
+		setConflictSessionId( null );
+		startNewSession( resumeId );
+
+		setIsFetching( true );
+		try {
+			const fetchedRecords = await apiFetch( {
+				path: `/wicket-aorm/v1/staged-records/${ resumeId }`,
+			} );
+			setRecords( fetchedRecords ?? [] );
+		} catch ( err ) {
+			setError(
+				err?.message ??
+					__(
+						'Could not load the existing session. Please try again.',
+						'wicket-aorm'
+					)
+			);
+		} finally {
+			setIsFetching( false );
+		}
+	}, [ conflictSessionId, startNewSession ] );
+
+	/**
+	 * Call DELETE /uploads/{id} to remove all rows for a session, ignoring
+	 * errors (idempotent — session may already be gone).
+	 *
+	 * @param {string} id  The session UUID to delete.
+	 */
+	const abandonSession = useCallback( async ( id ) => {
+		try {
+			await apiFetch( {
+				path: `/wicket-aorm/v1/uploads/${ id }`,
+				method: 'DELETE',
+			} );
+		} catch {
+			// Ignore — if the session is already gone that is fine.
+		}
+	}, [] );
+
+	/**
+	 * Re-upload handler for the "Re-upload" button shown after validation results.
+	 * Deletes the current session on the server (if any) before resetting the wizard.
+	 */
+	const handleReupload = useCallback( async () => {
+		if ( sessionId ) {
+			setIsAbandoning( true );
+			await abandonSession( sessionId );
+			setIsAbandoning( false );
+		}
+		resetWizard();
+		goToStep( 'upload-file' );
+	}, [ sessionId, abandonSession, resetWizard, goToStep ] );
+
+	/**
+	 * "Start Fresh" handler shown in the 409 conflict notice.
+	 * Deletes the stuck session on the server, then returns to the upload-file step.
+	 */
+	const handleStartFresh = useCallback( async () => {
+		setIsAbandoning( true );
+		await abandonSession( conflictSessionId );
+		setIsAbandoning( false );
+		resetWizard();
+		goToStep( 'upload-file' );
+	}, [ conflictSessionId, abandonSession, resetWizard, goToStep ] );
+
 	// ── Derived counts ────────────────────────────────────────────────────────
 
-	const isLoading     = isUploading || isFetching;
-	const validCount    = records.filter( ( r ) => r.validation_status === 'valid' ).length;
-	const invalidCount  = records.filter( ( r ) => r.validation_status === 'invalid' ).length;
-	const dupCount      = records.filter( ( r ) => r.validation_status === 'duplicate' ).length;
-	const hasProblems   = invalidCount > 0 || dupCount > 0;
+	const isLoading    = isUploading || isFetching || isAbandoning;
+	const validCount   = records.filter( ( r ) => r.validation_status === 'valid' ).length;
+	const invalidCount = records.filter( ( r ) => r.validation_status === 'invalid' ).length;
+	const dupCount     = records.filter( ( r ) => r.validation_status === 'duplicate' ).length;
+	const hasProblems  = invalidCount > 0 || dupCount > 0;
 
 	// ── Render ────────────────────────────────────────────────────────────────
 
@@ -173,11 +273,40 @@ export default function CsvValidationStep( {
 				<div className="aorm-csv-validation__loading">
 					<Spinner />
 					<p className="aorm-csv-validation__loading-text">
-						{ isUploading
-							? __( 'Uploading and validating file…', 'wicket-aorm' )
-							: __( 'Loading validation results…', 'wicket-aorm' ) }
+						{ isAbandoning
+							? __( 'Removing session…', 'wicket-aorm' )
+							: isUploading
+								? __( 'Uploading and validating file…', 'wicket-aorm' )
+								: __( 'Loading validation results…', 'wicket-aorm' ) }
 					</p>
 				</div>
+			) }
+
+			{ /* 409 conflict — active session exists (e.g. after a page refresh) */ }
+			{ conflictSessionId && ! isLoading && (
+				<Notice status="warning" isDismissible={ false }>
+					<p>
+						{ __(
+							'An upload session for this roster is already in progress. Would you like to resume it or start fresh with a new file?',
+							'wicket-aorm'
+						) }
+					</p>
+					<div className="aorm-csv-validation__conflict-actions">
+						<Button
+							variant="primary"
+							onClick={ handleResume }
+						>
+							{ __( 'Resume', 'wicket-aorm' ) }
+						</Button>
+						<Button
+							variant="secondary"
+							isDestructive
+							onClick={ handleStartFresh }
+						>
+							{ __( 'Start Fresh', 'wicket-aorm' ) }
+						</Button>
+					</div>
+				</Notice>
 			) }
 
 			{ /* Results */ }
@@ -341,13 +470,27 @@ export default function CsvValidationStep( {
 
 					{ /* ── Actions (Proceed / Re-upload — AORM-6.19) ─────────── */ }
 					<div className="aorm-csv-validation__actions">
-						{ /* Proceed and Re-upload buttons implemented in AORM-6.19 */ }
+						<Button
+							variant="primary"
+							disabled={ hasProblems }
+							onClick={ () => goToStep( 'matching-progress' ) }
+						>
+							{ __( 'Proceed', 'wicket-aorm' ) }
+						</Button>
+						<Button
+							variant="secondary"
+							isBusy={ isAbandoning }
+							disabled={ isAbandoning }
+							onClick={ handleReupload }
+						>
+							{ __( 'Re-upload', 'wicket-aorm' ) }
+						</Button>
 					</div>
 				</>
 			) }
 
-			{ /* Empty state */ }
-			{ ! isLoading && ! error && records.length === 0 && (
+			{ /* Empty state — only shown when there is no conflict notice and no records */ }
+			{ ! isLoading && ! error && ! conflictSessionId && records.length === 0 && (
 				<Notice status="info" isDismissible={ false }>
 					{ __( 'No rows were found for this upload session.', 'wicket-aorm' ) }
 				</Notice>

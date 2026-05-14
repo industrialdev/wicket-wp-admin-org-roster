@@ -455,6 +455,13 @@
 	margin-top: 8px;
 }
 
+/** Inline action buttons inside the 409 conflict notice */
+.aorm-csv-validation__conflict-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 12px;
+}
+
 /* ── Status badges ── */
 
 .aorm-validation-badge {

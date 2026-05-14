@@ -143,6 +143,26 @@ class StagedRecordsTable
     }
 
     /**
+     * Delete all staged records for a given upload session.
+     *
+     * Used by the abandon endpoint (DELETE /wicket-aorm/v1/uploads/{session_id})
+     * to permanently remove rows so the active-session gate no longer blocks
+     * new uploads for the same org + membership.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return int  Number of rows deleted; 0 if none matched or on failure.
+     */
+    public function deleteRecordsBySessionId(string $sessionId): int
+    {
+        global $wpdb;
+
+        $table  = $wpdb->prefix . 'wicket_aorm_staged_records';
+        $result = $wpdb->delete($table, ['upload_session_id' => $sessionId]);
+
+        return is_int($result) ? $result : 0;
+    }
+
+    /**
      * Return all staged records for a given upload session, ordered by
      * insertion order (id ASC).
      *

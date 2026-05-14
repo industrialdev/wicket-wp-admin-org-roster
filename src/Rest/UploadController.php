@@ -15,7 +15,8 @@ use WicketAORM\Services\ValidationService;
  * assets/roster-template.csv (AORM-6.3) — no endpoint needed.
  *
  * Routes:
- *   POST /wicket-aorm/v1/uploads  — upload + parse CSV (AORM-6.5)
+ *   POST   /wicket-aorm/v1/uploads                   — upload + parse CSV (AORM-6.5)
+ *   DELETE /wicket-aorm/v1/uploads/{session_id}       — abandon session, delete all staged rows
  *
  * Processing order enforced by upload():
  *   1. Validate file type (CSV) and size (max 1 MB) (AORM-6.6).
@@ -80,6 +81,24 @@ class UploadController extends RestController
                         // args, so we skip the required flag and handle the missing-file
                         // case ourselves (returns 422 with a message).
                         'file'            => [],
+                    ],
+                ],
+            ],
+        );
+
+        register_rest_route(
+            $this->namespace,
+            '/uploads/(?P<session_id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+            [
+                [
+                    'methods'             => \WP_REST_Server::DELETABLE,
+                    'callback'            => [$this, 'abandon'],
+                    'permission_callback' => [$this, 'upload_permissions_check'],
+                    'args'                => [
+                        'session_id' => [
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ],
                     ],
                 ],
             ],
@@ -241,6 +260,31 @@ class UploadController extends RestController
                 'valid_count'     => $validCount,
                 'invalid_count'   => $invalidCount,
                 'duplicate_count' => $duplicateCount,
+            ],
+            200,
+        );
+    }
+
+    /**
+     * Handle DELETE /uploads/{session_id}.
+     *
+     * Permanently removes all staged records for the given session so the
+     * active-session gate no longer blocks new uploads for the same roster.
+     * Idempotent: deleting a session that has already been removed (or never
+     * existed) returns 200 with deleted = 0.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function abandon(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $sessionId = (string) $request->get_param('session_id');
+        $table     = $this->stagedRecordsTable ?? new StagedRecordsTable();
+        $deleted   = $table->deleteRecordsBySessionId($sessionId);
+
+        return new \WP_REST_Response(
+            [
+                'deleted'    => $deleted,
+                'session_id' => $sessionId,
             ],
             200,
         );
