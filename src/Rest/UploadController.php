@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\FileParserService;
 use WicketAORM\Services\ValidationService;
 
@@ -45,6 +46,7 @@ class UploadController extends RestController
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?FileParserService $fileParserService = null,
         private readonly ?ValidationService $validationService = null,
+        private readonly ?ActivityLogger $activityLogger = null,
     ) {
     }
 
@@ -249,6 +251,30 @@ class UploadController extends RestController
                 'updated_at'         => $now,
             ]);
         }
+
+        // AORM-6.20: Log the upload + validation event and mark the roster as in_progress.
+        $logger = $this->activityLogger ?? new ActivityLogger();
+        $logger->logRosterAction(
+            $orgUuid,
+            $membershipUuid,
+            'upload_validated',
+            sprintf(
+                'CSV uploaded and validated: %d valid, %d invalid, %d duplicate of %d total rows.',
+                $validCount,
+                $invalidCount,
+                $duplicateCount,
+                count($rows),
+            ),
+            [
+                'session_id'      => $sessionId,
+                'action_type'     => $actionType,
+                'row_count'       => count($rows),
+                'valid_count'     => $validCount,
+                'invalid_count'   => $invalidCount,
+                'duplicate_count' => $duplicateCount,
+            ],
+            'in_progress',
+        );
 
         return new \WP_REST_Response(
             [
