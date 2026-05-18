@@ -40,6 +40,13 @@ final class Main
 
         // Enqueue admin assets.
         add_action('admin_enqueue_scripts', [$this, 'enqueueAssets']);
+
+        // AORM-7.2: Background MDP matching job — fired by Action Scheduler or
+        // WP-Cron with the upload_session_id as the first (and only) argument.
+        add_action(
+            Services\MatchingJobRunner::HOOK,
+            [new Services\MatchingJobRunner(), 'handle'],
+        );
     }
 
     /**
