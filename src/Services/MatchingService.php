@@ -29,10 +29,14 @@ namespace WicketAORM\Services;
  * "Already on Roster" check: when the top-scoring candidate (score ≥ 20)
  * is already a member of the target org membership roster, the record_status
  * is set to 'already_on_roster' and category to 'ready_to_sync'.
+ *
+ * Scoring is delegated to ScoringService (AORM-7.3), which holds the
+ * configurable weights and thresholds. The constants below are kept for
+ * backward compatibility with existing call-sites.
  */
 class MatchingService
 {
-    // ── Score constants ────────────────────────────────────────────────────
+    // ── Score constants (mirrors ScoringService defaults) ─────────────────
 
     public const SCORE_EXACT_MATCH         = 100;
     public const SCORE_EMAIL_NAME_MISMATCH = 80;
@@ -61,7 +65,22 @@ class MatchingService
 
     public function __construct(
         private readonly ?MdpClient $mdpClient = null,
+        private readonly ?ScoringService $scoringService = null,
     ) {
+    }
+
+    // ── Scorer accessor ────────────────────────────────────────────────────
+
+    /**
+     * Return the active ScoringService instance.
+     *
+     * Uses the injected instance when provided; otherwise instantiates one
+     * from default weights and thresholds so that call-sites that construct
+     * MatchingService without arguments continue to work unchanged.
+     */
+    private function scorer(): ScoringService
+    {
+        return $this->scoringService ?? ScoringService::fromDefaults();
     }
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -115,11 +134,13 @@ class MatchingService
         // 3. Merge + deduplicate by UUID.
         $candidates = $this->mergeCandidates($byEmail, $byName);
 
+        $scorer = $this->scorer();
+
         // 4. Score every candidate and sort descending.
         $scored = [];
 
         foreach ($candidates as $candidate) {
-            $scored[] = array_merge($candidate, ['_score' => $this->scoreCandidate($candidate, $fields)]);
+            $scored[] = array_merge($candidate, ['_score' => $scorer->scoreCandidate($candidate, $fields)]);
         }
 
         usort($scored, static fn (array $a, array $b): int => $b['_score'] <=> $a['_score']);
@@ -130,7 +151,7 @@ class MatchingService
         // 5. Already-on-roster check for meaningful matches.
         $alreadyOnRoster = false;
 
-        if ($best !== null && $bestScore >= self::THRESHOLD_POSSIBLE) {
+        if ($best !== null && $bestScore >= $scorer->getThreshold(ScoringService::THRESHOLD_KEY_POSSIBLE)) {
             $alreadyOnRoster = $client->isPersonOnRoster(
                 (string) ($best['uuid'] ?? ''),
                 $membershipUuid,
@@ -138,8 +159,8 @@ class MatchingService
         }
 
         // 6. Categorise.
-        $category     = $this->categorizeScore($bestScore, $alreadyOnRoster);
-        $recordStatus = $this->resolveRecordStatus($bestScore, $alreadyOnRoster);
+        $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
+        $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
 
         // 7. Build JSON payloads — only for candidates at or above the threshold.
         $aboveThreshold = array_values(array_filter(
@@ -165,7 +186,7 @@ class MatchingService
                 fn (array $c): array => [
                     'uuid'     => (string) ($c['uuid'] ?? ''),
                     'score'    => $c['_score'],
-                    'category' => $this->categorizeScore($c['_score'], false),
+                    'category' => $scorer->categorizeScore($c['_score'], false),
                 ],
                 $aboveThreshold,
             ),
@@ -184,60 +205,15 @@ class MatchingService
     /**
      * Score a single MDP candidate against the submitted row fields.
      *
-     * Comparisons are case-insensitive and whitespace-trimmed.
-     * The highest-scoring rule that applies wins (decision-tree order).
+     * Delegates to the active ScoringService instance so that any custom
+     * weights injected via the constructor or WordPress filter are honoured.
      *
      * @param array{uuid: string, name: string, email: string, given_name: string, family_name: string} $candidate
      * @param array{first_name: string, last_name: string, email: string} $input
      */
     public function scoreCandidate(array $candidate, array $input): int
     {
-        $emailExact = $candidate['email'] !== ''
-            && strtolower(trim($candidate['email'])) === strtolower(trim($input['email']));
-
-        $firstExact = strtolower(trim($candidate['given_name'] ?? '')) === strtolower(trim($input['first_name']));
-        $lastExact  = strtolower(trim($candidate['family_name'] ?? '')) === strtolower(trim($input['last_name']));
-
-        // 100 — email + first + last all exact.
-        if ($emailExact && $firstExact && $lastExact) {
-            return self::SCORE_EXACT_MATCH;
-        }
-
-        // 80 — email exact but name has at least one discrepancy.
-        if ($emailExact) {
-            return self::SCORE_EMAIL_NAME_MISMATCH;
-        }
-
-        // 60 — both first and last exact but email is different.
-        if ($firstExact && $lastExact) {
-            return self::SCORE_NAME_DIFF_EMAIL;
-        }
-
-        $inputDomain     = $this->extractEmailDomain($input['email']);
-        $candidateDomain = $this->extractEmailDomain((string) ($candidate['email'] ?? ''));
-        $domainMatch     = $inputDomain !== '' && $inputDomain === $candidateDomain;
-
-        // 40 — email domain + last name match.
-        if ($domainMatch && $lastExact) {
-            return self::SCORE_DOMAIN_LAST;
-        }
-
-        // 30 — last name + first initial match.
-        $givenName    = (string) ($candidate['given_name'] ?? '');
-        $firstPartial = $input['first_name'] !== ''
-            && $givenName !== ''
-            && strtolower($givenName[0]) === strtolower($input['first_name'][0]);
-
-        if ($lastExact && $firstPartial) {
-            return self::SCORE_LAST_PARTIAL_FIRST;
-        }
-
-        // 20 — last name only.
-        if ($lastExact) {
-            return self::SCORE_LAST_ONLY;
-        }
-
-        return 0;
+        return $this->scorer()->scoreCandidate($candidate, $input);
     }
 
     /**
@@ -248,23 +224,7 @@ class MatchingService
      */
     public function categorizeScore(int $score, bool $alreadyOnRoster = false): string
     {
-        if ($alreadyOnRoster) {
-            return self::CATEGORY_READY_TO_SYNC;
-        }
-
-        if ($score === self::SCORE_EXACT_MATCH) {
-            return self::CATEGORY_READY_TO_SYNC;
-        }
-
-        if ($score >= self::THRESHOLD_PROBABLE) {
-            return self::CATEGORY_PROBABLE_MATCH;
-        }
-
-        if ($score >= self::THRESHOLD_POSSIBLE) {
-            return self::CATEGORY_POSSIBLE_MATCH;
-        }
-
-        return self::CATEGORY_READY_TO_SYNC;
+        return $this->scorer()->categorizeScore($score, $alreadyOnRoster);
     }
 
     /**
@@ -275,15 +235,17 @@ class MatchingService
      */
     public function resolveRecordStatus(int $score, bool $alreadyOnRoster): string
     {
-        if ($alreadyOnRoster) {
-            return self::STATUS_ALREADY_ON_ROSTER;
-        }
+        return $this->scorer()->resolveRecordStatus($score, $alreadyOnRoster);
+    }
 
-        if ($score === self::SCORE_EXACT_MATCH) {
-            return self::STATUS_EXACT_MATCH;
-        }
-
-        return self::STATUS_NEW_RECORD;
+    /**
+     * Extract the domain part of an email address (everything after '@').
+     *
+     * Returns an empty string when the address is malformed or empty.
+     */
+    public function extractEmailDomain(string $email): string
+    {
+        return $this->scorer()->extractEmailDomain($email);
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
@@ -314,21 +276,5 @@ class MatchingService
         }
 
         return $merged;
-    }
-
-    /**
-     * Extract the domain part of an email address (everything after '@').
-     *
-     * Returns an empty string when the address is malformed or empty.
-     */
-    public function extractEmailDomain(string $email): string
-    {
-        $atPos = strrpos($email, '@');
-
-        if ($atPos === false) {
-            return '';
-        }
-
-        return strtolower(substr($email, $atPos + 1));
     }
 }
