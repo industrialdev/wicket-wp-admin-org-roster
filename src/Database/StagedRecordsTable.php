@@ -325,6 +325,60 @@ class StagedRecordsTable
     }
 
     /**
+     * Return matching-job progress counts for the given upload session.
+     *
+     * Only valid, non-remove_existing rows are counted: remove_existing rows
+     * are synthetic records injected by the replace-mode diff (AORM-7.9) and
+     * are never processed by the matching job, so they must not skew the
+     * progress calculation.
+     *
+     * Returns:
+     *   - 'total'     — count of valid, matchable rows in the session.
+     *   - 'processed' — count of those rows whose sync_status is no longer
+     *                   'pending' (i.e. the matching job has finished with them).
+     *
+     * Used by UploadStatusController (AORM-7.11) to compute the percentage
+     * displayed by the React polling component (AORM-7.13).
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array{total: int, processed: int}
+     */
+    public function getMatchingProgress(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $total = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND record_status != 'remove_existing'",
+                $sessionId,
+            ),
+        );
+
+        $processed = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND record_status != 'remove_existing'
+                   AND sync_status != 'pending'",
+                $sessionId,
+            ),
+        );
+
+        return [
+            'total'     => $total,
+            'processed' => $processed,
+        ];
+    }
+
+    /**
      * Return true when at least one row with record_status = 'remove_existing'
      * already exists for the given session.
      *

@@ -68,6 +68,7 @@ final class Main
         (new Rest\UploadController())->register_routes();
         (new Rest\StagedRecordController())->register_routes();
         (new Rest\SyncController())->register_routes();
+        (new Rest\UploadStatusController())->register_routes(); // AORM-7.11
     }
 
     /**
