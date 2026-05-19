@@ -175,13 +175,17 @@ class StagedRecordsTable
      * (batching added in AORM-7.10) are deterministic.
      *
      * @param string $sessionId  The upload_session_id UUID.
+     * @param int    $limit      Maximum number of rows to return. 0 means no limit (default).
      * @return array<int, array<string, mixed>>  Rows as associative arrays; empty array when none found.
      */
-    public function getPendingMatchingRecords(string $sessionId): array
+    public function getPendingMatchingRecords(string $sessionId, int $limit = 0): array
     {
         global $wpdb;
 
         $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        // $limit is a typed int — sprintf is safe and avoids a nested prepare() call.
+        $limitClause = $limit > 0 ? sprintf('LIMIT %d', $limit) : '';
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -191,7 +195,8 @@ class StagedRecordsTable
                    AND validation_status = 'valid'
                    AND sync_status = 'pending'
                    AND record_status != 'remove_existing'
-                 ORDER BY id ASC",
+                 ORDER BY id ASC
+                 {$limitClause}",
                 $sessionId,
             ),
             \ARRAY_A,

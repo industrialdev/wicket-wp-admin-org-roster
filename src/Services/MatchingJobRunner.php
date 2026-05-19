@@ -34,7 +34,7 @@ use WicketAORM\Database\StagedRecordsTable;
  *   AORM-7.7  — build and persist match payload (match_count, matched_persons, match_details)
  *   AORM-7.8  — already-on-roster check (isPersonOnRoster → record_status=already_on_roster)
  *   AORM-7.9  — replace mode: inject remove_existing rows for absent roster members
- *               (batch scheduling in AORM-7.10)
+ *   AORM-7.10 — process in configurable batch size (default 50), re-schedule for next batch
  */
 class MatchingJobRunner
 {
@@ -47,6 +47,21 @@ class MatchingJobRunner
      *   - MatchingJobRunner      — re-dispatch for next batch (AORM-7.10)
      */
     public const HOOK = 'wicket_aorm_run_matching';
+
+    /**
+     * WordPress option key for plugin settings.
+     *
+     * The 'matching_batch_size' key within this option controls how many
+     * staged records are processed per job invocation (AORM-7.10).
+     */
+    private const SETTINGS_OPTION = 'wicket_aorm_settings';
+
+    /**
+     * Default number of staged records processed per job invocation.
+     *
+     * Overridden by wicket_aorm_settings[matching_batch_size] (AORM-7.10).
+     */
+    public const DEFAULT_BATCH_SIZE = 50;
 
     public function __construct(
         private readonly ?SchedulerService $schedulerService = null,
@@ -80,7 +95,12 @@ class MatchingJobRunner
      * Already-on-roster check (AORM-7.8): the top candidate's UUID is checked
      * against the roster via MdpClient::isPersonOnRoster(); when true the record
      * gets category=ready_to_sync and record_status=already_on_roster.
-     * Batch scheduling / re-dispatch: AORM-7.10.
+     * Batch scheduling / re-dispatch (AORM-7.10): reads matching_batch_size from
+     * wicket_aorm_settings (default 50). After processing the batch, if the batch
+     * was full the job re-dispatches itself so the next batch is processed in a
+     * subsequent Action Scheduler / WP-Cron invocation.  Each processed record
+     * has its sync_status advanced to 'ready_to_sync' so it is not re-fetched
+     * by subsequent batches.
      *
      * @param string $uploadSessionId UUID of the upload session to process.
      */
@@ -90,11 +110,18 @@ class MatchingJobRunner
             return;
         }
 
-        $table  = $this->stagedRecordsTable ?? new StagedRecordsTable();
-        $client = $this->mdpClient ?? new MdpClient();
-        $scorer = $this->scoringService ?? ScoringService::fromWordPressFilter();
+        $table     = $this->stagedRecordsTable ?? new StagedRecordsTable();
+        $client    = $this->mdpClient ?? new MdpClient();
+        $scorer    = $this->scoringService ?? ScoringService::fromWordPressFilter();
+        $scheduler = $this->schedulerService ?? new SchedulerService();
 
-        $records = $table->getPendingMatchingRecords($uploadSessionId);
+        // AORM-7.10: Read configurable batch size (default 50).
+        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
+        $batchSize = isset($settings['matching_batch_size']) && (int) $settings['matching_batch_size'] > 0
+            ? (int) $settings['matching_batch_size']
+            : self::DEFAULT_BATCH_SIZE;
+
+        $records = $table->getPendingMatchingRecords($uploadSessionId, $batchSize);
 
         foreach ($records as $record) {
             $fields = $this->extractFields($record);
@@ -168,12 +195,15 @@ class MatchingJobRunner
                 ),
             );
 
+            // AORM-7.10: advance sync_status to 'ready_to_sync' so this record
+            // is not re-fetched by subsequent batch invocations.
             $table->updateRecord((int) $record['id'], [
                 'category'        => $category,
                 'record_status'   => $recordStatus,
                 'match_count'     => $matchCount,
                 'matched_persons' => $matchedPersons,
                 'match_details'   => $matchDetails,
+                'sync_status'     => 'ready_to_sync',
                 'updated_at'      => current_time('mysql'),
             ]);
         }
@@ -184,6 +214,16 @@ class MatchingJobRunner
         // to call on every handle() invocation — if removal rows already exist
         // (e.g. on a job retry) it exits immediately.
         $this->maybeInsertReplaceModeRemovals($uploadSessionId, $table, $client);
+
+        // AORM-7.10: If we processed a full batch, there may be more records
+        // waiting.  Re-dispatch the job so the next batch is handled in a
+        // separate Action Scheduler / WP-Cron invocation.
+        if (count($records) >= $batchSize) {
+            $scheduler->dispatch(
+                self::HOOK,
+                ['upload_session_id' => $uploadSessionId],
+            );
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
