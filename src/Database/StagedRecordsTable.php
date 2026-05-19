@@ -163,6 +163,43 @@ class StagedRecordsTable
     }
 
     /**
+     * Return staged records that are ready for background MDP matching.
+     *
+     * A row is "pending matching" when:
+     *   - It belongs to the given upload session.
+     *   - Its validation_status is 'valid' (invalid/duplicate rows are skipped).
+     *   - Its sync_status is 'pending' (not yet categorised by the matching job).
+     *
+     * Used by MatchingJobRunner::handle() (AORM-7.6) to build the per-batch
+     * work list. Rows are returned in insertion order so that partial runs
+     * (batching added in AORM-7.10) are deterministic.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array<int, array<string, mixed>>  Rows as associative arrays; empty array when none found.
+     */
+    public function getPendingMatchingRecords(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT * FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND sync_status = 'pending'
+                 ORDER BY id ASC",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
      * Return all staged records for a given upload session, ordered by
      * insertion order (id ASC).
      *

@@ -4,17 +4,14 @@ declare(strict_types=1);
 
 namespace WicketAORM\Services;
 
+use WicketAORM\Database\StagedRecordsTable;
+
 /**
  * MatchingJobRunner — background job handler for MDP duplicate detection.
  *
  * This class is the WordPress action hook callback registered under HOOK.
  * Action Scheduler (or WP-Cron via the fallback path in SchedulerService)
  * invokes handle() with the upload_session_id of the batch to process.
- *
- * The actual per-row matching logic (scoring, categorisation, DB updates)
- * is added by subsequent tickets (AORM-7.3 through AORM-7.10). This class
- * provides the entry-point contract: a stable hook name constant and a
- * typed handle() signature that downstream code can depend on.
  *
  * Dispatching this job is done via SchedulerService::dispatch():
  *
@@ -30,6 +27,13 @@ namespace WicketAORM\Services;
  *   do_action('wicket_aorm_run_matching', $uploadSessionId)
  *
  * which maps directly to handle(string $uploadSessionId).
+ *
+ * Milestone coverage:
+ *   AORM-7.2  — hook constant + handle() signature
+ *   AORM-7.6  — categorise each row from its highest MDP match score
+ *               (already-on-roster check wired in AORM-7.8;
+ *                match payload stored in AORM-7.7;
+ *                batch scheduling in AORM-7.10)
  */
 class MatchingJobRunner
 {
@@ -45,24 +49,138 @@ class MatchingJobRunner
 
     public function __construct(
         private readonly ?SchedulerService $schedulerService = null,
+        private readonly ?StagedRecordsTable $stagedRecordsTable = null,
+        private readonly ?MdpClient $mdpClient = null,
+        private readonly ?ScoringService $scoringService = null,
     ) {
     }
+
+    // ── Public entry point ────────────────────────────────────────────────
 
     /**
      * Entry point invoked by Action Scheduler / WP-Cron.
      *
-     * Receives the upload session UUID and orchestrates MDP matching for
-     * the next unprocessed batch of staged records in that session.
+     * Fetches the next batch of unprocessed valid staged records for the
+     * given session, scores each against MDP candidates, categorises by the
+     * highest score, and writes category + record_status back to the DB.
      *
-     * The full implementation is added across AORM-7.3 through AORM-7.10.
-     * This stub establishes the callable contract so the hook registration
-     * (AORM-7.2) and any dispatch call-sites can be wired without waiting
-     * for the matching logic to be complete.
+     * Scoring rules (default weights — override via wicket_aorm_scoring_config filter):
+     *   100 — email + first + last exact  → ready_to_sync  (exact_match)
+     *    80 — email exact, name differs   → probable_match
+     *    60 — first + last exact, diff email → probable_match
+     *    40 — email domain + last exact   → possible_match
+     *    30 — last + first initial        → possible_match
+     *    20 — last name only              → possible_match
+     *     0 — no match                   → ready_to_sync  (new_record)
+     *
+     * Thresholds: 80+ → probable_match, 20–79 → possible_match, 0 → new_record.
+     *
+     * Already-on-roster check: wired in AORM-7.8.
+     * Match payload (match_count, matched_persons, match_details): AORM-7.7.
+     * Batch scheduling / re-dispatch: AORM-7.10.
      *
      * @param string $uploadSessionId UUID of the upload session to process.
      */
     public function handle(string $uploadSessionId): void
     {
-        // Implementation added in AORM-7.3 – 7.10.
+        if ($uploadSessionId === '') {
+            return;
+        }
+
+        $table  = $this->stagedRecordsTable ?? new StagedRecordsTable();
+        $client = $this->mdpClient ?? new MdpClient();
+        $scorer = $this->scoringService ?? ScoringService::fromWordPressFilter();
+
+        $records = $table->getPendingMatchingRecords($uploadSessionId);
+
+        foreach ($records as $record) {
+            $fields = $this->extractFields($record);
+
+            // Search MDP by email, then by name (AORM-7.4).
+            $byEmail = $client->searchPersonsByEmail($fields['email']);
+            $byName  = $client->searchPersonsByName($fields['first_name'], $fields['last_name']);
+
+            // Merge and deduplicate candidates by UUID (AORM-7.5).
+            $candidates = $this->mergeCandidates($byEmail, $byName);
+
+            // Score each candidate; retain only the highest score (AORM-7.5).
+            $bestScore = 0;
+
+            foreach ($candidates as $candidate) {
+                $score = $scorer->scoreCandidate($candidate, $fields);
+
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                }
+            }
+
+            // Categorise from the highest score (AORM-7.6).
+            // Note: alreadyOnRoster=false here — AORM-7.8 wires the roster check.
+            $category     = $scorer->categorizeScore($bestScore);
+            $recordStatus = $scorer->resolveRecordStatus($bestScore, false);
+
+            // Persist category and record_status.
+            // match_count / matched_persons / match_details stored in AORM-7.7.
+            $table->updateRecord((int) $record['id'], [
+                'category'      => $category,
+                'record_status' => $recordStatus,
+                'updated_at'    => current_time('mysql'),
+            ]);
+        }
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────
+
+    /**
+     * Extract the person fields needed for MDP matching from a staged record row.
+     *
+     * The raw_data column stores the parsed CSV row as a JSON object.
+     * Returns empty strings for any missing keys so scoring rules degrade
+     * gracefully rather than throwing.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @return array{first_name: string, last_name: string, email: string}
+     */
+    private function extractFields(array $record): array
+    {
+        $raw = json_decode((string) ($record['raw_data'] ?? ''), true);
+        $raw = is_array($raw) ? $raw : [];
+
+        return [
+            'first_name' => (string) ($raw['first_name'] ?? ''),
+            'last_name'  => (string) ($raw['last_name'] ?? ''),
+            'email'      => (string) ($raw['email'] ?? ''),
+        ];
+    }
+
+    /**
+     * Merge two candidate lists from MDP search and deduplicate by UUID.
+     *
+     * The first occurrence of each UUID is kept; subsequent duplicates are
+     * discarded. Candidates with an empty UUID are dropped silently.
+     *
+     * @param list<array<string,mixed>> $a  Results from searchPersonsByEmail().
+     * @param list<array<string,mixed>> $b  Results from searchPersonsByName().
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function mergeCandidates(array $a, array $b): array
+    {
+        $seen   = [];
+        $merged = [];
+
+        foreach (array_merge($a, $b) as $candidate) {
+            $uuid = (string) ($candidate['uuid'] ?? '');
+
+            if ($uuid === '' || isset($seen[$uuid])) {
+                continue;
+            }
+
+            $seen[$uuid] = true;
+            $merged[]    = $candidate;
+        }
+
+        return $merged;
     }
 }
