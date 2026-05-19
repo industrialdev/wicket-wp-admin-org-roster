@@ -13,6 +13,21 @@ namespace WicketAORM\Services;
 class MdpClient
 {
     /**
+     * Total number of attempts (initial + retries) for retryable MDP API calls.
+     *
+     * A value of 3 means: 1 initial attempt + 2 retries before giving up.
+     */
+    public const RETRY_MAX_ATTEMPTS = 3;
+
+    /**
+     * Base delay in milliseconds applied between retry attempts.
+     *
+     * The actual delay follows exponential back-off: base × 2^(attempt).
+     * Attempt 0 fails → sleep 1 000 ms; attempt 1 fails → sleep 2 000 ms.
+     */
+    public const RETRY_BASE_DELAY_MS = 1000;
+
+    /**
      * The only MDP membership status excluded from the roster list view.
      *
      * The MDP exposes three effective states — Active (including Grace Period
@@ -625,7 +640,7 @@ class MdpClient
         ]);
 
         try {
-            $response = $client->get('people?' . $query);
+            $response = $this->callWithRetry(fn () => $client->get('people?' . $query));
 
             return $this->normalizePeopleSearchResults($response);
         } catch (\Exception $e) {
@@ -673,7 +688,7 @@ class MdpClient
         ]);
 
         try {
-            $response = $client->get('people?' . $query);
+            $response = $this->callWithRetry(fn () => $client->get('people?' . $query));
 
             return $this->normalizePeopleSearchResults($response);
         } catch (\Exception $e) {
@@ -707,12 +722,89 @@ class MdpClient
         $endpoint = 'organization_memberships/' . $membershipUuid . '/person_memberships?' . $query;
 
         try {
-            $response = $client->get($endpoint);
+            $response = $this->callWithRetry(fn () => $client->get($endpoint));
 
             return is_array($response) && ! empty($response['data']);
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Call an MDP API callable with exponential-backoff retry.
+     *
+     * Retries up to {@see RETRY_MAX_ATTEMPTS} total attempts (including the first).
+     * Only retries when {@see isRetryableException()} returns true for the thrown
+     * exception. Delays between attempts follow exponential back-off starting at
+     * {@see RETRY_BASE_DELAY_MS} milliseconds.
+     *
+     * @param callable $apiCall Zero-argument callable that performs the API call.
+     *
+     * @return mixed Whatever the callable returns on success.
+     *
+     * @throws \Exception The last caught exception when all attempts are exhausted,
+     *                    or any non-retryable exception immediately.
+     */
+    protected function callWithRetry(callable $apiCall): mixed
+    {
+        for ($attempt = 0; $attempt < self::RETRY_MAX_ATTEMPTS; $attempt++) {
+            try {
+                return $apiCall();
+            } catch (\Exception $e) {
+                $isLastAttempt = ($attempt + 1) >= self::RETRY_MAX_ATTEMPTS;
+
+                if ($isLastAttempt || ! $this->isRetryableException($e)) {
+                    throw $e;
+                }
+
+                // Exponential back-off: RETRY_BASE_DELAY_MS × 2^attempt (ms → µs).
+                $delayMicroseconds = self::RETRY_BASE_DELAY_MS * (2 ** $attempt) * 1000;
+
+                $this->sleepMicroseconds((int) $delayMicroseconds);
+            }
+        }
+
+        // Unreachable — the loop always returns or throws before exiting here.
+        // Satisfies static analysis tools that require all code paths to return.
+        throw new \RuntimeException('callWithRetry: loop exited without result.');
+    }
+
+    /**
+     * Determine whether an exception should trigger a retry.
+     *
+     * Retryable conditions:
+     *   - HTTP 429 Too Many Requests (MDP rate limiting).
+     *   - HTTP 5xx Server Error (transient server fault).
+     *   - Network-level errors detected by message (timeouts, connection drops).
+     *
+     * @param \Exception $e Exception to inspect.
+     */
+    protected function isRetryableException(\Exception $e): bool
+    {
+        // Guzzle-compatible: inspect HTTP status code via getResponse().
+        if (method_exists($e, 'getResponse') && $e->getResponse() !== null) {
+            $statusCode = (int) $e->getResponse()->getStatusCode();
+
+            return $statusCode === 429 || $statusCode >= 500;
+        }
+
+        // Fall back to message inspection for network-level errors.
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'timeout') || str_contains($message, 'timed out');
+    }
+
+    /**
+     * Sleep for the given number of microseconds.
+     *
+     * Extracted to a protected method so tests can subclass and override it to
+     * avoid real delays without patching global state.
+     *
+     * @param int $microseconds Duration to sleep (1 000 000 µs = 1 s).
+     */
+    protected function sleepMicroseconds(int $microseconds): void
+    {
+        usleep($microseconds);
     }
 
     /**
