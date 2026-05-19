@@ -31,9 +31,9 @@ use WicketAORM\Database\StagedRecordsTable;
  * Milestone coverage:
  *   AORM-7.2  — hook constant + handle() signature
  *   AORM-7.6  — categorise each row from its highest MDP match score
- *               (already-on-roster check wired in AORM-7.8;
- *                match payload stored in AORM-7.7;
- *                batch scheduling in AORM-7.10)
+ *   AORM-7.7  — build and persist match payload (match_count, matched_persons, match_details)
+ *   AORM-7.8  — already-on-roster check (isPersonOnRoster → record_status=already_on_roster)
+ *               (batch scheduling in AORM-7.10)
  */
 class MatchingJobRunner
 {
@@ -76,7 +76,9 @@ class MatchingJobRunner
      *
      * Thresholds: 80+ → probable_match, 20–79 → possible_match, 0 → new_record.
      *
-     * Already-on-roster check: wired in AORM-7.8.
+     * Already-on-roster check (AORM-7.8): the top candidate's UUID is checked
+     * against the roster via MdpClient::isPersonOnRoster(); when true the record
+     * gets category=ready_to_sync and record_status=already_on_roster.
      * Batch scheduling / re-dispatch: AORM-7.10.
      *
      * @param string $uploadSessionId UUID of the upload session to process.
@@ -114,10 +116,22 @@ class MatchingJobRunner
 
             $bestScore = isset($scored[0]) ? (int) $scored[0]['_score'] : 0;
 
-            // Categorise from the highest score (AORM-7.6).
-            // Note: alreadyOnRoster=false here — AORM-7.8 wires the roster check.
-            $category     = $scorer->categorizeScore($bestScore);
-            $recordStatus = $scorer->resolveRecordStatus($bestScore, false);
+            // AORM-7.8: Check if the top candidate is already on the roster.
+            // Only perform the API call when at least one candidate was scored —
+            // a bestScore of 0 means no candidates matched, so there is no UUID
+            // to look up and alreadyOnRoster stays false.
+            $alreadyOnRoster = false;
+
+            if ($bestScore > 0 && isset($scored[0]['uuid']) && (string) $scored[0]['uuid'] !== '') {
+                $alreadyOnRoster = $client->isPersonOnRoster(
+                    (string) $scored[0]['uuid'],
+                    (string) ($record['membership_uuid'] ?? ''),
+                );
+            }
+
+            // Categorise from the highest score (AORM-7.6, AORM-7.8).
+            $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
+            $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
 
             // AORM-7.7: Build match payload for all candidates at or above the
             // possible-match threshold.  Candidates below threshold are noise
