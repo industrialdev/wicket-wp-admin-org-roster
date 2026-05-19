@@ -555,6 +555,41 @@ class MdpClient
     }
 
     /**
+     * Fetch all person_membership records for an org roster, paginating until
+     * all pages are consumed.
+     *
+     * Delegates to getRosterMembers() with a fixed page size of 100, iterating
+     * until `total_pages` is exhausted. Returns a flat list in the same member
+     * shape that getRosterMembers() returns in its `members` key.
+     *
+     * Used by MatchingJobRunner (AORM-7.9) to build the full current-roster
+     * set for the replace-mode diff without callers needing to handle pagination
+     * themselves.
+     *
+     * @param string $orgUuid        Organisation UUID.
+     * @param string $membershipUuid Org-membership UUID.
+     * @return list<array{person_uuid: string, email: string, name: string, title: string, phone: string, roles: list<string>, is_owner: bool}>
+     */
+    public function getAllRosterMembers(string $orgUuid, string $membershipUuid): array
+    {
+        $all     = [];
+        $page    = 1;
+        $perPage = 100;
+
+        do {
+            $result     = $this->getRosterMembers($orgUuid, $membershipUuid, [
+                'page'     => $page,
+                'per_page' => $perPage,
+            ]);
+            $all        = array_merge($all, $result['members']);
+            $totalPages = max(1, (int) $result['total_pages']);
+            $page++;
+        } while ($page <= $totalPages);
+
+        return $all;
+    }
+
+    /**
      * Search MDP for people by exact primary email address.
      *
      * Uses the `people` endpoint with a Ransack `primary_email_address_eq` filter.

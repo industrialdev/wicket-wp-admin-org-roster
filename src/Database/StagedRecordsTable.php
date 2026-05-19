@@ -190,6 +190,7 @@ class StagedRecordsTable
                  WHERE upload_session_id = %s
                    AND validation_status = 'valid'
                    AND sync_status = 'pending'
+                   AND record_status != 'remove_existing'
                  ORDER BY id ASC",
                 $sessionId,
             ),
@@ -226,5 +227,122 @@ class StagedRecordsTable
         );
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Return session-level context from any row in the given session.
+     *
+     * All rows in a session share the same action_type, org_uuid,
+     * membership_uuid, and uploaded_by values. Returns null when no rows
+     * exist for the session.
+     *
+     * Used by MatchingJobRunner (AORM-7.9) to detect replace mode and
+     * resolve the org + membership context without requiring callers to
+     * carry this data through the call stack.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array{action_type: string, org_uuid: string, membership_uuid: string, uploaded_by: int}|null
+     */
+    public function getSessionContext(string $sessionId): ?array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT action_type, org_uuid, membership_uuid, uploaded_by
+                 FROM {$table}
+                 WHERE upload_session_id = %s
+                 LIMIT 1",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        if (! is_array($row)) {
+            return null;
+        }
+
+        return [
+            'action_type'     => (string) ($row['action_type'] ?? ''),
+            'org_uuid'        => (string) ($row['org_uuid'] ?? ''),
+            'membership_uuid' => (string) ($row['membership_uuid'] ?? ''),
+            'uploaded_by'     => (int)    ($row['uploaded_by'] ?? 0),
+        ];
+    }
+
+    /**
+     * Return all email addresses from valid, non-removal rows in a session.
+     *
+     * Reads the `raw_data` JSON column for each valid, non-remove_existing
+     * row and extracts the `email` field. Emails are lowercased and
+     * deduplicated. Used by MatchingJobRunner (AORM-7.9) to build the
+     * "uploaded" email set for replace-mode diff.
+     *
+     * Rows with record_status = 'remove_existing' are excluded so that
+     * synthetic removal rows injected by AORM-7.9 do not pollute the set.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return list<string>  Lowercased, unique email addresses; empty list when none found.
+     */
+    public function getValidRowEmailsForSession(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT raw_data FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND record_status != 'remove_existing'",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        $emails = [];
+
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $data  = json_decode((string) ($row['raw_data'] ?? ''), true);
+            $email = strtolower(trim((string) ($data['email'] ?? '')));
+
+            if ($email !== '') {
+                $emails[] = $email;
+            }
+        }
+
+        return array_values(array_unique($emails));
+    }
+
+    /**
+     * Return true when at least one row with record_status = 'remove_existing'
+     * already exists for the given session.
+     *
+     * Used by MatchingJobRunner (AORM-7.9) as an idempotency guard: when
+     * removal rows have already been injected (e.g. on a job retry), the
+     * replace-mode diff is skipped so duplicates are never created.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     */
+    public function hasRemoveExistingRecords(string $sessionId): bool
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND record_status = 'remove_existing'",
+                $sessionId,
+            ),
+        ) > 0;
     }
 }

@@ -33,6 +33,7 @@ use WicketAORM\Database\StagedRecordsTable;
  *   AORM-7.6  — categorise each row from its highest MDP match score
  *   AORM-7.7  — build and persist match payload (match_count, matched_persons, match_details)
  *   AORM-7.8  — already-on-roster check (isPersonOnRoster → record_status=already_on_roster)
+ *   AORM-7.9  — replace mode: inject remove_existing rows for absent roster members
  *               (batch scheduling in AORM-7.10)
  */
 class MatchingJobRunner
@@ -176,6 +177,13 @@ class MatchingJobRunner
                 'updated_at'      => current_time('mysql'),
             ]);
         }
+
+        // AORM-7.9: After scoring all rows in the batch, inject synthetic
+        // "Remove Existing Record" rows for roster members absent from the
+        // upload (replace mode only).  The method is idempotent so it is safe
+        // to call on every handle() invocation — if removal rows already exist
+        // (e.g. on a job retry) it exits immediately.
+        $this->maybeInsertReplaceModeRemovals($uploadSessionId, $table, $client);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────
@@ -231,5 +239,92 @@ class MatchingJobRunner
         }
 
         return $merged;
+    }
+
+    /**
+     * Inject synthetic "Remove Existing Record" staged rows for replace-mode sessions.
+     *
+     * For replace-mode uploads (action_type = 'replace') only, this method:
+     *   1. Reads all valid uploaded email addresses from the session.
+     *   2. Fetches all current roster members from MDP (all pages).
+     *   3. For each roster member whose email is absent from the uploaded set,
+     *      inserts a staged record with category = 'ready_to_sync' and
+     *      record_status = 'remove_existing' so that SyncService knows to
+     *      end-date that person's org relationship during the sync phase.
+     *
+     * Idempotent: exits immediately when any remove_existing rows already exist
+     * for the session, so retries and re-runs never create duplicates.
+     *
+     * Email comparison is case-insensitive (both sides lowercased).
+     *
+     * @param string             $uploadSessionId Upload session UUID.
+     * @param StagedRecordsTable $table           DB table accessor.
+     * @param MdpClient          $client          MDP API client.
+     */
+    private function maybeInsertReplaceModeRemovals(
+        string $uploadSessionId,
+        StagedRecordsTable $table,
+        MdpClient $client,
+    ): void {
+        // Idempotency guard — skip if removal rows already exist.
+        if ($table->hasRemoveExistingRecords($uploadSessionId)) {
+            return;
+        }
+
+        // Read session context to determine action_type and org/membership UUIDs.
+        $context = $table->getSessionContext($uploadSessionId);
+
+        if ($context === null || $context['action_type'] !== 'replace') {
+            return;
+        }
+
+        $orgUuid        = $context['org_uuid'];
+        $membershipUuid = $context['membership_uuid'];
+        $uploadedBy     = $context['uploaded_by'];
+
+        // Build a lookup set of uploaded emails (lowercased) for O(1) lookup.
+        $uploadedEmails = array_flip(
+            $table->getValidRowEmailsForSession($uploadSessionId),
+        );
+
+        // Fetch every current roster member (all MDP pages).
+        $currentMembers = $client->getAllRosterMembers($orgUuid, $membershipUuid);
+
+        $now = current_time('mysql');
+
+        foreach ($currentMembers as $member) {
+            $memberEmail = strtolower(trim((string) ($member['email'] ?? '')));
+
+            // Skip members with no email or whose email appears in the upload.
+            if ($memberEmail === '' || isset($uploadedEmails[$memberEmail])) {
+                continue;
+            }
+
+            // This roster member was not in the upload — schedule removal.
+            $table->insertRecord([
+                'upload_session_id'  => $uploadSessionId,
+                'action_type'        => 'replace',
+                'org_uuid'           => $orgUuid,
+                'membership_uuid'    => $membershipUuid,
+                'raw_data'           => (string) json_encode([
+                    'person_uuid' => (string) ($member['person_uuid'] ?? ''),
+                    'first_name'  => '',
+                    'last_name'   => '',
+                    'email'       => (string) ($member['email'] ?? ''),
+                    'name'        => (string) ($member['name'] ?? ''),
+                ]),
+                'validation_status'  => 'valid',
+                'validation_message' => null,
+                'category'           => 'ready_to_sync',
+                'record_status'      => 'remove_existing',
+                'match_count'        => 0,
+                'matched_persons'    => null,
+                'match_details'      => null,
+                'sync_status'        => 'pending',
+                'uploaded_by'        => $uploadedBy,
+                'created_at'         => $now,
+                'updated_at'         => $now,
+            ]);
+        }
     }
 }
