@@ -62,7 +62,8 @@ class MatchingJobRunner
      *
      * Fetches the next batch of unprocessed valid staged records for the
      * given session, scores each against MDP candidates, categorises by the
-     * highest score, and writes category + record_status back to the DB.
+     * highest score, and writes category, record_status, and the full match
+     * payload (match_count, matched_persons, match_details) back to the DB.
      *
      * Scoring rules (default weights — override via wicket_aorm_scoring_config filter):
      *   100 — email + first + last exact  → ready_to_sync  (exact_match)
@@ -76,7 +77,6 @@ class MatchingJobRunner
      * Thresholds: 80+ → probable_match, 20–79 → possible_match, 0 → new_record.
      *
      * Already-on-roster check: wired in AORM-7.8.
-     * Match payload (match_count, matched_persons, match_details): AORM-7.7.
      * Batch scheduling / re-dispatch: AORM-7.10.
      *
      * @param string $uploadSessionId UUID of the upload session to process.
@@ -103,28 +103,63 @@ class MatchingJobRunner
             // Merge and deduplicate candidates by UUID (AORM-7.5).
             $candidates = $this->mergeCandidates($byEmail, $byName);
 
-            // Score each candidate; retain only the highest score (AORM-7.5).
-            $bestScore = 0;
+            // Score every candidate and sort descending (AORM-7.5).
+            $scored = [];
 
             foreach ($candidates as $candidate) {
-                $score = $scorer->scoreCandidate($candidate, $fields);
-
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                }
+                $scored[] = array_merge($candidate, ['_score' => $scorer->scoreCandidate($candidate, $fields)]);
             }
+
+            usort($scored, static fn (array $a, array $b): int => $b['_score'] <=> $a['_score']);
+
+            $bestScore = isset($scored[0]) ? (int) $scored[0]['_score'] : 0;
 
             // Categorise from the highest score (AORM-7.6).
             // Note: alreadyOnRoster=false here — AORM-7.8 wires the roster check.
             $category     = $scorer->categorizeScore($bestScore);
             $recordStatus = $scorer->resolveRecordStatus($bestScore, false);
 
-            // Persist category and record_status.
-            // match_count / matched_persons / match_details stored in AORM-7.7.
+            // AORM-7.7: Build match payload for all candidates at or above the
+            // possible-match threshold.  Candidates below threshold are noise
+            // and are not stored.
+            $possibleThreshold = $scorer->getThreshold(ScoringService::THRESHOLD_KEY_POSSIBLE);
+
+            $aboveThreshold = array_values(array_filter(
+                $scored,
+                static fn (array $c): bool => (int) $c['_score'] >= $possibleThreshold,
+            ));
+
+            $matchCount = count($aboveThreshold);
+
+            $matchedPersons = (string) json_encode(
+                array_map(
+                    static fn (array $c): array => [
+                        'uuid'  => (string) ($c['uuid'] ?? ''),
+                        'name'  => (string) ($c['name'] ?? ''),
+                        'email' => (string) ($c['email'] ?? ''),
+                    ],
+                    $aboveThreshold,
+                ),
+            );
+
+            $matchDetails = (string) json_encode(
+                array_map(
+                    fn (array $c): array => [
+                        'uuid'     => (string) ($c['uuid'] ?? ''),
+                        'score'    => (int) $c['_score'],
+                        'category' => $scorer->categorizeScore((int) $c['_score']),
+                    ],
+                    $aboveThreshold,
+                ),
+            );
+
             $table->updateRecord((int) $record['id'], [
-                'category'      => $category,
-                'record_status' => $recordStatus,
-                'updated_at'    => current_time('mysql'),
+                'category'        => $category,
+                'record_status'   => $recordStatus,
+                'match_count'     => $matchCount,
+                'matched_persons' => $matchedPersons,
+                'match_details'   => $matchDetails,
+                'updated_at'      => current_time('mysql'),
             ]);
         }
     }
