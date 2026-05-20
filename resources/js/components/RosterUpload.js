@@ -16,6 +16,15 @@
  * validation-review — accordion review screen      (AORM-8)
  * sync-progress     — commit & sync progress       (AORM-9)
  *
+ * Initial step resolution
+ * -----------------------
+ * Assets.php queries the database at page-render time and injects an
+ * `activeSession` object into window.aormContext:
+ *
+ *   null                        → no active session → start at 'landing'
+ *   { isComplete: false, … }    → matching in progress → 'matching-progress'
+ *   { isComplete: true,  … }    → matching done        → 'validation-review'
+ *
  * Exported constants
  * ------------------
  * WIZARD_STEPS — ordered array of all step names (useful for tests).
@@ -48,19 +57,40 @@ export const WIZARD_STEPS = [
 	'sync-progress',
 ];
 
+/**
+ * Derive the initial wizard step from the PHP-injected active session.
+ *
+ * @param {{ sessionId: string, isComplete: boolean }|null} activeSession
+ * @returns {string}
+ */
+function initialStep( activeSession ) {
+	if ( ! activeSession?.sessionId ) {
+		return 'landing';
+	}
+
+	return activeSession.isComplete ? 'validation-review' : 'matching-progress';
+}
+
 export default function RosterUpload( { orgUuid, membershipUuid } ) {
-	/**
-	 * Active wizard step.
-	 * @type {[string, Function]}
-	 */
-	const [ step, setStep ] = useState( 'landing' );
+	// Active session injected by Assets.php at page-render time.
+	const activeSession = window.aormContext?.activeSession ?? null;
 
 	/**
-	 * Active upload session ID (set after a CSV upload or individual add
-	 * creates a staged-records session on the server).
+	 * Active wizard step — initialised from the PHP-injected session so the
+	 * correct step is shown immediately on page load with no flash or extra
+	 * request, regardless of which admin opened the page.
+	 *
+	 * @type {[string, Function]}
+	 */
+	const [ step, setStep ] = useState( () => initialStep( activeSession ) );
+
+	/**
+	 * Active upload session ID — pre-populated when Assets.php found an
+	 * in-progress session, otherwise set after a CSV upload creates one.
+	 *
 	 * @type {[string|null, Function]}
 	 */
-	const [ sessionId, setSessionId ] = useState( null );
+	const [ sessionId, setSessionId ] = useState( activeSession?.sessionId ?? null );
 
 	/**
 	 * Bulk-upload action chosen by the admin: 'add' (default) or 'replace'.
@@ -71,7 +101,6 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 	/**
 	 * Match category returned by the individual add endpoint (AORM-5.7).
 	 * One of 'ready_to_sync' | 'probable_match' | 'possible_match' | null.
-	 * Set after a successful individual add; consumed by validation-review.
 	 *
 	 * @type {[string|null, Function]}
 	 */
@@ -79,12 +108,13 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 
 	/**
 	 * The File object chosen by the admin in the upload-file step.
-	 * Lifted here (from UploadFileStep's local state) so CsvValidationStep
-	 * can access it when POSTing to the upload endpoint (AORM-6.18).
+	 * Lifted here so CsvValidationStep can POST it to the upload endpoint.
 	 *
 	 * @type {[File|null, Function]}
 	 */
 	const [ selectedFile, setSelectedFile ] = useState( null );
+
+	// ── Wizard actions ────────────────────────────────────────────────────────
 
 	/** Navigate to any named step. */
 	const goToStep = useCallback( ( nextStep ) => {
@@ -104,6 +134,8 @@ export default function RosterUpload( { orgUuid, membershipUuid } ) {
 		setMatchCategory( null );
 		setSelectedFile( null );
 	}, [] );
+
+	// ── Render ────────────────────────────────────────────────────────────────
 
 	/** Props forwarded to every step component. */
 	const sharedProps = {

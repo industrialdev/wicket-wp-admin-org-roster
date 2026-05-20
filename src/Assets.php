@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM;
 
 use WicketAORM\Admin\MenuPage;
+use WicketAORM\Database\StagedRecordsTable;
 
 /**
  * Enqueue React bundles and WP admin styles.
@@ -89,11 +90,20 @@ class Assets
      * Build the aormContext object passed to window via wp_localize_script.
      *
      * All pages receive restUrl and nonce. The roster-detail page additionally
-     * receives orgUuid and membershipUuid — read from the request URL params
-     * here in PHP so React never needs to parse window.location.search itself.
+     * receives orgUuid, membershipUuid, and activeSession — read from the
+     * request URL params and the database here in PHP so React never needs to
+     * parse window.location.search itself or make an extra API call on mount.
+     *
+     * activeSession shape (null when no session is in progress):
+     *   { sessionId: string, isComplete: bool }
+     *
+     * React reads this to set the wizard's initial step:
+     *   null              → 'landing'
+     *   isComplete=false  → 'matching-progress'
+     *   isComplete=true   → 'validation-review'
      *
      * @param string $hookSuffix
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function buildLocalizationData(string $hookSuffix): array
     {
@@ -104,9 +114,12 @@ class Assets
 
         if (str_contains($hookSuffix, MenuPage::DETAIL_SLUG)) {
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            $data['orgUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['org_uuid'] ?? '')));
+            $orgUuid = sanitize_text_field(wp_unslash((string) ($_GET['org_uuid'] ?? '')));
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            $data['membershipUuid'] = sanitize_text_field(wp_unslash((string) ($_GET['membership_uuid'] ?? '')));
+            $membershipUuid = sanitize_text_field(wp_unslash((string) ($_GET['membership_uuid'] ?? '')));
+
+            $data['orgUuid']        = $orgUuid;
+            $data['membershipUuid'] = $membershipUuid;
 
             // MDP admin base URL used by RosterHeading to build the external link.
             // get_wicket_settings() is provided by wicket-wp-base-plugin; guard so
@@ -120,9 +133,44 @@ class Assets
             // CSV template download URL used by UploadFileStep (AORM-6.3).
             // Served as a static plugin asset — no REST endpoint needed.
             $data['templateDownloadUrl'] = esc_url(WICKET_AORM_URL . 'assets/roster-template.csv');
+
+            // Active session context — lets React set the correct initial wizard.
+            $data['activeSession'] = $this->resolveActiveSession($orgUuid, $membershipUuid);
         }
 
         return $data;
+    }
+
+    /**
+     * Look up any in-progress upload session for the given roster and return
+     * its status, or null when no session is active.
+     *
+     * @param string $orgUuid
+     * @param string $membershipUuid
+     * @return array{sessionId: string, isComplete: bool}|null
+     */
+    private function resolveActiveSession(string $orgUuid, string $membershipUuid): ?array
+    {
+        if ($orgUuid === '' || $membershipUuid === '') {
+            return null;
+        }
+
+        $table     = new StagedRecordsTable();
+        $sessionId = $table->getActiveSessionId($orgUuid, $membershipUuid);
+
+        if ($sessionId === null) {
+            return null;
+        }
+
+        $progress   = $table->getMatchingProgress($sessionId);
+        $total      = $progress['total'];
+        $processed  = $progress['processed'];
+        $isComplete = $total === 0 || $processed === $total;
+
+        return [
+            'sessionId'  => $sessionId,
+            'isComplete' => $isComplete,
+        ];
     }
 
     /**

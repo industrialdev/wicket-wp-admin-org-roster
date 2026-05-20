@@ -7,6 +7,8 @@ namespace WicketAORM\Rest;
 use WicketAORM\Database\StagedRecordsTable;
 use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\FileParserService;
+use WicketAORM\Services\MatchingJobRunner;
+use WicketAORM\Services\SchedulerService;
 use WicketAORM\Services\ValidationService;
 
 /**
@@ -47,6 +49,7 @@ class UploadController extends RestController
         private readonly ?FileParserService $fileParserService = null,
         private readonly ?ValidationService $validationService = null,
         private readonly ?ActivityLogger $activityLogger = null,
+        private readonly ?SchedulerService $schedulerService = null,
     ) {
     }
 
@@ -130,6 +133,8 @@ class UploadController extends RestController
      *                   • 'duplicate'          (identical first_name+last_name+email → AORM-6.15/6.16)
      *                   • 'valid'              (passes all checks)
      *                   Insert staged records; return session_id + per-status counts.
+     *   5. AORM-7       — Dispatch the background MDP matching job via SchedulerService when
+     *                   at least one valid row was inserted.
      *
      * @param \WP_REST_Request $request
      */
@@ -275,6 +280,17 @@ class UploadController extends RestController
             ],
             'in_progress',
         );
+
+        // AORM-7: Dispatch the background MDP matching job for all valid rows.
+        // Only dispatched when at least one valid row exists — invalid/duplicate
+        // rows are excluded by MatchingJobRunner (validation_status = 'valid').
+        if ($validCount > 0) {
+            $scheduler = $this->schedulerService ?? new SchedulerService();
+            $scheduler->dispatch(
+                MatchingJobRunner::HOOK,
+                ['upload_session_id' => $sessionId],
+            );
+        }
 
         return new \WP_REST_Response(
             [
