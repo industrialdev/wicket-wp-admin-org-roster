@@ -108,6 +108,100 @@ class ActivityLogger
     }
 
     /**
+     * Log a matching-complete event to wp_wicket_aorm_logs.
+     *
+     * Written by MatchingJobRunner when the final batch of an upload session has
+     * been processed (i.e. the batch was partial). The entry uses object_type =
+     * 'session' so it is associated with the upload session rather than a
+     * specific roster or staged record. No roster_meta update is performed — this
+     * is an informational audit trail entry only.
+     *
+     * The human-readable $message is built from the summary counts so an admin
+     * reading the log table can understand the outcome at a glance. The full
+     * summary array is stored as JSON in the context column for downstream
+     * consumption (e.g. reporting queries).
+     *
+     * @param string               $uploadSessionId UUID of the completed upload session.
+     * @param string               $orgUuid         Organisation UUID from the session context.
+     * @param int                  $uploadedBy      WordPress user ID that initiated the upload (0 = system).
+     * @param array{
+     *   total: int,
+     *   by_category: array<string, int>,
+     *   by_status: array<string, int>
+     * }                           $summary         Counts returned by StagedRecordsTable::getSummaryByCategory().
+     *
+     * @see AORM-7.14
+     */
+    public function logMatchingComplete(
+        string $uploadSessionId,
+        string $orgUuid,
+        int $uploadedBy,
+        array $summary,
+    ): void {
+        $db  = $this->wpdb ?? $GLOBALS['wpdb'];
+        $now = current_time('mysql', true);
+
+        $total    = (int) ($summary['total'] ?? 0);
+        $byCat    = (array) ($summary['by_category'] ?? []);
+        $byStatus = (array) ($summary['by_status'] ?? []);
+
+        $ready    = (int) ($byCat['ready_to_sync'] ?? 0);
+        $possible = (int) ($byCat['possible_match'] ?? 0);
+        $probable = (int) ($byCat['probable_match'] ?? 0);
+        $manual   = (int) ($byCat['manual_update'] ?? 0);
+        $discard  = (int) ($byCat['discard'] ?? 0);
+        $remove   = (int) ($byStatus['remove_existing'] ?? 0);
+
+        $message = sprintf(
+            'Matching complete: %d record%s processed — %d ready to sync, %d possible match%s, %d probable match%s, %d manual update%s, %d discard%s, %d to remove.',
+            $total,
+            $total === 1 ? '' : 's',
+            $ready,
+            $possible,
+            $possible === 1 ? '' : 'es',
+            $probable,
+            $probable === 1 ? '' : 'es',
+            $manual,
+            $manual === 1 ? '' : 's',
+            $discard,
+            $discard === 1 ? '' : 's',
+            $remove,
+        );
+
+        $logsTable = $db->prefix . 'wicket_aorm_logs';
+
+        // staged_record_id is intentionally omitted — it defaults to NULL in the
+        // schema and there is no single staged_record associated with a session-level log.
+        $db->insert(
+            $logsTable,
+            [
+                'upload_session_id' => $uploadSessionId,
+                'org_uuid'          => $orgUuid,
+                'user_id'           => $uploadedBy,
+                'level'             => 'info',
+                'action'            => 'matching_complete',
+                'object_type'       => 'session',
+                'object_id'         => $uploadSessionId,
+                'message'           => $message,
+                'context'           => json_encode($summary),
+                'created_at'        => $now,
+            ],
+            [
+                '%s', // upload_session_id
+                '%s', // org_uuid
+                '%d', // user_id
+                '%s', // level
+                '%s', // action
+                '%s', // object_type
+                '%s', // object_id
+                '%s', // message
+                '%s', // context
+                '%s', // created_at
+            ],
+        );
+    }
+
+    /**
      * Resolve a display name for the acting WordPress user.
      *
      * Preference order: user_email → "user:{id}" → "system" (unauthenticated).

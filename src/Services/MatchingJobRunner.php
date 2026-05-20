@@ -68,6 +68,7 @@ class MatchingJobRunner
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?MdpClient $mdpClient = null,
         private readonly ?ScoringService $scoringService = null,
+        private readonly ?ActivityLogger $activityLogger = null,
     ) {
     }
 
@@ -114,6 +115,7 @@ class MatchingJobRunner
         $client    = $this->mdpClient ?? new MdpClient();
         $scorer    = $this->scoringService ?? ScoringService::fromWordPressFilter();
         $scheduler = $this->schedulerService ?? new SchedulerService();
+        $logger    = $this->activityLogger ?? new ActivityLogger();
 
         // AORM-7.10: Read configurable batch size (default 50).
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
@@ -223,7 +225,20 @@ class MatchingJobRunner
                 self::HOOK,
                 ['upload_session_id' => $uploadSessionId],
             );
+
+            return;
         }
+
+        // AORM-7.14: The batch was partial (or empty), so all records have now
+        // been processed.  Log a matching_complete summary entry so admins can
+        // see the final category breakdown in the audit log without querying the
+        // staged_records table directly.
+        $context    = $table->getSessionContext($uploadSessionId);
+        $orgUuid    = (string) ($context['org_uuid'] ?? '');
+        $uploadedBy = (int) ($context['uploaded_by'] ?? 0);
+        $summary    = $table->getSummaryByCategory($uploadSessionId);
+
+        $logger->logMatchingComplete($uploadSessionId, $orgUuid, $uploadedBy, $summary);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────

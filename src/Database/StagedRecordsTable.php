@@ -379,6 +379,111 @@ class StagedRecordsTable
     }
 
     /**
+     * Return a matching summary for a completed upload session.
+     *
+     * Counts every valid staged record (including synthetic remove_existing rows)
+     * grouped by category and by record_status. Used by MatchingJobRunner to
+     * build the context payload of the 'matching_complete' audit log entry
+     * (AORM-7.14).
+     *
+     * Returned shape:
+     * [
+     *   'total'       => int,
+     *   'by_category' => [
+     *     'ready_to_sync'  => int,
+     *     'possible_match' => int,
+     *     'probable_match' => int,
+     *     'manual_update'  => int,
+     *     'discard'        => int,
+     *   ],
+     *   'by_status' => [
+     *     'new_record'        => int,
+     *     'exact_match'       => int,
+     *     'merging_to_record' => int,
+     *     'already_on_roster' => int,
+     *     'remove_existing'   => int,
+     *   ],
+     * ]
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array{total: int, by_category: array<string, int>, by_status: array<string, int>}
+     */
+    public function getSummaryByCategory(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $total = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table} WHERE upload_session_id = %s AND validation_status = 'valid'",
+                $sessionId,
+            ),
+        );
+
+        $categoryRows = (array) $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT category, COUNT(*) AS cnt FROM {$table}
+                 WHERE upload_session_id = %s AND validation_status = 'valid'
+                 GROUP BY category",
+                $sessionId,
+            ),
+            ARRAY_A,
+        );
+
+        $statusRows = (array) $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT record_status, COUNT(*) AS cnt FROM {$table}
+                 WHERE upload_session_id = %s AND validation_status = 'valid'
+                 GROUP BY record_status",
+                $sessionId,
+            ),
+            ARRAY_A,
+        );
+
+        $byCategory = [
+            'ready_to_sync'  => 0,
+            'possible_match' => 0,
+            'probable_match' => 0,
+            'manual_update'  => 0,
+            'discard'        => 0,
+        ];
+
+        foreach ($categoryRows as $row) {
+            $key = (string) ($row['category'] ?? '');
+
+            if (array_key_exists($key, $byCategory)) {
+                $byCategory[$key] = (int) $row['cnt'];
+            }
+        }
+
+        $byStatus = [
+            'new_record'        => 0,
+            'exact_match'       => 0,
+            'merging_to_record' => 0,
+            'already_on_roster' => 0,
+            'remove_existing'   => 0,
+        ];
+
+        foreach ($statusRows as $row) {
+            $key = (string) ($row['record_status'] ?? '');
+
+            if (array_key_exists($key, $byStatus)) {
+                $byStatus[$key] = (int) $row['cnt'];
+            }
+        }
+
+        return [
+            'total'       => $total,
+            'by_category' => $byCategory,
+            'by_status'   => $byStatus,
+        ];
+    }
+
+    /**
      * Return true when at least one row with record_status = 'remove_existing'
      * already exists for the given session.
      *
