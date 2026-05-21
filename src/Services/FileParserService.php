@@ -22,7 +22,7 @@ class FileParserService
      *
      * The header→field mapping exists because the user-facing CSV column names
      * (email_address, phone_number) differ from the internal field names used by
-     * ValidationService and the individual add form (email, mobile_phone).
+     * ValidationService and the individual add form (email, phone).
      *
      * Column order matches the downloadable template (AORM-6.3).
      * Header matching is case-insensitive and alias-aware (AORM-6.10).
@@ -48,7 +48,7 @@ class FileParserService
         ],
         [
             'header'   => 'phone_number',
-            'field'    => 'mobile_phone',
+            'field'    => 'phone',
             'required' => false,
         ],
         [
@@ -118,9 +118,9 @@ class FileParserService
             ],
             [
                 'header'   => 'phone_number',
-                'field'    => 'mobile_phone',
+                'field'    => 'phone',
                 'required' => false,
-                'aliases'  => ['phone_number', 'phone number', 'phone', 'mobile', 'mobile_phone', 'mobile phone', 'cell', 'telephone'],
+                'aliases'  => ['phone_number', 'phone number', 'phone', 'mobile', 'phone', 'mobile phone', 'cell', 'telephone'],
             ],
             [
                 'header'   => 'title',

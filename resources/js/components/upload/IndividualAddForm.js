@@ -2,13 +2,13 @@
  * Individual add form — AORM-5.1 / AORM-5.2 / AORM-5.7 / AORM-5.8.
  *
  * Renders a form for adding a single member to the roster. The form collects
- * five fields — first_name, last_name, and email are required; mobile_phone
+ * five fields — first_name, last_name, and email are required; phone
  * and title are optional.
  *
  * Client-side validation (AORM-5.2) runs on submit:
  *   - first_name, last_name, email are required.
  *   - email must match EMAIL_REGEX.
- *   - mobile_phone, when provided, must match PHONE_REGEX.
+ *   - phone, when provided, must match PHONE_REGEX.
  *
  * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
  * session_id via startNewSession(), stores match_category via setMatchCategory(),
@@ -72,7 +72,7 @@ export const PHONE_REGEX = /^[+]?[\d\s\-().]{7,20}$/;
  *   first_name:   string,
  *   last_name:    string,
  *   email:        string,
- *   mobile_phone: string,
+ *   phone: string,
  *   title:        string,
  * }} fields
  * @returns {Record<string, string>} Error map (empty = no errors).
@@ -94,8 +94,8 @@ export function validateFields( fields ) {
 		errors.email = __( 'Please enter a valid email address.', 'wicket-aorm' );
 	}
 
-	if ( fields.mobile_phone.trim() && ! PHONE_REGEX.test( fields.mobile_phone.trim() ) ) {
-		errors.mobile_phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
+	if ( fields.phone.trim() && ! PHONE_REGEX.test( fields.phone.trim() ) ) {
+		errors.phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
 	}
 
 	return errors;
@@ -110,7 +110,7 @@ const EMPTY_FIELDS = {
 	first_name:   '',
 	last_name:    '',
 	email:        '',
-	mobile_phone: '',
+	phone: '',
 	title:        '',
 };
 
@@ -323,17 +323,17 @@ export default function IndividualAddForm( {
 				/>
 
 				<TextControl
-					className={ fieldClass( 'mobile_phone' ) }
+					className={ fieldClass( 'phone' ) }
 					label={ __( 'Mobile Phone', 'wicket-aorm' ) }
 					type="tel"
-					value={ fields.mobile_phone }
-					onChange={ ( value ) => handleChange( 'mobile_phone', value ) }
+					value={ fields.phone }
+					onChange={ ( value ) => handleChange( 'phone', value ) }
 					autoComplete="tel"
 					disabled={ isSubmitting }
-					aria-describedby={ errors.mobile_phone ? 'aorm-error-mobile_phone' : undefined }
+					aria-describedby={ errors.phone ? 'aorm-error-phone' : undefined }
 					help={
-						errors.mobile_phone
-							? <span id="aorm-error-mobile_phone" className="aorm-individual-form__error" role="alert">{ errors.mobile_phone }</span>
+						errors.phone
+							? <span id="aorm-error-phone" className="aorm-individual-form__error" role="alert">{ errors.phone }</span>
 							: undefined
 					}
 				/>

@@ -264,7 +264,7 @@ class MatchingJobRunner
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
-     * @return array{first_name: string, last_name: string, email: string, mobile_phone: string, title: string}
+     * @return array{first_name: string, last_name: string, email: string, phone: string, title: string}
      */
     private function extractFields(array $record): array
     {
@@ -275,7 +275,7 @@ class MatchingJobRunner
             'first_name'   => (string) ($raw['first_name'] ?? ''),
             'last_name'    => (string) ($raw['last_name'] ?? ''),
             'email'        => (string) ($raw['email'] ?? ''),
-            'mobile_phone' => (string) ($raw['mobile_phone'] ?? ''),
+            'phone' => (string) ($raw['phone'] ?? ''),
             'title'        => (string) ($raw['title'] ?? ''),
         ];
     }

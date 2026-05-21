@@ -202,7 +202,7 @@ class UploadController extends RestController
             // AORM-6.13: email is present but fails format/length rules (not a missing-data error).
             $emailInvalid = isset($errors['email']) && ! $emailMissing;
             // AORM-6.14: phone is present but digit count is out of range.
-            $phoneInvalid = isset($errors['mobile_phone']);
+            $phoneInvalid = isset($errors['phone']);
             // AORM-6.15/6.16: second (or later) occurrence of name+email key.
             $isDuplicate  = isset($duplicateIndices[$rowIndex]);
 

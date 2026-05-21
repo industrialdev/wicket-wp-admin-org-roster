@@ -74,7 +74,7 @@ class IndividualController extends RestController
                             'required'          => true,
                             'sanitize_callback' => 'sanitize_text_field',
                         ],
-                        'mobile_phone'    => [
+                        'phone'    => [
                             'required'          => false,
                             'sanitize_callback' => 'sanitize_text_field',
                         ],
@@ -136,7 +136,7 @@ class IndividualController extends RestController
             'first_name'   => (string) ($request->get_param('first_name') ?? ''),
             'last_name'    => (string) ($request->get_param('last_name') ?? ''),
             'email'        => (string) ($request->get_param('email') ?? ''),
-            'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+            'phone' => (string) ($request->get_param('phone') ?? ''),
         ]);
 
         if (! empty($errors)) {
@@ -152,7 +152,7 @@ class IndividualController extends RestController
             'first_name'   => (string) ($request->get_param('first_name') ?? ''),
             'last_name'    => (string) ($request->get_param('last_name') ?? ''),
             'email'        => (string) ($request->get_param('email') ?? ''),
-            'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+            'phone' => (string) ($request->get_param('phone') ?? ''),
             'title'        => (string) ($request->get_param('title') ?? ''),
         ]);
 
@@ -200,7 +200,7 @@ class IndividualController extends RestController
                 'first_name'   => (string) ($request->get_param('first_name') ?? ''),
                 'last_name'    => (string) ($request->get_param('last_name') ?? ''),
                 'email'        => (string) ($request->get_param('email') ?? ''),
-                'mobile_phone' => (string) ($request->get_param('mobile_phone') ?? ''),
+                'phone' => (string) ($request->get_param('phone') ?? ''),
                 'title'        => (string) ($request->get_param('title') ?? ''),
             ],
             $orgUuid,

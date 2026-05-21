@@ -114,7 +114,7 @@ class MatchingService
      *   first_name:    string,
      *   last_name:     string,
      *   email:         string,
-     *   mobile_phone?: string,
+     *   phone?: string,
      *   title?:        string,
      * } $fields         Submitted person data (already validated).
      * @param string $orgUuid        Organisation UUID (not used in MDP search but

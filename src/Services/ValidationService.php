@@ -67,7 +67,7 @@ class ValidationService
     public const PHONE_MAX_DIGITS = 15;
 
     /**
-     * Human-readable validation label for rows where the mobile_phone value is
+     * Human-readable validation label for rows where the phone value is
      * present but the digit count (after stripping non-numeric characters) falls
      * outside PHONE_MIN_DIGITS–PHONE_MAX_DIGITS (AORM-6.14).
      *
@@ -104,7 +104,7 @@ class ValidationService
      *   1. Required fields present and non-empty after trimming.
      *   2. Email format matches EMAIL_REGEX.
      *   3. Phone digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
-     *      stripping non-numeric characters (only when mobile_phone is provided).
+     *      stripping non-numeric characters (only when phone is provided).
      *
      * @param array<string, string> $fields Associative array of field values.
      * @return array<string, string> Field-keyed error messages (empty = valid).
@@ -144,14 +144,14 @@ class ValidationService
         //    AORM-6.14: strip all non-numeric characters first; the remaining
         //    digit count must fall within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS
         //    (MDP rules).  An absent or blank value is valid (empty is OK).
-        $phone = trim((string) ($fields['mobile_phone'] ?? ''));
+        $phone = trim((string) ($fields['phone'] ?? ''));
 
         if ($phone !== '') {
             $digits     = (string) preg_replace('/\D/', '', $phone);
             $digitCount = strlen($digits);
 
             if ($digitCount < self::PHONE_MIN_DIGITS || $digitCount > self::PHONE_MAX_DIGITS) {
-                $errors['mobile_phone'] = 'Invalid phone number format.';
+                $errors['phone'] = 'Invalid phone number format.';
             }
         }
 

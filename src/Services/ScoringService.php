@@ -225,14 +225,14 @@ class ScoringService
      *   email: string,
      *   given_name: string,
      *   family_name: string,
-     *   mobile_phone?: string,
+     *   phone?: string,
      *   title?: string,
      * } $candidate  MDP candidate record.
      * @param array{
      *   first_name: string,
      *   last_name: string,
      *   email: string,
-     *   mobile_phone?: string,
+     *   phone?: string,
      *   title?: string,
      * } $input       Submitted person data from the staged record.
      */
@@ -251,7 +251,7 @@ class ScoringService
 
         // ── Phone exact (40) ──────────────────────────────────────────────
         $candidatePhone = $this->normalizePhone((string) ($candidate['phone'] ?? ''));
-        $inputPhone     = $this->normalizePhone((string) ($input['mobile_phone'] ?? ''));
+        $inputPhone     = $this->normalizePhone((string) ($input['phone'] ?? ''));
 
         if ($candidatePhone !== '' && $inputPhone !== '' && $candidatePhone === $inputPhone) {
             $score += $this->getWeight(self::WEIGHT_PHONE_EXACT);

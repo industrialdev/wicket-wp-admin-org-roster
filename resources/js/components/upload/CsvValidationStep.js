@@ -452,7 +452,7 @@ export default function CsvValidationStep( {
 											{ raw.email || '—' }
 										</td>
 										<td className="aorm-csv-validation__col-phone">
-											{ raw.mobile_phone || '—' }
+											{ raw.phone || '—' }
 										</td>
 										<td className="aorm-csv-validation__col-status">
 											<span className={ config.className }>
