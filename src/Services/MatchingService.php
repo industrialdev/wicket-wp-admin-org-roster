@@ -7,28 +7,33 @@ namespace WicketAORM\Services;
 /**
  * MDP duplicate-detection and scoring for staged roster records.
  *
- * Implements the scoring matrix defined in AORM-7 for a single row,
+ * Implements the additive scoring model defined in AORM-7 for a single row,
  * allowing IndividualController (AORM-5.6) to run matching synchronously
  * rather than via the background batch job used for bulk uploads.
  *
- * Scoring matrix (highest applicable score wins):
- *   100 — email exact  + first exact  + last exact  → Exact Match
- *    80 — email exact  + name differs               → Probable Match
- *    60 — first exact  + last exact   + diff email  → Probable Match
- *    40 — email domain + last exact                 → Possible Match
- *    30 — last exact   + first partial (first char) → Possible Match
- *    20 — last exact   only                         → Possible Match
- *     0 — no match                                  → New Record
+ * Additive scoring signals (see ScoringService for full details):
+ *   email_exact      → 50
+ *   phone_exact      → 40
+ *   last_name_exact  → 25
+ *   first_name_exact → 25
+ *   email_domain     → 10  (skipped when email_exact fires)
+ *   title_exact      →  5
+ *   org_overlap      →  5  (applied post-roster-check for best candidate only)
+ *   first_initial    →  5  (skipped when first_name_exact fires)
+ *   Cap              → 100
  *
  * Thresholds:
- *   = 100  → ready_to_sync   (exact_match)
- *   80–99  → probable_match
- *   20–79  → possible_match
- *   0      → ready_to_sync   (new_record)
+ *   80–100 → probable_match
+ *   30–79  → possible_match
+ *   0–29   → ready_to_sync  (new_record)
  *
- * "Already on Roster" check: when the top-scoring candidate (score ≥ 20)
- * is already a member of the target org membership roster, the record_status
- * is set to 'already_on_roster' and category to 'ready_to_sync'.
+ * Exact-match detection: email + first + last all exact → ready_to_sync
+ * (exact_match), bypassing human review.
+ *
+ * "Already on Roster" check: when the top-scoring candidate (score ≥ possible
+ * threshold) is already a member of the target org membership roster, the
+ * record_status is set to 'already_on_roster' and category to 'ready_to_sync'.
+ * The org_overlap weight is also added to that candidate's score.
  *
  * Scoring is delegated to ScoringService (AORM-7.3), which holds the
  * configurable weights and thresholds. The constants below are kept for
@@ -36,22 +41,26 @@ namespace WicketAORM\Services;
  */
 class MatchingService
 {
-    // ── Score constants (mirrors ScoringService defaults) ─────────────────
+    // ── Score signal keys (mirrors ScoringService) ─────────────────────────
 
-    public const SCORE_EXACT_MATCH         = 100;
-    public const SCORE_EMAIL_NAME_MISMATCH = 80;
-    public const SCORE_NAME_DIFF_EMAIL     = 60;
-    public const SCORE_DOMAIN_LAST         = 40;
-    public const SCORE_LAST_PARTIAL_FIRST  = 30;
-    public const SCORE_LAST_ONLY           = 20;
+    public const WEIGHT_EMAIL_EXACT      = ScoringService::WEIGHT_EMAIL_EXACT;
+    public const WEIGHT_PHONE_EXACT      = ScoringService::WEIGHT_PHONE_EXACT;
+    public const WEIGHT_LAST_NAME_EXACT  = ScoringService::WEIGHT_LAST_NAME_EXACT;
+    public const WEIGHT_FIRST_NAME_EXACT = ScoringService::WEIGHT_FIRST_NAME_EXACT;
+    public const WEIGHT_EMAIL_DOMAIN     = ScoringService::WEIGHT_EMAIL_DOMAIN;
+    public const WEIGHT_TITLE_EXACT      = ScoringService::WEIGHT_TITLE_EXACT;
+    public const WEIGHT_ORG_OVERLAP      = ScoringService::WEIGHT_ORG_OVERLAP;
+    public const WEIGHT_FIRST_INITIAL    = ScoringService::WEIGHT_FIRST_INITIAL;
+
+    public const SCORE_CAP = ScoringService::SCORE_CAP;
 
     // ── Threshold constants ────────────────────────────────────────────────
 
-    /** Minimum score to classify as Probable Match (score 80–99). */
+    /** Minimum score to classify as Probable Match (score 80–100). */
     public const THRESHOLD_PROBABLE = 80;
 
-    /** Minimum score to classify as Possible Match (score 20–79). */
-    public const THRESHOLD_POSSIBLE = 20;
+    /** Minimum score to classify as Possible Match (score 30–79). */
+    public const THRESHOLD_POSSIBLE = 30;
 
     // ── Category / record-status constants ────────────────────────────────
 
@@ -93,11 +102,13 @@ class MatchingService
      *   1. Search MDP by email to find candidates.
      *   2. Search MDP by first+last name to find additional candidates.
      *   3. Merge and deduplicate candidates by UUID.
-     *   4. Score each candidate; pick the highest-scoring one.
+     *   4. Score each candidate additively; sort descending.
      *   5. When the best score ≥ THRESHOLD_POSSIBLE, check if the candidate
      *      is already on the target roster.
-     *   6. Determine category and record_status from score + roster membership.
-     *   7. Build matched_persons / match_details JSON payloads.
+     *   6. If already on roster, add org_overlap weight to best score (capped).
+     *   7. Determine if best candidate is an exact match (email+first+last).
+     *   8. Determine category and record_status from adjusted score + flags.
+     *   9. Build matched_persons / match_details JSON payloads.
      *
      * @param array{
      *   first_name:    string,
@@ -109,7 +120,8 @@ class MatchingService
      * @param string $orgUuid        Organisation UUID (not used in MDP search but
      *                               kept for symmetry with AORM-7 batch matching).
      * @param string $membershipUuid Org-membership UUID, used to check roster
-     *                               membership for "Already on Roster" detection.
+     *                               membership for "Already on Roster" detection
+     *                               and the org_overlap scoring signal.
      *
      * @return array{
      *   match_count:     int,
@@ -136,7 +148,7 @@ class MatchingService
 
         $scorer = $this->scorer();
 
-        // 4. Score every candidate and sort descending.
+        // 4. Score every candidate additively and sort descending.
         $scored = [];
 
         foreach ($candidates as $candidate) {
@@ -158,11 +170,25 @@ class MatchingService
             );
         }
 
-        // 6. Categorise.
-        $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
-        $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
+        // 6. Apply org_overlap signal to best candidate score when on roster.
+        //    The org_overlap weight is configurable; apply it here rather than
+        //    inside scoreCandidate() because roster membership is only checked
+        //    for the top candidate (avoiding N extra MDP calls).
+        if ($alreadyOnRoster) {
+            $bestScore = min(
+                $bestScore + $scorer->getWeight(ScoringService::WEIGHT_ORG_OVERLAP),
+                ScoringService::SCORE_CAP,
+            );
+        }
 
-        // 7. Build JSON payloads — only for candidates at or above the threshold.
+        // 7. Exact-match check: email + first + last all matched exactly.
+        $isExactMatch = $best !== null && $scorer->isExactMatch($best, $fields);
+
+        // 8. Categorise.
+        $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster, $isExactMatch);
+        $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster, $isExactMatch);
+
+        // 9. Build JSON payloads — only for candidates at or above the threshold.
         $aboveThreshold = array_values(array_filter(
             $scored,
             static fn (array $c): bool => $c['_score'] >= self::THRESHOLD_POSSIBLE,
@@ -217,25 +243,28 @@ class MatchingService
     }
 
     /**
-     * Map a match score (and already-on-roster flag) to a staged-records category.
+     * Map a match score (and already-on-roster / exact-match flags) to a category string.
      *
      * @param int  $score           Best score across all candidates.
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
+     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function categorizeScore(int $score, bool $alreadyOnRoster = false): string
+    public function categorizeScore(int $score, bool $alreadyOnRoster = false, bool $isExactMatch = false): string
     {
-        return $this->scorer()->categorizeScore($score, $alreadyOnRoster);
+        return $this->scorer()->categorizeScore($score, $alreadyOnRoster, $isExactMatch);
     }
 
     /**
-     * Determine the record_status value from a match score and roster-membership flag.
+     * Determine the record_status value from a match score, roster-membership
+     * flag, and exact-match determination.
      *
      * @param int  $score           Best score across all candidates.
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
+     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function resolveRecordStatus(int $score, bool $alreadyOnRoster): string
+    public function resolveRecordStatus(int $score, bool $alreadyOnRoster, bool $isExactMatch = false): string
     {
-        return $this->scorer()->resolveRecordStatus($score, $alreadyOnRoster);
+        return $this->scorer()->resolveRecordStatus($score, $alreadyOnRoster, $isExactMatch);
     }
 
     /**

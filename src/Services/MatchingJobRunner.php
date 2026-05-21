@@ -159,9 +159,21 @@ class MatchingJobRunner
                 );
             }
 
+            // Apply org_overlap signal when the top candidate is already on the roster.
+            if ($alreadyOnRoster) {
+                $bestScore = min(
+                    $bestScore + $scorer->getWeight(ScoringService::WEIGHT_ORG_OVERLAP),
+                    ScoringService::SCORE_CAP,
+                );
+            }
+
+            // Exact-match check: email + first + last all matched exactly.
+            // Exact matches bypass human review (ready_to_sync / exact_match).
+            $isExactMatch = isset($scored[0]) && $scorer->isExactMatch($scored[0], $fields);
+
             // Categorise from the highest score (AORM-7.6, AORM-7.8).
-            $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
-            $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
+            $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster, $isExactMatch);
+            $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster, $isExactMatch);
 
             // AORM-7.7: Build match payload for all candidates at or above the
             // possible-match threshold.  Candidates below threshold are noise
@@ -252,7 +264,7 @@ class MatchingJobRunner
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
-     * @return array{first_name: string, last_name: string, email: string}
+     * @return array{first_name: string, last_name: string, email: string, mobile_phone: string, title: string}
      */
     private function extractFields(array $record): array
     {
@@ -260,9 +272,11 @@ class MatchingJobRunner
         $raw = is_array($raw) ? $raw : [];
 
         return [
-            'first_name' => (string) ($raw['first_name'] ?? ''),
-            'last_name'  => (string) ($raw['last_name'] ?? ''),
-            'email'      => (string) ($raw['email'] ?? ''),
+            'first_name'   => (string) ($raw['first_name'] ?? ''),
+            'last_name'    => (string) ($raw['last_name'] ?? ''),
+            'email'        => (string) ($raw['email'] ?? ''),
+            'mobile_phone' => (string) ($raw['mobile_phone'] ?? ''),
+            'title'        => (string) ($raw['title'] ?? ''),
         ];
     }
 

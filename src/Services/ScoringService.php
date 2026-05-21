@@ -7,47 +7,71 @@ namespace WicketAORM\Services;
 /**
  * ScoringService — configurable matching-score engine for AORM-7.
  *
- * Encapsulates the scoring matrix, threshold comparisons, and categorisation
- * logic that determines how well an MDP candidate matches a staged roster row.
- * All numeric weights and thresholds are constructor-injectable so that
- * administrators can tune the matching sensitivity without modifying code.
+ * Encapsulates the additive scoring model, threshold comparisons, and
+ * categorisation logic that determines how well an MDP candidate matches a
+ * staged roster row.  All numeric weights and thresholds are
+ * constructor-injectable so that administrators can tune the matching
+ * sensitivity without modifying code.
  *
- * Default scoring matrix:
- *   100 — email exact  + first exact  + last exact  → Exact Match
- *    80 — email exact  + name has any discrepancy   → Probable Match
- *    60 — first exact  + last exact   + diff email  → Probable Match
- *    40 — email domain + last exact                 → Possible Match
- *    30 — last exact   + first initial match        → Possible Match
- *    20 — last exact   only                         → Possible Match
- *     0 — no match                                  → New Record
+ * Additive scoring model:
+ *   Each signal that fires contributes its weight independently.  The raw sum
+ *   is capped at SCORE_CAP (100) so no single over-determining combination
+ *   inflates the result beyond the maximum.
+ *
+ *   Signal weights (defaults):
+ *     email_exact      → 50   (exact email address match)
+ *     phone_exact      → 40   (exact phone after stripping non-digits)
+ *     last_name_exact  → 25   (exact last-name match)
+ *     first_name_exact → 25   (exact first-name match)
+ *     email_domain     → 10   (domain-only match; skipped when email_exact fires)
+ *     title_exact      →  5   (exact job-title match)
+ *     org_overlap      →  5   (candidate already on target org's roster)
+ *     first_initial    →  5   (first-initial match; skipped when first_name_exact fires)
+ *
+ *   Design rationale: at least two corroborating signals are required to reach
+ *   the Probable Match threshold (80).  No single signal alone is sufficient,
+ *   protecting against false merges on common names, shared emails, or
+ *   reassigned phone numbers.
  *
  * Default thresholds:
- *   probable → 80  (score ≥ 80 → probable_match)
- *   possible → 20  (score ≥ 20 → possible_match)
+ *   probable → 80  (score 80–100 → probable_match)
+ *   possible → 30  (score 30–79 → possible_match)
+ *                  (score  0–29 → ready_to_sync / new_record)
+ *
+ * Exact-match detection:
+ *   A dedicated isExactMatch() helper checks email + first + last all exact.
+ *   When true the record bypasses human review (ready_to_sync / exact_match).
  *
  * Customisation — WordPress filter:
  *   add_filter( 'wicket_aorm_scoring_config', function ( array $config ): array {
- *       $config['weights']['email_name_mismatch'] = 75;
- *       $config['thresholds']['probable']         = 75;
+ *       $config['weights']['phone_exact'] = 35;
+ *       $config['thresholds']['probable'] = 75;
  *       return $config;
  *   } );
  *
  * Or inject directly:
  *   $scorer = new ScoringService(
- *       weights:    ['exact_match' => 100, 'email_name_mismatch' => 70, ...],
- *       thresholds: ['probable' => 70, 'possible' => 20],
+ *       weights:    ['email_exact' => 50, 'phone_exact' => 35, ...],
+ *       thresholds: ['probable' => 75, 'possible' => 30],
  *   );
  */
 class ScoringService
 {
     // ── Weight keys ────────────────────────────────────────────────────────
 
-    public const WEIGHT_EXACT_MATCH         = 'exact_match';
-    public const WEIGHT_EMAIL_NAME_MISMATCH = 'email_name_mismatch';
-    public const WEIGHT_NAME_DIFF_EMAIL     = 'name_diff_email';
-    public const WEIGHT_DOMAIN_LAST         = 'domain_last';
-    public const WEIGHT_LAST_PARTIAL_FIRST  = 'last_partial_first';
-    public const WEIGHT_LAST_ONLY           = 'last_only';
+    public const WEIGHT_EMAIL_EXACT      = 'email_exact';
+    public const WEIGHT_PHONE_EXACT      = 'phone_exact';
+    public const WEIGHT_LAST_NAME_EXACT  = 'last_name_exact';
+    public const WEIGHT_FIRST_NAME_EXACT = 'first_name_exact';
+    public const WEIGHT_EMAIL_DOMAIN     = 'email_domain';
+    public const WEIGHT_TITLE_EXACT      = 'title_exact';
+    public const WEIGHT_ORG_OVERLAP      = 'org_overlap';
+    public const WEIGHT_FIRST_INITIAL    = 'first_initial';
+
+    // ── Score cap ──────────────────────────────────────────────────────────
+
+    /** Raw signal sum is capped at this value before categorisation. */
+    public const SCORE_CAP = 100;
 
     // ── Threshold keys ─────────────────────────────────────────────────────
 
@@ -70,18 +94,20 @@ class ScoringService
 
     /** @var array<string, int> */
     public const DEFAULT_WEIGHTS = [
-        self::WEIGHT_EXACT_MATCH         => 100,
-        self::WEIGHT_EMAIL_NAME_MISMATCH => 80,
-        self::WEIGHT_NAME_DIFF_EMAIL     => 60,
-        self::WEIGHT_DOMAIN_LAST         => 40,
-        self::WEIGHT_LAST_PARTIAL_FIRST  => 30,
-        self::WEIGHT_LAST_ONLY           => 20,
+        self::WEIGHT_EMAIL_EXACT      => 50,
+        self::WEIGHT_PHONE_EXACT      => 40,
+        self::WEIGHT_LAST_NAME_EXACT  => 25,
+        self::WEIGHT_FIRST_NAME_EXACT => 25,
+        self::WEIGHT_EMAIL_DOMAIN     => 10,
+        self::WEIGHT_TITLE_EXACT      =>  5,
+        self::WEIGHT_ORG_OVERLAP      =>  5,
+        self::WEIGHT_FIRST_INITIAL    =>  5,
     ];
 
     /** @var array<string, int> */
     public const DEFAULT_THRESHOLDS = [
         self::THRESHOLD_KEY_PROBABLE => 80,
-        self::THRESHOLD_KEY_POSSIBLE => 20,
+        self::THRESHOLD_KEY_POSSIBLE => 30,
     ];
 
     // ── WordPress filter name ──────────────────────────────────────────────
@@ -181,79 +207,144 @@ class ScoringService
     // ── Scoring ────────────────────────────────────────────────────────────
 
     /**
-     * Score a single MDP candidate against submitted row fields.
+     * Score a single MDP candidate against submitted row fields using the
+     * additive signal model.
      *
-     * Comparisons are case-insensitive and whitespace-trimmed.
-     * The highest-scoring rule that applies wins (decision-tree order).
+     * Each matching signal independently contributes its weight.  The raw sum
+     * is capped at SCORE_CAP.  Two mutual-exclusivity rules apply:
+     *   - email_domain is skipped when email_exact already fired (same signal,
+     *     weaker form).
+     *   - first_initial is skipped when first_name_exact already fired.
      *
-     * @param array{uuid: string, name: string, email: string, given_name: string, family_name: string} $candidate
-     * @param array{first_name: string, last_name: string, email: string} $input
+     * Comparisons are case-insensitive and whitespace-trimmed.  Phone numbers
+     * are normalised by stripping all non-digit characters before comparison.
+     *
+     * @param array{
+     *   uuid: string,
+     *   name: string,
+     *   email: string,
+     *   given_name: string,
+     *   family_name: string,
+     *   mobile_phone?: string,
+     *   title?: string,
+     * } $candidate  MDP candidate record.
+     * @param array{
+     *   first_name: string,
+     *   last_name: string,
+     *   email: string,
+     *   mobile_phone?: string,
+     *   title?: string,
+     * } $input       Submitted person data from the staged record.
      */
     public function scoreCandidate(array $candidate, array $input): int
     {
-        $emailExact = $candidate['email'] !== ''
-            && strtolower(trim($candidate['email'])) === strtolower(trim($input['email']));
+        $score = 0;
 
-        $firstExact = strtolower(trim($candidate['given_name'] ?? '')) === strtolower(trim($input['first_name']));
-        $lastExact  = strtolower(trim($candidate['family_name'] ?? '')) === strtolower(trim($input['last_name']));
+        // ── Email exact (50) ───────────────────────────────────────────────
+        $candidateEmail = (string) ($candidate['email'] ?? '');
+        $emailExact     = $candidateEmail !== ''
+            && strtolower(trim($candidateEmail)) === strtolower(trim($input['email']));
 
-        // Rule 1 — email + first + last all exact.
-        if ($emailExact && $firstExact && $lastExact) {
-            return $this->getWeight(self::WEIGHT_EXACT_MATCH);
-        }
-
-        // Rule 2 — email exact but name has at least one discrepancy.
         if ($emailExact) {
-            return $this->getWeight(self::WEIGHT_EMAIL_NAME_MISMATCH);
+            $score += $this->getWeight(self::WEIGHT_EMAIL_EXACT);
         }
 
-        // Rule 3 — both first and last exact but email is different.
-        if ($firstExact && $lastExact) {
-            return $this->getWeight(self::WEIGHT_NAME_DIFF_EMAIL);
+        // ── Phone exact (40) ──────────────────────────────────────────────
+        $candidatePhone = $this->normalizePhone((string) ($candidate['mobile_phone'] ?? ''));
+        $inputPhone     = $this->normalizePhone((string) ($input['mobile_phone'] ?? ''));
+
+        if ($candidatePhone !== '' && $inputPhone !== '' && $candidatePhone === $inputPhone) {
+            $score += $this->getWeight(self::WEIGHT_PHONE_EXACT);
         }
 
-        $inputDomain     = $this->extractEmailDomain($input['email']);
-        $candidateDomain = $this->extractEmailDomain((string) ($candidate['email'] ?? ''));
-        $domainMatch     = $inputDomain !== '' && $inputDomain === $candidateDomain;
+        // ── Last name exact (25) ───────────────────────────────────────────
+        $lastExact = strtolower(trim((string) ($candidate['family_name'] ?? '')))
+            === strtolower(trim($input['last_name']));
 
-        // Rule 4 — email domain + last name match.
-        if ($domainMatch && $lastExact) {
-            return $this->getWeight(self::WEIGHT_DOMAIN_LAST);
-        }
-
-        // Rule 5 — last name + first initial match.
-        $givenName    = (string) ($candidate['given_name'] ?? '');
-        $firstPartial = $input['first_name'] !== ''
-            && $givenName !== ''
-            && strtolower($givenName[0]) === strtolower($input['first_name'][0]);
-
-        if ($lastExact && $firstPartial) {
-            return $this->getWeight(self::WEIGHT_LAST_PARTIAL_FIRST);
-        }
-
-        // Rule 6 — last name only.
         if ($lastExact) {
-            return $this->getWeight(self::WEIGHT_LAST_ONLY);
+            $score += $this->getWeight(self::WEIGHT_LAST_NAME_EXACT);
         }
 
-        return 0;
+        // ── First name exact (25) / first initial (5) ─────────────────────
+        $candidateFirst = (string) ($candidate['given_name'] ?? '');
+        $firstExact     = strtolower(trim($candidateFirst)) === strtolower(trim($input['first_name']));
+
+        if ($firstExact) {
+            $score += $this->getWeight(self::WEIGHT_FIRST_NAME_EXACT);
+        } elseif (
+            $input['first_name'] !== ''
+            && $candidateFirst !== ''
+            && strtolower($candidateFirst[0]) === strtolower($input['first_name'][0])
+        ) {
+            // First-initial only fires when first-name-exact did not.
+            $score += $this->getWeight(self::WEIGHT_FIRST_INITIAL);
+        }
+
+        // ── Email domain (10) — skipped when email_exact already fired ─────
+        if (! $emailExact) {
+            $inputDomain     = $this->extractEmailDomain($input['email']);
+            $candidateDomain = $this->extractEmailDomain($candidateEmail);
+            $domainMatch     = $inputDomain !== '' && $inputDomain === $candidateDomain;
+
+            if ($domainMatch) {
+                $score += $this->getWeight(self::WEIGHT_EMAIL_DOMAIN);
+            }
+        }
+
+        // ── Title exact (5) ───────────────────────────────────────────────
+        $candidateTitle = strtolower(trim((string) ($candidate['title'] ?? '')));
+        $inputTitle     = strtolower(trim((string) ($input['title'] ?? '')));
+
+        if ($candidateTitle !== '' && $inputTitle !== '' && $candidateTitle === $inputTitle) {
+            $score += $this->getWeight(self::WEIGHT_TITLE_EXACT);
+        }
+
+        return min($score, self::SCORE_CAP);
+    }
+
+    /**
+     * Determine whether a candidate is an exact match for the submitted input.
+     *
+     * An exact match requires email, first name, and last name to all match
+     * exactly (case-insensitive, whitespace-trimmed).  Records that satisfy
+     * this check bypass human review and are routed directly to ready_to_sync.
+     *
+     * @param array{email: string, given_name: string, family_name: string} $candidate
+     * @param array{first_name: string, last_name: string, email: string}   $input
+     */
+    public function isExactMatch(array $candidate, array $input): bool
+    {
+        $candidateEmail = (string) ($candidate['email'] ?? '');
+
+        if ($candidateEmail === '') {
+            return false;
+        }
+
+        return strtolower(trim($candidateEmail)) === strtolower(trim($input['email']))
+            && strtolower(trim((string) ($candidate['given_name'] ?? ''))) === strtolower(trim($input['first_name']))
+            && strtolower(trim((string) ($candidate['family_name'] ?? ''))) === strtolower(trim($input['last_name']));
     }
 
     // ── Categorisation ─────────────────────────────────────────────────────
 
     /**
-     * Map a match score (and already-on-roster flag) to a category string.
+     * Map a match score (and already-on-roster / exact-match flags) to a category string.
      *
-     * @param int  $score           Best score across all candidates.
+     * Score ranges (defaults):
+     *   80–100 → probable_match
+     *   30–79  → possible_match
+     *   0–29   → ready_to_sync  (treated as new record)
+     *
+     * already_on_roster=true and isExactMatch=true both short-circuit to
+     * ready_to_sync, as those records bypass human review.
+     *
+     * @param int  $score           Best score across all candidates (post-cap).
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
+     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function categorizeScore(int $score, bool $alreadyOnRoster = false): string
+    public function categorizeScore(int $score, bool $alreadyOnRoster = false, bool $isExactMatch = false): string
     {
-        if ($alreadyOnRoster) {
-            return self::CATEGORY_READY_TO_SYNC;
-        }
-
-        if ($score === $this->getWeight(self::WEIGHT_EXACT_MATCH)) {
+        if ($alreadyOnRoster || $isExactMatch) {
             return self::CATEGORY_READY_TO_SYNC;
         }
 
@@ -269,18 +360,25 @@ class ScoringService
     }
 
     /**
-     * Determine the record_status value from a match score and roster-membership flag.
+     * Determine the record_status value from a match score, roster-membership
+     * flag, and exact-match determination.
      *
-     * @param int  $score           Best score across all candidates.
+     * Priority:
+     *   1. already_on_roster → always_on_roster status.
+     *   2. isExactMatch      → exact_match status (bypasses human review).
+     *   3. Otherwise         → new_record.
+     *
+     * @param int  $score           Best score across all candidates (post-cap).
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
+     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function resolveRecordStatus(int $score, bool $alreadyOnRoster): string
+    public function resolveRecordStatus(int $score, bool $alreadyOnRoster, bool $isExactMatch = false): string
     {
         if ($alreadyOnRoster) {
             return self::STATUS_ALREADY_ON_ROSTER;
         }
 
-        if ($score === $this->getWeight(self::WEIGHT_EXACT_MATCH)) {
+        if ($isExactMatch) {
             return self::STATUS_EXACT_MATCH;
         }
 
@@ -303,5 +401,19 @@ class ScoringService
         }
 
         return strtolower(substr($email, $atPos + 1));
+    }
+
+    /**
+     * Normalise a phone number string for comparison by stripping every
+     * character that is not a digit (0–9).
+     *
+     * Examples:
+     *   '+1 (555) 123-4567' → '15551234567'
+     *   '555.123.4567'      → '5551234567'
+     *   ''                  → ''
+     */
+    public function normalizePhone(string $phone): string
+    {
+        return preg_replace('/\D/', '', $phone) ?? '';
     }
 }
