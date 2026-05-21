@@ -181,12 +181,9 @@ class MatchingService
             );
         }
 
-        // 7. Exact-match check: email + first + last all matched exactly.
-        $isExactMatch = $best !== null && $scorer->isExactMatch($best, $fields);
-
-        // 8. Categorise.
-        $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster, $isExactMatch);
-        $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster, $isExactMatch);
+        // 7. Categorise (score=100 auto-routes to ready_to_sync / exact_match).
+        $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
+        $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
 
         // 9. Build JSON payloads — only for candidates at or above the threshold.
         $aboveThreshold = array_values(array_filter(
@@ -243,28 +240,25 @@ class MatchingService
     }
 
     /**
-     * Map a match score (and already-on-roster / exact-match flags) to a category string.
+     * Map a match score (and already-on-roster flag) to a category string.
      *
      * @param int  $score           Best score across all candidates.
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
-     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function categorizeScore(int $score, bool $alreadyOnRoster = false, bool $isExactMatch = false): string
+    public function categorizeScore(int $score, bool $alreadyOnRoster = false): string
     {
-        return $this->scorer()->categorizeScore($score, $alreadyOnRoster, $isExactMatch);
+        return $this->scorer()->categorizeScore($score, $alreadyOnRoster);
     }
 
     /**
-     * Determine the record_status value from a match score, roster-membership
-     * flag, and exact-match determination.
+     * Determine the record_status value from a match score and roster-membership flag.
      *
      * @param int  $score           Best score across all candidates.
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
-     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function resolveRecordStatus(int $score, bool $alreadyOnRoster, bool $isExactMatch = false): string
+    public function resolveRecordStatus(int $score, bool $alreadyOnRoster): string
     {
-        return $this->scorer()->resolveRecordStatus($score, $alreadyOnRoster, $isExactMatch);
+        return $this->scorer()->resolveRecordStatus($score, $alreadyOnRoster);
     }
 
     /**

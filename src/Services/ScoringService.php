@@ -34,13 +34,14 @@ namespace WicketAORM\Services;
  *   reassigned phone numbers.
  *
  * Default thresholds:
- *   probable → 80  (score 80–100 → probable_match)
- *   possible → 30  (score 30–79 → possible_match)
- *                  (score  0–29 → ready_to_sync / new_record)
+ *   probable → 80  (score  80–99  → probable_match)
+ *   possible → 30  (score  30–79  → possible_match)
+ *                  (score   0–29  → ready_to_sync / new_record)
+ *                  (score = 100   → ready_to_sync / exact_match)
  *
  * Exact-match detection:
- *   A dedicated isExactMatch() helper checks email + first + last all exact.
- *   When true the record bypasses human review (ready_to_sync / exact_match).
+ *   A score equal to SCORE_CAP (100) is treated as a perfect match.
+ *   Such records bypass human review (ready_to_sync / exact_match).
  *
  * Customisation — WordPress filter:
  *   add_filter( 'wicket_aorm_scoring_config', function ( array $config ): array {
@@ -302,49 +303,26 @@ class ScoringService
         return min($score, self::SCORE_CAP);
     }
 
-    /**
-     * Determine whether a candidate is an exact match for the submitted input.
-     *
-     * An exact match requires email, first name, and last name to all match
-     * exactly (case-insensitive, whitespace-trimmed).  Records that satisfy
-     * this check bypass human review and are routed directly to ready_to_sync.
-     *
-     * @param array{email: string, given_name: string, family_name: string} $candidate
-     * @param array{first_name: string, last_name: string, email: string}   $input
-     */
-    public function isExactMatch(array $candidate, array $input): bool
-    {
-        $candidateEmail = (string) ($candidate['email'] ?? '');
-
-        if ($candidateEmail === '') {
-            return false;
-        }
-
-        return strtolower(trim($candidateEmail)) === strtolower(trim($input['email']))
-            && strtolower(trim((string) ($candidate['given_name'] ?? ''))) === strtolower(trim($input['first_name']))
-            && strtolower(trim((string) ($candidate['family_name'] ?? ''))) === strtolower(trim($input['last_name']));
-    }
-
     // ── Categorisation ─────────────────────────────────────────────────────
 
     /**
-     * Map a match score (and already-on-roster / exact-match flags) to a category string.
+     * Map a match score (and already-on-roster flag) to a category string.
      *
      * Score ranges (defaults):
-     *   80–100 → probable_match
-     *   30–79  → possible_match
-     *   0–29   → ready_to_sync  (treated as new record)
+     *   100     → ready_to_sync  (perfect score — exact match, bypasses review)
+     *   80–99   → probable_match
+     *   30–79   → possible_match
+     *   0–29    → ready_to_sync  (treated as new record)
      *
-     * already_on_roster=true and isExactMatch=true both short-circuit to
+     * already_on_roster=true and score=SCORE_CAP both short-circuit to
      * ready_to_sync, as those records bypass human review.
      *
      * @param int  $score           Best score across all candidates (post-cap).
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
-     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function categorizeScore(int $score, bool $alreadyOnRoster = false, bool $isExactMatch = false): string
+    public function categorizeScore(int $score, bool $alreadyOnRoster = false): string
     {
-        if ($alreadyOnRoster || $isExactMatch) {
+        if ($alreadyOnRoster || $score === self::SCORE_CAP) {
             return self::CATEGORY_READY_TO_SYNC;
         }
 
@@ -360,25 +338,23 @@ class ScoringService
     }
 
     /**
-     * Determine the record_status value from a match score, roster-membership
-     * flag, and exact-match determination.
+     * Determine the record_status value from a match score and roster-membership flag.
      *
      * Priority:
-     *   1. already_on_roster → always_on_roster status.
-     *   2. isExactMatch      → exact_match status (bypasses human review).
-     *   3. Otherwise         → new_record.
+     *   1. already_on_roster → already_on_roster status.
+     *   2. score === SCORE_CAP → exact_match status (bypasses human review).
+     *   3. Otherwise          → new_record.
      *
      * @param int  $score           Best score across all candidates (post-cap).
      * @param bool $alreadyOnRoster Whether the top candidate is already rostered.
-     * @param bool $isExactMatch    Whether email + first + last all matched exactly.
      */
-    public function resolveRecordStatus(int $score, bool $alreadyOnRoster, bool $isExactMatch = false): string
+    public function resolveRecordStatus(int $score, bool $alreadyOnRoster): string
     {
         if ($alreadyOnRoster) {
             return self::STATUS_ALREADY_ON_ROSTER;
         }
 
-        if ($isExactMatch) {
+        if ($score === self::SCORE_CAP) {
             return self::STATUS_EXACT_MATCH;
         }
 

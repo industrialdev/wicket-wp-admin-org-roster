@@ -167,13 +167,10 @@ class MatchingJobRunner
                 );
             }
 
-            // Exact-match check: email + first + last all matched exactly.
-            // Exact matches bypass human review (ready_to_sync / exact_match).
-            $isExactMatch = isset($scored[0]) && $scorer->isExactMatch($scored[0], $fields);
-
             // Categorise from the highest score (AORM-7.6, AORM-7.8).
-            $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster, $isExactMatch);
-            $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster, $isExactMatch);
+            // score=100 auto-routes to ready_to_sync / exact_match.
+            $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
+            $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
 
             // AORM-7.7: Build match payload for all candidates at or above the
             // possible-match threshold.  Candidates below threshold are noise
