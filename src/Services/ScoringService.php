@@ -250,7 +250,7 @@ class ScoringService
         }
 
         // ── Phone exact (40) ──────────────────────────────────────────────
-        $candidatePhone = $this->normalizePhone((string) ($candidate['mobile_phone'] ?? ''));
+        $candidatePhone = $this->normalizePhone((string) ($candidate['phone'] ?? ''));
         $inputPhone     = $this->normalizePhone((string) ($input['mobile_phone'] ?? ''));
 
         if ($candidatePhone !== '' && $inputPhone !== '' && $candidatePhone === $inputPhone) {

@@ -620,6 +620,7 @@ class MdpClient
      *   email:       string,
      *   given_name:  string,
      *   family_name: string,
+     *   phone:       string,
      * }>
      */
     public function searchPersonsByEmail(string $email): array
@@ -635,8 +636,9 @@ class MdpClient
         }
 
         $query = http_build_query([
-            'filter' => ['emails_address_eq' => $email, 'emails_primary_eq' => true],
-            'page'   => ['size' => 10],
+            'filter'  => ['emails_address_eq' => $email, 'emails_primary_eq' => true],
+            'page'    => ['size' => 10],
+            'include' => 'phones',
         ]);
 
         try {
@@ -665,6 +667,7 @@ class MdpClient
      *   email:       string,
      *   given_name:  string,
      *   family_name: string,
+     *   phone:       string,
      * }>
      */
     public function searchPersonsByName(string $firstName, string $lastName): array
@@ -684,7 +687,8 @@ class MdpClient
                 'given_name_eq'  => $firstName,
                 'family_name_eq' => $lastName,
             ],
-            'page' => ['size' => 10],
+            'page'    => ['size' => 10],
+            'include' => 'phones',
         ]);
 
         try {
@@ -811,6 +815,10 @@ class MdpClient
      * Normalize a JSON:API `people` list response into a flat candidate array
      * suitable for MatchingService scoring.
      *
+     * When the response includes sideloaded `phones` resources (via
+     * `?include=phones`), the primary phone number — or the first phone if no
+     * primary is flagged — is extracted and added to each result row.
+     *
      * @param mixed $response Raw API response.
      *
      * @return list<array{
@@ -819,12 +827,22 @@ class MdpClient
      *   email:       string,
      *   given_name:  string,
      *   family_name: string,
+     *   phone:       string,
      * }>
      */
     private function normalizePeopleSearchResults(mixed $response): array
     {
         if (! is_array($response) || empty($response['data'])) {
             return [];
+        }
+
+        // Build a lookup map: phone id → phone attributes from the included sideload.
+        $phoneMap = [];
+
+        foreach ($response['included'] ?? [] as $included) {
+            if (($included['type'] ?? '') === 'phones') {
+                $phoneMap[(string) $included['id']] = $included['attributes'] ?? [];
+            }
         }
 
         $results = [];
@@ -837,12 +855,40 @@ class MdpClient
                 continue;
             }
 
+            // Resolve the phone number from sideloaded data.
+            $phone          = '';
+            $phoneRelations = $item['relationships']['phones']['data'] ?? [];
+
+            if (! empty($phoneRelations)) {
+                // Prefer the primary phone; fall back to the first in the list.
+                $primaryId  = '';
+                $fallbackId = (string) ($phoneRelations[0]['id'] ?? '');
+
+                foreach ($phoneRelations as $rel) {
+                    $relId    = (string) ($rel['id'] ?? '');
+                    $relAttrs = $phoneMap[$relId] ?? [];
+
+                    if (! empty($relAttrs['primary'])) {
+                        $primaryId = $relId;
+
+                        break;
+                    }
+                }
+
+                $resolvedId = $primaryId !== '' ? $primaryId : $fallbackId;
+
+                if ($resolvedId !== '' && isset($phoneMap[$resolvedId])) {
+                    $phone = (string) ($phoneMap[$resolvedId]['number'] ?? '');
+                }
+            }
+
             $results[] = [
                 'uuid'        => $uuid,
                 'name'        => (string) ($attrs['full_name'] ?? ''),
                 'email'       => (string) ($attrs['primary_email_address'] ?? ''),
                 'given_name'  => (string) ($attrs['given_name'] ?? ''),
                 'family_name' => (string) ($attrs['family_name'] ?? ''),
+                'phone'       => $phone,
             ];
         }
 
