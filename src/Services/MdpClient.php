@@ -637,6 +637,7 @@ class MdpClient
      *   given_name:  string,
      *   family_name: string,
      *   phone:       string,
+     *   org_uuids:   list<string>,
      * }>
      */
     public function searchPersons(array $fields): array
@@ -813,6 +814,9 @@ class MdpClient
      * `?include=phones`), the primary phone number — or the first phone if no
      * primary is flagged — is extracted and added to each result row.
      *
+     * The `relationships.organizations.data` array is extracted as `org_uuids`
+     * so callers can check org overlap without an additional API round-trip.
+     *
      * @param mixed $response Raw API response.
      *
      * @return list<array{
@@ -822,6 +826,7 @@ class MdpClient
      *   given_name:  string,
      *   family_name: string,
      *   phone:       string,
+     *   org_uuids:   list<string>,
      * }>
      */
     private function normalizePeopleSearchResults(mixed $response): array
@@ -876,6 +881,18 @@ class MdpClient
                 }
             }
 
+            // Extract org UUIDs from relationships.organizations.data so the
+            // org_overlap scoring signal can be evaluated without a second API call.
+            $orgUuids = [];
+
+            foreach ($item['relationships']['organizations']['data'] ?? [] as $orgRel) {
+                $orgId = (string) ($orgRel['id'] ?? '');
+
+                if ($orgId !== '') {
+                    $orgUuids[] = $orgId;
+                }
+            }
+
             $results[] = [
                 'uuid'        => $uuid,
                 'name'        => (string) ($attrs['full_name'] ?? ''),
@@ -883,6 +900,7 @@ class MdpClient
                 'given_name'  => (string) ($attrs['given_name'] ?? ''),
                 'family_name' => (string) ($attrs['family_name'] ?? ''),
                 'phone'       => $phone,
+                'org_uuids'   => $orgUuids,
             ];
         }
 

@@ -142,21 +142,42 @@ class MatchingJobRunner
 
             $bestScore = isset($scored[0]) ? (int) $scored[0]['_score'] : 0;
 
-            // AORM-7.8: Check if the top candidate is already on the roster.
-            // Only perform the API call when at least one candidate was scored —
-            // a bestScore of 0 means no candidates matched, so there is no UUID
-            // to look up and alreadyOnRoster stays false.
+            // AORM-7.8: Check if the top candidate is already on the roster and
+            // whether they have any relationship with the target org.
+            //
+            // alreadyOnRoster — true when the person is on *this specific* membership
+            // roster; drives the already_on_roster status / ready_to_sync override.
+            //
+            // hasOrgOverlap — true when the candidate's org_uuids list (populated
+            // inline by MdpClient::searchPersons() from relationships.organizations)
+            // contains the target org UUID, OR when already on this roster.
+            // No extra API call is required.
+            //
+            // Only perform API calls when at least one candidate scored > 0;
+            // a zero score means no candidates matched, so there is nothing to look up.
             $alreadyOnRoster = false;
+            $hasOrgOverlap   = false;
 
             if ($bestScore > 0 && isset($scored[0]['uuid']) && (string) $scored[0]['uuid'] !== '') {
+                $personUuid = (string) $scored[0]['uuid'];
+
                 $alreadyOnRoster = $client->isPersonOnRoster(
-                    (string) $scored[0]['uuid'],
+                    $personUuid,
                     (string) ($record['membership_uuid'] ?? ''),
                 );
+
+                // org_uuids comes free from the searchPersons() response —
+                // no extra round-trip needed to check the org relationship.
+                $hasOrgOverlap = $alreadyOnRoster
+                    || in_array(
+                        (string) ($record['org_uuid'] ?? ''),
+                        (array) ($scored[0]['org_uuids'] ?? []),
+                        true,
+                    );
             }
 
-            // Apply org_overlap signal when the top candidate is already on the roster.
-            if ($alreadyOnRoster) {
+            // Apply org_overlap signal when the person has any org relationship.
+            if ($hasOrgOverlap) {
                 $bestScore = min(
                     $bestScore + $scorer->getWeight(ScoringService::WEIGHT_ORG_OVERLAP),
                     ScoringService::SCORE_CAP,

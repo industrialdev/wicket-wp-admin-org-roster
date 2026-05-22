@@ -103,9 +103,11 @@ class MatchingService
      *      first name, last name) to gather candidates.
      *   2. Score each candidate additively; sort descending.
      *   3. When the best score ≥ THRESHOLD_POSSIBLE, check if the candidate
-     *      is already on the target roster.
-     *   4. If already on roster, add org_overlap weight to best score (capped).
-     *   5. Determine if best candidate is an exact match (email+first+last).
+     *      is already on the target roster (isPersonOnRoster → alreadyOnRoster).
+     *   4. Derive hasOrgOverlap from alreadyOnRoster OR from candidate's org_uuids
+     *      list (populated inline by searchPersons() — no extra API call).
+     *   5. If hasOrgOverlap, add org_overlap weight to best score (capped).
+     *   6. Determine if best candidate is an exact match (email+first+last).
      *   6. Determine category and record_status from adjusted score + flags.
      *   7. Build matched_persons / match_details JSON payloads.
      *
@@ -152,21 +154,33 @@ class MatchingService
         $best      = $scored[0] ?? null;
         $bestScore = $best !== null ? (int) $best['_score'] : 0;
 
-        // 5. Already-on-roster check for meaningful matches.
+        // 5. Already-on-roster and org-overlap checks for meaningful matches.
+        //
+        //    alreadyOnRoster — true when the top candidate is already a member of
+        //    *this specific* membership roster; drives the already_on_roster status
+        //    and the ready_to_sync category override.
+        //
+        //    hasOrgOverlap — true when the candidate's relationships.organizations
+        //    list (returned inline by searchPersons()) includes the target org UUID,
+        //    OR when they are already on this roster.  No extra API call required.
         $alreadyOnRoster = false;
+        $hasOrgOverlap   = false;
 
         if ($best !== null && $bestScore >= $scorer->getThreshold(ScoringService::THRESHOLD_KEY_POSSIBLE)) {
-            $alreadyOnRoster = $client->isPersonOnRoster(
-                (string) ($best['uuid'] ?? ''),
-                $membershipUuid,
-            );
+            $personUuid = (string) ($best['uuid'] ?? '');
+
+            $alreadyOnRoster = $client->isPersonOnRoster($personUuid, $membershipUuid);
+
+            // org_uuids is populated by MdpClient::searchPersons() from the
+            // relationships.organizations.data array — no extra round-trip needed.
+            $hasOrgOverlap = $alreadyOnRoster
+                || in_array($orgUuid, (array) ($best['org_uuids'] ?? []), true);
         }
 
-        // 6. Apply org_overlap signal to best candidate score when on roster.
-        //    The org_overlap weight is configurable; apply it here rather than
-        //    inside scoreCandidate() because roster membership is only checked
-        //    for the top candidate (avoiding N extra MDP calls).
-        if ($alreadyOnRoster) {
+        // 6. Apply org_overlap signal when the person has any org relationship.
+        //    The weight is configurable; applied here (not inside scoreCandidate())
+        //    because the org check is only done for the top candidate.
+        if ($hasOrgOverlap) {
             $bestScore = min(
                 $bestScore + $scorer->getWeight(ScoringService::WEIGHT_ORG_OVERLAP),
                 ScoringService::SCORE_CAP,
@@ -177,7 +191,7 @@ class MatchingService
         $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
         $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);
 
-        // 9. Build JSON payloads — only for candidates at or above the threshold.
+        // 8. Build JSON payloads — only for candidates at or above the threshold.
         $aboveThreshold = array_values(array_filter(
             $scored,
             static fn (array $c): bool => $c['_score'] >= self::THRESHOLD_POSSIBLE,
