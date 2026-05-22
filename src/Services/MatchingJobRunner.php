@@ -128,12 +128,8 @@ class MatchingJobRunner
         foreach ($records as $record) {
             $fields = $this->extractFields($record);
 
-            // Search MDP by email, then by name (AORM-7.4).
-            $byEmail = $client->searchPersonsByEmail($fields['email']);
-            $byName  = $client->searchPersonsByName($fields['first_name'], $fields['last_name']);
-
-            // Merge and deduplicate candidates by UUID (AORM-7.5).
-            $candidates = $this->mergeCandidates($byEmail, $byName);
+            // Search MDP via a single OR query (email, phone, first name, last name).
+            $candidates = $client->searchPersons($fields);
 
             // Score every candidate and sort descending (AORM-7.5).
             $scored = [];
@@ -275,36 +271,6 @@ class MatchingJobRunner
             'phone' => (string) ($raw['phone'] ?? ''),
             'title'        => (string) ($raw['title'] ?? ''),
         ];
-    }
-
-    /**
-     * Merge two candidate lists from MDP search and deduplicate by UUID.
-     *
-     * The first occurrence of each UUID is kept; subsequent duplicates are
-     * discarded. Candidates with an empty UUID are dropped silently.
-     *
-     * @param list<array<string,mixed>> $a  Results from searchPersonsByEmail().
-     * @param list<array<string,mixed>> $b  Results from searchPersonsByName().
-     *
-     * @return list<array<string,mixed>>
-     */
-    private function mergeCandidates(array $a, array $b): array
-    {
-        $seen   = [];
-        $merged = [];
-
-        foreach (array_merge($a, $b) as $candidate) {
-            $uuid = (string) ($candidate['uuid'] ?? '');
-
-            if ($uuid === '' || isset($seen[$uuid])) {
-                continue;
-            }
-
-            $seen[$uuid] = true;
-            $merged[]    = $candidate;
-        }
-
-        return $merged;
     }
 
     /**

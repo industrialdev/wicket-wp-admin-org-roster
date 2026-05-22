@@ -605,61 +605,30 @@ class MdpClient
     }
 
     /**
-     * Search MDP for people by exact primary email address.
+     * Search MDP for people by email, phone, or last name.
      *
-     * Uses the `people` endpoint with a Ransack `primary_email_address_eq` filter.
-     * Returns a normalised list of candidate records suitable for MatchingService
-     * scoring. Returns an empty array when `wicket_api_client()` is unavailable,
-     * no results are found, or the request throws.
+     * Issues a single POST to `people/query` with a Ransack OR group so all
+     * supplied fields are searched in one round-trip. Empty fields are omitted
+     * from the group; if no non-empty fields remain the method returns early
+     * without making any API call.
      *
-     * @param string $email The email address to match.
+     * First name is intentionally excluded from the search axes — it is too
+     * common to be a useful search criterion and would flood the result set
+     * with false positives. It remains a scoring signal in ScoringService.
      *
-     * @return list<array{
-     *   uuid:        string,
-     *   name:        string,
-     *   email:       string,
-     *   given_name:  string,
-     *   family_name: string,
-     *   phone:       string,
-     * }>
-     */
-    public function searchPersonsByEmail(string $email): array
-    {
-        if ($email === '') {
-            return [];
-        }
-
-        $client = wicket_api_client();
-
-        if (! $client) {
-            return [];
-        }
-
-        $query = http_build_query([
-            'filter'  => ['emails_address_eq' => $email, 'emails_primary_eq' => true],
-            'page'    => ['size' => 10],
-            'include' => 'phones',
-        ]);
-
-        try {
-            $response = $this->callWithRetry(fn () => $client->get('people?' . $query));
-
-            return $this->normalizePeopleSearchResults($response);
-        } catch (\Exception $e) {
-            return [];
-        }
-    }
-
-    /**
-     * Search MDP for people by exact first name and last name.
+     * Phone numbers are normalised to digits-only before being added to the
+     * query so formatting differences (parentheses, dashes, spaces) do not
+     * prevent a match.
      *
-     * Uses Ransack `given_name_eq` + `family_name_eq` filters on the `people`
-     * endpoint. Returns a normalised list of candidate records. Returns an
-     * empty array when `wicket_api_client()` is unavailable, no results are
-     * found, or the request throws.
+     * Returns an empty array when `wicket_api_client()` is unavailable, no
+     * results are found, or the request throws.
      *
-     * @param string $firstName Given name to match.
-     * @param string $lastName  Family name to match.
+     * @param array{
+     *   first_name?: string,
+     *   last_name?:  string,
+     *   email?:      string,
+     *   phone?:      string,
+     * } $fields
      *
      * @return list<array{
      *   uuid:        string,
@@ -670,9 +639,26 @@ class MdpClient
      *   phone:       string,
      * }>
      */
-    public function searchPersonsByName(string $firstName, string $lastName): array
+    public function searchPersons(array $fields): array
     {
-        if ($firstName === '' || $lastName === '') {
+        $group = ['m' => 'or'];
+
+        if (($fields['email'] ?? '') !== '') {
+            $group['emails_address_eq'] = (string) $fields['email'];
+        }
+
+        $normalizedPhone = preg_replace('/\D/', '', (string) ($fields['phone'] ?? '')) ?? '';
+
+        if ($normalizedPhone !== '') {
+            $group['phones_number_eq'] = $normalizedPhone;
+        }
+
+        if (($fields['last_name'] ?? '') !== '') {
+            $group['family_name_eq'] = (string) $fields['last_name'];
+        }
+
+        // All fields empty — nothing to search.
+        if (count($group) <= 1) {
             return [];
         }
 
@@ -682,17 +668,25 @@ class MdpClient
             return [];
         }
 
-        $query = http_build_query([
+        $queryArgs = (string) preg_replace(
+            '/\%5B\d+\%5D/',
+            '%5B%5D',
+            http_build_query([
+                'page'    => ['size' => 20],
+                'include' => 'phones',
+            ]),
+        );
+
+        $args = [
             'filter' => [
-                'given_name_eq'  => $firstName,
-                'family_name_eq' => $lastName,
+                'g' => [$group],
             ],
-            'page'    => ['size' => 10],
-            'include' => 'phones',
-        ]);
+        ];
 
         try {
-            $response = $this->callWithRetry(fn () => $client->get('people?' . $query));
+            $response = $this->callWithRetry(
+                fn () => $client->post('people/query?' . $queryArgs, ['json' => $args]),
+            );
 
             return $this->normalizePeopleSearchResults($response);
         } catch (\Exception $e) {

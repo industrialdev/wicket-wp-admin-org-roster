@@ -99,16 +99,15 @@ class MatchingService
      * needed to update that row in the database.
      *
      * Steps:
-     *   1. Search MDP by email to find candidates.
-     *   2. Search MDP by first+last name to find additional candidates.
-     *   3. Merge and deduplicate candidates by UUID.
-     *   4. Score each candidate additively; sort descending.
-     *   5. When the best score ≥ THRESHOLD_POSSIBLE, check if the candidate
+     *   1. Search MDP via a single POST people/query OR group (email, phone,
+     *      first name, last name) to gather candidates.
+     *   2. Score each candidate additively; sort descending.
+     *   3. When the best score ≥ THRESHOLD_POSSIBLE, check if the candidate
      *      is already on the target roster.
-     *   6. If already on roster, add org_overlap weight to best score (capped).
-     *   7. Determine if best candidate is an exact match (email+first+last).
-     *   8. Determine category and record_status from adjusted score + flags.
-     *   9. Build matched_persons / match_details JSON payloads.
+     *   4. If already on roster, add org_overlap weight to best score (capped).
+     *   5. Determine if best candidate is an exact match (email+first+last).
+     *   6. Determine category and record_status from adjusted score + flags.
+     *   7. Build matched_persons / match_details JSON payloads.
      *
      * @param array{
      *   first_name:    string,
@@ -136,15 +135,8 @@ class MatchingService
     {
         $client = $this->mdpClient ?? new MdpClient();
 
-        // 1 & 2. Gather candidates from MDP.
-        $byEmail = $client->searchPersonsByEmail($fields['email']);
-        $byName  = $client->searchPersonsByName(
-            $fields['first_name'],
-            $fields['last_name'],
-        );
-
-        // 3. Merge + deduplicate by UUID.
-        $candidates = $this->mergeCandidates($byEmail, $byName);
+        // 1. Gather candidates from MDP in a single OR query.
+        $candidates = $client->searchPersons($fields);
 
         $scorer = $this->scorer();
 
@@ -271,33 +263,4 @@ class MatchingService
         return $this->scorer()->extractEmailDomain($email);
     }
 
-    // ── Private helpers ────────────────────────────────────────────────────
-
-    /**
-     * Merge two candidate lists (email search + name search) and deduplicate
-     * by UUID, keeping the first occurrence encountered.
-     *
-     * @param list<array<string,mixed>> $a
-     * @param list<array<string,mixed>> $b
-     *
-     * @return list<array<string,mixed>>
-     */
-    private function mergeCandidates(array $a, array $b): array
-    {
-        $seen   = [];
-        $merged = [];
-
-        foreach (array_merge($a, $b) as $candidate) {
-            $uuid = (string) ($candidate['uuid'] ?? '');
-
-            if ($uuid === '' || isset($seen[$uuid])) {
-                continue;
-            }
-
-            $seen[$uuid] = true;
-            $merged[]    = $candidate;
-        }
-
-        return $merged;
-    }
 }
