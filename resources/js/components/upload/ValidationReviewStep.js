@@ -13,6 +13,11 @@
  *   4. manual_update   — Manual Updates
  *   5. discard         — Discard
  *
+ * AORM-8.4: The Ready to Sync panel renders a session header (via
+ * ReadyToSyncPanel) showing the uploaded file name and action type.
+ * The action_type is read from the staged API response so it remains
+ * accurate after a page reload (when selectedFile is no longer in state).
+ *
  * Table content within each panel is added in AORM-8.3 – 8.10.
  *
  * @param {{
@@ -21,6 +26,7 @@
  *   membershipUuid: string,
  *   sessionId:      string|null,
  *   uploadAction:   string,
+ *   selectedFile:   File|null,
  * }} props
  */
 
@@ -29,6 +35,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
+import ReadyToSyncPanel from './ReadyToSyncPanel';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,8 +69,9 @@ export const CATEGORY_LABELS = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ValidationReviewStep( { sessionId } ) {
+export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 	const [ categories, setCategories ] = useState( null );
+	const [ actionType, setActionType ] = useState( null );
 	const [ isLoading,  setIsLoading  ] = useState( false );
 	const [ error,      setError      ] = useState( null );
 
@@ -88,6 +96,7 @@ export default function ValidationReviewStep( { sessionId } ) {
 		} )
 			.then( ( response ) => {
 				setCategories( response?.categories ?? null );
+				setActionType( response?.action_type ?? null );
 			} )
 			.catch( ( err ) => {
 				setError(
@@ -156,19 +165,28 @@ export default function ValidationReviewStep( { sessionId } ) {
 								initialOpen={ key === 'ready_to_sync' }
 								className={ `aorm-validation-review__panel aorm-validation-review__panel--${ key }` }
 							>
-								{ /*
-								 * Table content is added per-category in AORM-8.3 – 8.10.
-								 * For now render a count summary so the accordion is not empty.
-								 */ }
-								<p className="aorm-validation-review__panel-placeholder">
-									{ bucket.count === 0
-										? __( 'No records in this category.', 'wicket-aorm' )
-										: sprintf(
-											/* translators: %d: number of records */
-											__( '%d record(s) in this category.', 'wicket-aorm' ),
-											bucket.count
-										) }
-								</p>
+								{ key === 'ready_to_sync' ? (
+									/* AORM-8.4: Session header + tables for the Ready to Sync panel. */
+									<ReadyToSyncPanel
+										records={ bucket.records ?? [] }
+										actionType={ actionType }
+										fileName={ selectedFile?.name ?? null }
+									/>
+								) : (
+									/*
+									 * Table content for other categories is added in AORM-8.7 – 8.10.
+									 * Render a count summary so the accordion is not empty.
+									 */
+									<p className="aorm-validation-review__panel-placeholder">
+										{ bucket.count === 0
+											? __( 'No records in this category.', 'wicket-aorm' )
+											: sprintf(
+												/* translators: %d: number of records */
+												__( '%d record(s) in this category.', 'wicket-aorm' ),
+												bucket.count
+											) }
+									</p>
+								) }
 							</PanelBody>
 						);
 					} ) }
