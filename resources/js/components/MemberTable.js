@@ -152,7 +152,7 @@ export default function MemberTable( {
 									: '—' }
 							</td>
 							<td className="aorm-member-table__col--action">
-								<Button
+								{/* <Button
 									variant="secondary"
 									size="small"
 									onClick={ () => onEditPermissions?.( member ) }
@@ -162,7 +162,7 @@ export default function MemberTable( {
 									) } ${ member.name }` }
 								>
 									{ __( 'Edit Permissions', 'wicket-aorm' ) }
-								</Button>
+								</Button> */}
 								{ isOwner &&
 									<>
 										&nbsp;
@@ -178,7 +178,7 @@ export default function MemberTable( {
 								}
 							</td>
 							<td className="aorm-member-table__col--action">
-								<Button
+								{/* <Button
 									variant="secondary"
 									size="small"
 									isDestructive
@@ -189,7 +189,7 @@ export default function MemberTable( {
 									) } ${ member.name }` }
 								>
 									{ __( 'Remove', 'wicket-aorm' ) }
-								</Button>
+								</Button> */}
 							</td>
 						</tr>
 					);
