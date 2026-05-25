@@ -69,6 +69,7 @@ final class Main
         (new Rest\StagedRecordController())->register_routes();
         (new Rest\SyncController())->register_routes();
         (new Rest\UploadStatusController())->register_routes();   // AORM-7.11
+        (new Rest\UploadStagedController())->register_routes();  // AORM-8.1
         (new Rest\ActiveSessionController())->register_routes(); // AORM-7 cross-browser
     }
 

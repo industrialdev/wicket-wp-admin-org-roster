@@ -23,11 +23,15 @@ wicket-admin-org-roster/
 │   │   ├── Migrator.php           # Schema create/upgrade on activation
 │   │   └── StagedRecordsTable.php # wp_wicket_orm_staged_records CRUD
 │   ├── Rest/
-│   │   ├── RestController.php     # Base controller (namespace, permissions)
-│   │   ├── RosterController.php   # Roster list/detail endpoints
-│   │   ├── UploadController.php   # File upload + parse → staged records
-│   │   ├── StagedRecordController.php
-│   │   └── SyncController.php     # MDP sync (create/merge/update)
+│   │   ├── RestController.php          # Base controller (namespace, permissions)
+│   │   ├── RosterController.php        # Roster list/detail endpoints
+│   │   ├── UploadController.php        # File upload + parse → staged records
+│   │   ├── StagedRecordController.php  # GET /staged-records/{session_id} — validation review
+│   │   ├── UploadStatusController.php  # GET /uploads/{id}/status — matching progress
+│   │   ├── UploadStagedController.php  # GET /uploads/{id}/staged — categorised review (AORM-8.1)
+│   │   ├── ActiveSessionController.php # GET /rosters/{org}/{membership}/session
+│   │   ├── IndividualController.php    # Individual person add flow
+│   │   └── SyncController.php         # MDP sync (create/merge/update)
 │   ├── Services/
 │   │   ├── FileParserService.php  # CSV → normalized rows
 │   │   ├── ValidationService.php  # Row-level validation rules

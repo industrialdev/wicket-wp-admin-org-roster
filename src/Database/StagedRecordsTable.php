@@ -484,6 +484,94 @@ class StagedRecordsTable
     }
 
     /**
+     * Return all valid staged records for a session grouped by category.
+     *
+     * Only rows with validation_status = 'valid' are included. Records are
+     * ordered by insertion order (id ASC) within each category. Used by
+     * UploadStagedController (AORM-8.1) to power the categorised review
+     * view built in AORM-8.
+     *
+     * Returned shape:
+     * [
+     *   'ready_to_sync'  => ['count' => int, 'records' => [...]],
+     *   'possible_match' => ['count' => int, 'records' => [...]],
+     *   'probable_match' => ['count' => int, 'records' => [...]],
+     *   'manual_update'  => ['count' => int, 'records' => [...]],
+     *   'discard'        => ['count' => int, 'records' => [...]],
+     * ]
+     *
+     * Each record array contains:
+     *   - 'id'                (int)         — auto-increment row ID
+     *   - 'record_status'     (string)      — e.g. 'new_record', 'exact_match'
+     *   - 'sync_status'       (string)      — e.g. 'pending', 'ready_to_sync'
+     *   - 'raw_data'          (array)       — decoded parsed CSV field values
+     *   - 'match_count'       (int)         — number of MDP candidates found
+     *   - 'previous_category' (string|null) — set when record was moved from
+     *                                         another category (manual_update/discard)
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array{
+     *   ready_to_sync: array{count: int, records: list<array<string, mixed>>},
+     *   possible_match: array{count: int, records: list<array<string, mixed>>},
+     *   probable_match: array{count: int, records: list<array<string, mixed>>},
+     *   manual_update: array{count: int, records: list<array<string, mixed>>},
+     *   discard: array{count: int, records: list<array<string, mixed>>},
+     * }
+     */
+    public function getGroupedByCategory(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT id, category, record_status, sync_status, raw_data, match_count, previous_category
+                 FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                 ORDER BY id ASC",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        $grouped = [
+            'ready_to_sync'  => ['count' => 0, 'records' => []],
+            'possible_match' => ['count' => 0, 'records' => []],
+            'probable_match' => ['count' => 0, 'records' => []],
+            'manual_update'  => ['count' => 0, 'records' => []],
+            'discard'        => ['count' => 0, 'records' => []],
+        ];
+
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $category = (string) ($row['category'] ?? '');
+
+            if (! array_key_exists($category, $grouped)) {
+                continue;
+            }
+
+            $prevCat = isset($row['previous_category']) && $row['previous_category'] !== ''
+                ? (string) $row['previous_category']
+                : null;
+
+            $grouped[$category]['records'][] = [
+                'id'                => (int) $row['id'],
+                'record_status'     => (string) ($row['record_status'] ?? ''),
+                'sync_status'       => (string) ($row['sync_status'] ?? ''),
+                'raw_data'          => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
+                'match_count'       => (int) ($row['match_count'] ?? 0),
+                'previous_category' => $prevCat,
+            ];
+
+            $grouped[$category]['count']++;
+        }
+
+        return $grouped;
+    }
+
+    /**
      * Return true when at least one row with record_status = 'remove_existing'
      * already exists for the given session.
      *
