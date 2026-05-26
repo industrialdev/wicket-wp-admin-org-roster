@@ -34,14 +34,17 @@ use WicketAORM\Database\StagedRecordsTable;
  *   }
  *
  * Each record within a category contains:
- *   - id                (int)         — auto-increment row ID
- *   - record_status     (string)      — new_record | exact_match |
- *                                       merging_to_record | already_on_roster |
- *                                       remove_existing
- *   - sync_status       (string)      — pending | ready_to_sync | synced | failed
- *   - raw_data          (object)      — decoded parsed CSV field values
- *   - match_count       (int)         — number of MDP candidates found
- *   - previous_category (string|null) — prior category when record was moved
+ *   - id                (int)          — auto-increment row ID
+ *   - record_status     (string)       — new_record | exact_match |
+ *                                        merging_to_record | already_on_roster |
+ *                                        remove_existing
+ *   - sync_status       (string)       — pending | ready_to_sync | synced | failed
+ *   - raw_data          (object)       — decoded parsed CSV field values
+ *   - match_count       (int)          — number of MDP candidates found
+ *   - previous_category (string|null)  — prior category when record was moved
+ *   - matched_persons   (array|null)   — list of MDP candidate objects (uuid, name,
+ *                                        email, given_name, family_name); null when
+ *                                        no matches were stored (e.g. remove_existing)
  *
  * Returns 404 when no rows exist for the given session_id.
  */

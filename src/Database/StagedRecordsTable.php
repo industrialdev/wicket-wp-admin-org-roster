@@ -501,13 +501,17 @@ class StagedRecordsTable
      * ]
      *
      * Each record array contains:
-     *   - 'id'                (int)         — auto-increment row ID
-     *   - 'record_status'     (string)      — e.g. 'new_record', 'exact_match'
-     *   - 'sync_status'       (string)      — e.g. 'pending', 'ready_to_sync'
-     *   - 'raw_data'          (array)       — decoded parsed CSV field values
-     *   - 'match_count'       (int)         — number of MDP candidates found
-     *   - 'previous_category' (string|null) — set when record was moved from
-     *                                         another category (manual_update/discard)
+     *   - 'id'                (int)          — auto-increment row ID
+     *   - 'record_status'     (string)       — e.g. 'new_record', 'exact_match'
+     *   - 'sync_status'       (string)       — e.g. 'pending', 'ready_to_sync'
+     *   - 'raw_data'          (array)        — decoded parsed CSV field values
+     *   - 'match_count'       (int)          — number of MDP candidates found
+     *   - 'previous_category' (string|null)  — set when record was moved from
+     *                                          another category (manual_update/discard)
+     *   - 'matched_persons'   (array|null)   — decoded matched_persons JSON (list of
+     *                                          candidate objects with uuid, name, email,
+     *                                          given_name, family_name); null when no
+     *                                          matches were stored for this record
      *
      * @param string $sessionId  The upload_session_id UUID.
      * @return array{
@@ -527,7 +531,7 @@ class StagedRecordsTable
         $rows = $wpdb->get_results(
             $wpdb->prepare(
                 // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-                "SELECT id, category, record_status, sync_status, raw_data, match_count, previous_category
+                "SELECT id, category, record_status, sync_status, raw_data, match_count, previous_category, matched_persons
                  FROM {$table}
                  WHERE upload_session_id = %s
                    AND validation_status = 'valid'
@@ -556,6 +560,17 @@ class StagedRecordsTable
                 ? (string) $row['previous_category']
                 : null;
 
+            $matchedPersonsRaw = isset($row['matched_persons']) && $row['matched_persons'] !== ''
+                ? $row['matched_persons']
+                : null;
+
+            $matchedPersons = null;
+
+            if ($matchedPersonsRaw !== null) {
+                $decoded = json_decode((string) $matchedPersonsRaw, true);
+                $matchedPersons = is_array($decoded) ? $decoded : null;
+            }
+
             $grouped[$category]['records'][] = [
                 'id'                => (int) $row['id'],
                 'record_status'     => (string) ($row['record_status'] ?? ''),
@@ -563,6 +578,7 @@ class StagedRecordsTable
                 'raw_data'          => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
                 'match_count'       => (int) ($row['match_count'] ?? 0),
                 'previous_category' => $prevCat,
+                'matched_persons'   => $matchedPersons,
             ];
 
             $grouped[$category]['count']++;

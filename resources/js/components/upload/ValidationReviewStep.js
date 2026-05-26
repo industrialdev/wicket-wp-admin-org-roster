@@ -1,5 +1,5 @@
 /**
- * Upload validation review step — AORM-8.2.
+ * Upload validation review step — AORM-8.2 / AORM-8B.1.
  *
  * Fetches the categorised staged records for the active upload session from
  * GET /wicket-aorm/v1/uploads/{sessionId}/staged (built in AORM-8.1) and
@@ -18,6 +18,10 @@
  * The action_type is read from the staged API response so it remains
  * accurate after a page reload (when selectedFile is no longer in state).
  *
+ * AORM-8B.1: Passes onRecordDiscarded={refetchStaged} to ReadyToSyncPanel
+ * so the accordion refreshes automatically after a per-row Discard action.
+ * onOpenReviewModal is passed as undefined until AORM-8B.10 builds the modal.
+ *
  * Table content within each panel was added in AORM-8.3 – 8.10.
  *
  * @param {{
@@ -30,7 +34,7 @@
  * }} props
  */
 
-import { useState, useEffect } from '@wordpress/element';
+import { useState, useEffect, useCallback } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
@@ -79,6 +83,21 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 	const [ isLoading,  setIsLoading  ] = useState( false );
 	const [ error,      setError      ] = useState( null );
 
+	/**
+	 * Incrementing key used to re-trigger the fetch effect without changing
+	 * sessionId. Incremented by refetchStaged() after per-row actions such
+	 * as Discard (AORM-8B.1) so the accordion counts update immediately.
+	 */
+	const [ refetchKey, setRefetchKey ] = useState( 0 );
+
+	/**
+	 * Trigger a fresh fetch of the staged records for the current session.
+	 * Passed to ReadyToSyncPanel as onRecordDiscarded (AORM-8B.1).
+	 */
+	const refetchStaged = useCallback( () => {
+		setRefetchKey( ( k ) => k + 1 );
+	}, [] );
+
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
 	useEffect( () => {
@@ -111,7 +130,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 			.finally( () => {
 				setIsLoading( false );
 			} );
-	}, [ sessionId ] );
+	}, [ sessionId, refetchKey ] );
 
 	// ── Render ────────────────────────────────────────────────────────────────
 
@@ -170,11 +189,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 								className={ `aorm-validation-review__panel aorm-validation-review__panel--${ key }` }
 							>
 								{ key === 'ready_to_sync' ? (
-									/* AORM-8.4: Session header + tables for the Ready to Sync panel. */
+									/* AORM-8.4: Session header + tables.
+									 * AORM-8B.1: onRecordDiscarded re-fetches after Discard;
+									 *            onOpenReviewModal wired in AORM-8B.10. */
 									<ReadyToSyncPanel
 										records={ bucket.records ?? [] }
 										actionType={ actionType }
 										fileName={ selectedFile?.name ?? null }
+										onRecordDiscarded={ refetchStaged }
 									/>
 								) : key === 'possible_match' ? (
 									/* AORM-8.7: Possible Match panel — table with # Matches column. */
