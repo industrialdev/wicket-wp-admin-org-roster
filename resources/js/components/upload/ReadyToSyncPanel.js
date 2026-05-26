@@ -62,6 +62,14 @@ export const RECORD_STATUS_LABELS = {
  */
 export const ADDED_STATUSES = Object.keys( RECORD_STATUS_LABELS );
 
+/**
+ * record_status values that belong in the "Records being removed" table
+ * (AORM-8.6, replace mode only).
+ *
+ * @type {string[]}
+ */
+export const REMOVED_STATUSES = [ 'remove_existing' ];
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReadyToSyncPanel( { records, actionType, fileName } ) {
@@ -85,6 +93,12 @@ export default function ReadyToSyncPanel( { records, actionType, fileName } ) {
 				RECORD_STATUS_LABELS[ record.record_status ] ?? record.record_status,
 		},
 	];
+
+	// ── AORM-8.6: Derive "Records being removed" subset (replace mode only) ──
+
+	const removedRecords = records.filter(
+		( r ) => REMOVED_STATUSES.includes( r.record_status )
+	);
 
 	return (
 		<div className="aorm-ready-to-sync-panel">
@@ -126,7 +140,18 @@ export default function ReadyToSyncPanel( { records, actionType, fileName } ) {
 				/>
 			</div>
 
-			{ /* AORM-8.6: "Records being removed" table (Replace mode only) — added in AORM-8.6. */ }
+			{ /* AORM-8.6: "Records being removed" table (replace mode only) */ }
+			{ actionType === 'replace' && (
+				<div className="aorm-ready-to-sync-panel__section aorm-ready-to-sync-panel__section--removed">
+					<h3 className="aorm-ready-to-sync-panel__section-heading">
+						{ __( 'Records being removed', 'wicket-aorm' ) }
+					</h3>
+					<RecordsTable
+						records={ removedRecords }
+						noRecordsText={ __( 'No records to remove.', 'wicket-aorm' ) }
+					/>
+				</div>
+			) }
 
 		</div>
 	);
