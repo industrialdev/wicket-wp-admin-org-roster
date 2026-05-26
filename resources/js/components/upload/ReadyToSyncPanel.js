@@ -1,5 +1,5 @@
 /**
- * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1.
+ * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2.
  *
  * Renders the full content area for the "Ready to Sync" PanelBody in the
  * ValidationReviewStep accordion.
@@ -18,12 +18,21 @@
  *   - See Details     — merging_to_record only; opens Review Match modal (AORM-8B.10)
  *   - View in MDP     — exact_match / already_on_roster; opens MDP person page
  *
+ * AORM-8B.2: Bulk actions in the "Records being added" table:
+ *   - CheckboxControl on every row (plus a "select all" header checkbox).
+ *   - Bulk toolbar appears when one or more rows are selected, offering:
+ *       - "Sync to MDP" — fires onSyncSelected(ids) prop (wired in AORM-9).
+ *       - "Discard"     — calls PATCH staged-records/{id} for every selected
+ *                         record in parallel via Promise.allSettled; shows a
+ *                         partial-failure Notice and keeps failed IDs selected.
+ *
  * @param {{
  *   records:              Array<Object>,  — all ready_to_sync staged records
  *   actionType:           string,        — 'add' | 'replace' from the staged API response
  *   fileName:             string|null,   — original CSV file name (null after a page reload)
  *   onOpenReviewModal?:   (record: Object) => void, — callback for See Details (AORM-8B.10)
  *   onRecordDiscarded?:   () => void,    — called after a successful Discard to refresh data
+ *   onSyncSelected?:      (ids: number[]) => void, — bulk Sync to MDP (AORM-9 stub)
  * }} props
  */
 
@@ -105,9 +114,15 @@ export default function ReadyToSyncPanel( {
 	fileName,
 	onOpenReviewModal,
 	onRecordDiscarded,
+	onSyncSelected,
 } ) {
-	const [ discardingIds, setDiscardingIds ] = useState( new Set() );
-	const [ discardError,  setDiscardError  ] = useState( null );
+	const [ discardingIds,    setDiscardingIds    ] = useState( new Set() );
+	const [ discardError,     setDiscardError     ] = useState( null );
+
+	// ── AORM-8B.2: Bulk selection + bulk action state ────────────────────────
+	const [ selectedAddedIds, setSelectedAddedIds ] = useState( new Set() );
+	const [ isBulkDiscarding, setIsBulkDiscarding ] = useState( false );
+	const [ bulkDiscardError, setBulkDiscardError ] = useState( null );
 
 	const actionLabel = ACTION_TYPE_LABELS[ actionType ] ?? actionType;
 
@@ -149,6 +164,54 @@ export default function ReadyToSyncPanel( {
 						__( 'Failed to discard record. Please try again.', 'wicket-aorm' )
 				);
 			} );
+	}
+
+	// ── AORM-8B.2: Bulk discard handler ─────────────────────────────────────
+
+	/**
+	 * Discard all currently-selected "added" records in parallel.
+	 *
+	 * Uses Promise.allSettled so a partial failure does not abort the rest.
+	 * On complete failure or partial failure: surfaced via bulkDiscardError,
+	 * and the selection is narrowed to only the IDs that failed so the admin
+	 * can retry. On full success: selection is cleared and onRecordDiscarded
+	 * is called to refresh the parent's staged-records data.
+	 */
+	function handleBulkDiscard() {
+		const ids = Array.from( selectedAddedIds );
+
+		setIsBulkDiscarding( true );
+		setBulkDiscardError( null );
+
+		Promise.allSettled(
+			ids.map( ( id ) =>
+				apiFetch( {
+					path:   `/wicket-aorm/v1/staged-records/${ id }`,
+					method: 'PATCH',
+					data:   { category: 'discard' },
+				} )
+			)
+		).then( ( results ) => {
+			setIsBulkDiscarding( false );
+
+			const failedIds = results
+				.map( ( r, i ) => ( r.status === 'rejected' ? ids[ i ] : null ) )
+				.filter( ( id ) => id !== null );
+
+			if ( failedIds.length > 0 ) {
+				setBulkDiscardError(
+					sprintf(
+						/* translators: %d: number of records that could not be discarded */
+						__( '%d record(s) could not be discarded. Please try again.', 'wicket-aorm' ),
+						failedIds.length
+					)
+				);
+				setSelectedAddedIds( new Set( failedIds ) );
+			} else {
+				setSelectedAddedIds( new Set() );
+				onRecordDiscarded?.();
+			}
+		} );
 	}
 
 	// ── AORM-8.5: Derive "Records being added" subset ────────────────────────
@@ -274,7 +337,7 @@ export default function ReadyToSyncPanel( {
 				</dl>
 			</div>
 
-			{ /* AORM-8B.1: Discard error notice */ }
+			{ /* AORM-8B.1: Per-row discard error notice */ }
 			{ discardError && (
 				<Notice
 					status="error"
@@ -286,15 +349,69 @@ export default function ReadyToSyncPanel( {
 				</Notice>
 			) }
 
-			{ /* AORM-8.5: "Records being added" table (with AORM-8B.1 actions) */ }
+			{ /* AORM-8B.2: Bulk discard error notice */ }
+			{ bulkDiscardError && (
+				<Notice
+					status="error"
+					isDismissible
+					onRemove={ () => setBulkDiscardError( null ) }
+					className="aorm-ready-to-sync-panel__bulk-discard-error"
+				>
+					{ bulkDiscardError }
+				</Notice>
+			) }
+
+			{ /* AORM-8.5: "Records being added" table (with AORM-8B.1 actions + AORM-8B.2 bulk) */ }
 			<div className="aorm-ready-to-sync-panel__section aorm-ready-to-sync-panel__section--added">
 				<h3 className="aorm-ready-to-sync-panel__section-heading">
 					{ __( 'Records being added', 'wicket-aorm' ) }
 				</h3>
+
+				{ /* AORM-8B.2: Bulk action toolbar — visible when rows are selected */ }
+				{ selectedAddedIds.size > 0 && (
+					<div
+						className="aorm-rts-bulk-toolbar"
+						role="toolbar"
+						aria-label={ __( 'Bulk actions', 'wicket-aorm' ) }
+					>
+						<span className="aorm-rts-bulk-toolbar__count">
+							{ sprintf(
+								/* translators: %d: number of selected records */
+								__( '%d selected', 'wicket-aorm' ),
+								selectedAddedIds.size
+							) }
+						</span>
+
+						{ /* Sync to MDP — fires onSyncSelected prop (wired in AORM-9) */ }
+						<Button
+							variant="primary"
+							onClick={ () => onSyncSelected?.( Array.from( selectedAddedIds ) ) }
+							className="aorm-rts-bulk-toolbar__sync"
+						>
+							{ __( 'Sync to MDP', 'wicket-aorm' ) }
+						</Button>
+
+						{ /* Bulk Discard */ }
+						<Button
+							variant="secondary"
+							isDestructive
+							isBusy={ isBulkDiscarding }
+							disabled={ isBulkDiscarding }
+							onClick={ handleBulkDiscard }
+							className="aorm-rts-bulk-toolbar__discard"
+						>
+							{ __( 'Discard', 'wicket-aorm' ) }
+						</Button>
+					</div>
+				) }
+
 				<RecordsTable
 					records={ addedRecords }
 					extraColumns={ addedExtraColumns }
 					noRecordsText={ __( 'No records to add.', 'wicket-aorm' ) }
+					selectable
+					selectedIds={ selectedAddedIds }
+					onSelectionChange={ setSelectedAddedIds }
 				/>
 			</div>
 

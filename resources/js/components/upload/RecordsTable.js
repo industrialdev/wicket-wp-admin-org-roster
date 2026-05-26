@@ -1,11 +1,12 @@
 /**
- * RecordsTable — AORM-8.3.
+ * RecordsTable — AORM-8.3 / AORM-8B.2.
  *
  * Reusable table component for staged records in the upload validation-review
  * accordion. Provides:
  *  - Three base sortable columns: First Name, Last Name, Email (asc/desc toggle).
  *  - SearchControl that filters across ALL records before pagination.
  *  - Client-side pagination at PAGE_SIZE (10) records per page.
+ *  - Optional CheckboxControl row selection (AORM-8B.2) via `selectable` prop.
  *
  * Additional columns for specific categories (AORM-8.4 – 8.10) are injected
  * via the `extraColumns` prop; they are appended after the three base columns.
@@ -21,15 +22,18 @@
  *   }
  *
  * @param {{
- *   records:       Array<Object>,
- *   extraColumns?: Array<{key: string, label: string, render: (record: Object) => import('@wordpress/element').WPElement}>,
- *   noRecordsText?: string,
+ *   records:            Array<Object>,
+ *   extraColumns?:      Array<{key: string, label: string, render: (record: Object) => import('@wordpress/element').WPElement}>,
+ *   noRecordsText?:     string,
+ *   selectable?:        boolean,
+ *   selectedIds?:       Set<number>,
+ *   onSelectionChange?: (newSet: Set<number>) => void,
  * }} props
  */
 
-import { useState, useMemo } from '@wordpress/element';
+import { useState, useMemo, useRef, useEffect } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
-import { Button, SearchControl } from '@wordpress/components';
+import { Button, CheckboxControl, SearchControl } from '@wordpress/components';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +46,14 @@ export const BASE_COLUMNS = [
 	{ key: 'last_name',  label: __( 'Last Name',  'wicket-aorm' ) },
 	{ key: 'email',      label: __( 'Email',      'wicket-aorm' ) },
 ];
+
+/**
+ * Column key used by the checkbox selection column when `selectable=true`.
+ * Exported for test assertions (AORM-8B.2).
+ *
+ * @type {string}
+ */
+export const SELECTABLE_COL_KEY = 'select';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -131,6 +143,9 @@ export default function RecordsTable( {
 	records = [],
 	extraColumns = [],
 	noRecordsText,
+	selectable = false,
+	selectedIds = new Set(),
+	onSelectionChange,
 } ) {
 	const [ searchQuery, setSearchQuery ] = useState( '' );
 	const [ sortField,   setSortField   ] = useState( null );
@@ -191,9 +206,75 @@ export default function RecordsTable( {
 		setCurrentPage( page );
 	}
 
+	// ── Selection (AORM-8B.2) ────────────────────────────────────────────────
+
+	/**
+	 * IDs of all records that survive the current search filter (all pages).
+	 * Used to compute "select all" state and handle the header checkbox.
+	 */
+	const filteredIds = useMemo( () => filtered.map( ( r ) => r.id ), [ filtered ] );
+
+	const allFilteredSelected =
+		filteredIds.length > 0 &&
+		filteredIds.every( ( id ) => selectedIds.has( id ) );
+
+	const someFilteredSelected =
+		filteredIds.some( ( id ) => selectedIds.has( id ) );
+
+	const isHeaderIndeterminate = someFilteredSelected && ! allFilteredSelected;
+
+	/**
+	 * Ref wrapper on the header checkbox cell so we can find the inner
+	 * <input> and set its `indeterminate` property (not supported as a React
+	 * prop on CheckboxControl).
+	 */
+	const headerCheckboxRef = useRef( null );
+
+	useEffect( () => {
+		if ( headerCheckboxRef.current ) {
+			const input = headerCheckboxRef.current.querySelector( 'input[type="checkbox"]' );
+			if ( input ) {
+				input.indeterminate = isHeaderIndeterminate;
+			}
+		}
+	}, [ isHeaderIndeterminate ] );
+
+	function handleSelectAll( checked ) {
+		if ( ! onSelectionChange ) {
+			return;
+		}
+
+		const next = new Set( selectedIds );
+
+		if ( checked ) {
+			filteredIds.forEach( ( id ) => next.add( id ) );
+		} else {
+			filteredIds.forEach( ( id ) => next.delete( id ) );
+		}
+
+		onSelectionChange( next );
+	}
+
+	function handleRowSelect( recordId, checked ) {
+		if ( ! onSelectionChange ) {
+			return;
+		}
+
+		const next = new Set( selectedIds );
+
+		if ( checked ) {
+			next.add( recordId );
+		} else {
+			next.delete( recordId );
+		}
+
+		onSelectionChange( next );
+	}
+
 	// ── Column list ───────────────────────────────────────────────────────────
 
-	const totalCols = BASE_COLUMNS.length + extraColumns.length;
+	const checkboxColCount = selectable ? 1 : 0;
+	const totalCols = checkboxColCount + BASE_COLUMNS.length + extraColumns.length;
 
 	// ── Render ────────────────────────────────────────────────────────────────
 
@@ -218,6 +299,25 @@ export default function RecordsTable( {
 			>
 				<thead>
 					<tr>
+						{ /* AORM-8B.2: Select-all checkbox column header */ }
+						{ selectable && (
+							<th
+								scope="col"
+								className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY }` }
+								aria-label={ __( 'Select rows', 'wicket-aorm' ) }
+							>
+								<div ref={ headerCheckboxRef }>
+									<CheckboxControl
+										label={ __( 'Select all', 'wicket-aorm' ) }
+										hideLabelFromVision
+										checked={ allFilteredSelected }
+										onChange={ handleSelectAll }
+										disabled={ filteredIds.length === 0 }
+									/>
+								</div>
+							</th>
+						) }
+
 						{ BASE_COLUMNS.map( ( col ) => (
 							<th
 								key={ col.key }
@@ -259,10 +359,35 @@ export default function RecordsTable( {
 					{ pageRows.map( ( record ) => (
 						<tr
 							key={ record.id }
-							className="aorm-records-table__row"
+							className={
+								'aorm-records-table__row' +
+								( selectable && selectedIds.has( record.id )
+									? ' aorm-records-table__row--selected'
+									: '' )
+							}
 							data-record-id={ record.id }
 							data-record-status={ record.record_status }
 						>
+							{ /* AORM-8B.2: Per-row checkbox cell */ }
+							{ selectable && (
+								<td
+									className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY }` }
+								>
+									<CheckboxControl
+										label={ sprintf(
+											/* translators: %s: person first name or record ID */
+											__( 'Select record for %s', 'wicket-aorm' ),
+											record.raw_data?.first_name ?? record.id
+										) }
+										hideLabelFromVision
+										checked={ selectedIds.has( record.id ) }
+										onChange={ ( checked ) =>
+											handleRowSelect( record.id, checked )
+										}
+									/>
+								</td>
+							) }
+
 							{ BASE_COLUMNS.map( ( col ) => (
 								<td
 									key={ col.key }
