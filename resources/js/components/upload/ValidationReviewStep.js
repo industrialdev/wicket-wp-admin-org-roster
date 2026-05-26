@@ -18,7 +18,7 @@
  * The action_type is read from the staged API response so it remains
  * accurate after a page reload (when selectedFile is no longer in state).
  *
- * Table content within each panel is added in AORM-8.3 – 8.10.
+ * Table content within each panel was added in AORM-8.3 – 8.10.
  *
  * @param {{
  *   goToStep:       (step: string) => void,
@@ -35,6 +35,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
+import DiscardPanel from './DiscardPanel';
 import ManualUpdatePanel from './ManualUpdatePanel';
 import PossibleMatchPanel from './PossibleMatchPanel';
 import ProbableMatchPanel from './ProbableMatchPanel';
@@ -191,19 +192,10 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 										records={ bucket.records ?? [] }
 									/>
 								) : (
-									/*
-									 * Table content for the discard category is added in AORM-8.10.
-									 * Render a count summary so the accordion is not empty.
-									 */
-									<p className="aorm-validation-review__panel-placeholder">
-										{ bucket.count === 0
-											? __( 'No records in this category.', 'wicket-aorm' )
-											: sprintf(
-												/* translators: %d: number of records */
-												__( '%d record(s) in this category.', 'wicket-aorm' ),
-												bucket.count
-											) }
-									</p>
+									/* AORM-8.10: Discard panel — table with Previous Category column. */
+									<DiscardPanel
+										records={ bucket.records ?? [] }
+									/>
 								) }
 							</PanelBody>
 						);
