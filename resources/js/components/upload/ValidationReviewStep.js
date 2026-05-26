@@ -36,6 +36,7 @@ import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
 import PossibleMatchPanel from './PossibleMatchPanel';
+import ProbableMatchPanel from './ProbableMatchPanel';
 import ReadyToSyncPanel from './ReadyToSyncPanel';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -178,9 +179,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 									<PossibleMatchPanel
 										records={ bucket.records ?? [] }
 									/>
+								) : key === 'probable_match' ? (
+									/* AORM-8.8: Probable Match panel — table with # Matches column. */
+									<ProbableMatchPanel
+										records={ bucket.records ?? [] }
+									/>
 								) : (
 									/*
-									 * Table content for other categories is added in AORM-8.8 – 8.10.
+									 * Table content for other categories is added in AORM-8.9 – 8.10.
 									 * Render a count summary so the accordion is not empty.
 									 */
 									<p className="aorm-validation-review__panel-placeholder">
