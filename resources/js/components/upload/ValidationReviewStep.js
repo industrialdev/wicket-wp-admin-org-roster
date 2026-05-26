@@ -35,6 +35,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
+import ManualUpdatePanel from './ManualUpdatePanel';
 import PossibleMatchPanel from './PossibleMatchPanel';
 import ProbableMatchPanel from './ProbableMatchPanel';
 import ReadyToSyncPanel from './ReadyToSyncPanel';
@@ -184,9 +185,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 									<ProbableMatchPanel
 										records={ bucket.records ?? [] }
 									/>
+								) : key === 'manual_update' ? (
+									/* AORM-8.9: Manual Updates panel — table with Previous Category column. */
+									<ManualUpdatePanel
+										records={ bucket.records ?? [] }
+									/>
 								) : (
 									/*
-									 * Table content for other categories is added in AORM-8.9 – 8.10.
+									 * Table content for the discard category is added in AORM-8.10.
 									 * Render a count summary so the accordion is not empty.
 									 */
 									<p className="aorm-validation-review__panel-placeholder">
