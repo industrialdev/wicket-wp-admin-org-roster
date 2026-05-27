@@ -20,7 +20,13 @@
  *
  * AORM-8B.1: Passes onRecordDiscarded={refetchStaged} to ReadyToSyncPanel
  * so the accordion refreshes automatically after a per-row Discard action.
- * onOpenReviewModal is passed as undefined until AORM-8B.10 builds the modal.
+ * onOpenReviewModal is passed as undefined to ReadyToSyncPanel until
+ * AORM-8B.10 builds the modal.
+ *
+ * AORM-8B.5: Passes onOpenReviewModal to PossibleMatchPanel and
+ * ProbableMatchPanel (currently undefined — will be wired in AORM-8B.10).
+ * Both panels conditionally render the "View Match" Actions column only when
+ * the prop is a function.
  *
  * Table content within each panel was added in AORM-8.3 – 8.10.
  *
@@ -201,12 +207,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 										onRecordDiscarded={ refetchStaged }
 									/>
 								) : key === 'possible_match' ? (
-									/* AORM-8.7: Possible Match panel — table with # Matches column. */
+									/* AORM-8.7: Possible Match panel — table with # Matches column.
+									 * AORM-8B.5: onOpenReviewModal wired in AORM-8B.10. */
 									<PossibleMatchPanel
 										records={ bucket.records ?? [] }
 									/>
 								) : key === 'probable_match' ? (
-									/* AORM-8.8: Probable Match panel — table with # Matches column. */
+									/* AORM-8.8: Probable Match panel — table with # Matches column.
+									 * AORM-8B.5: onOpenReviewModal wired in AORM-8B.10. */
 									<ProbableMatchPanel
 										records={ bucket.records ?? [] }
 									/>

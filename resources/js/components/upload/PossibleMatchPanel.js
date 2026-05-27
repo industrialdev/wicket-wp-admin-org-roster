@@ -1,19 +1,26 @@
 /**
- * Possible Match accordion panel content — AORM-8.7.
+ * Possible Match accordion panel content — AORM-8.7 / AORM-8B.5.
  *
  * Renders the full content area for the "Possible Match" PanelBody in the
  * ValidationReviewStep accordion.
  *
  * AORM-8.7: Displays a RecordsTable with a "# Matches" extra column that
- * shows the match_count for each record. Display only — no View Match action
- * is available at this stage (deferred to AORM-8B).
+ * shows the match_count for each record.
+ *
+ * AORM-8B.5: Adds an "Actions" extra column with a per-row "View Match"
+ * button that fires the onOpenReviewModal(record) prop callback (wired to
+ * the Review Match modal in AORM-8B.10). The Actions column is only added
+ * when onOpenReviewModal is provided; when absent the panel renders exactly
+ * as it did in AORM-8.7.
  *
  * @param {{
- *   records: Array<Object>,  — all possible_match staged records
+ *   records:             Array<Object>,    — all possible_match staged records
+ *   onOpenReviewModal?:  (record: Object) => void,
  * }} props
  */
 
 import { __ } from '@wordpress/i18n';
+import { Button } from '@wordpress/components';
 import RecordsTable from './RecordsTable';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -34,19 +41,47 @@ export const POSSIBLE_MATCH_STATUS = 'possible_match';
  */
 export const MATCHES_COLUMN_LABEL = __( '# Matches', 'wicket-aorm' );
 
+/**
+ * Record statuses eligible for the "View Match" action in this panel.
+ * Exported for test assertions.
+ *
+ * @type {string[]}
+ */
+export const VIEW_MATCH_STATUSES = [ 'possible_match' ];
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function PossibleMatchPanel( { records } ) {
+export default function PossibleMatchPanel( { records, onOpenReviewModal } ) {
 	/**
-	 * Extra column injected into the RecordsTable for AORM-8.7.
-	 * Displays the match_count for each record (integer, display only).
+	 * "# Matches" column — always present (AORM-8.7).
 	 */
+	const matchCountColumn = {
+		key:    'match_count',
+		label:  MATCHES_COLUMN_LABEL,
+		render: ( record ) => record.match_count ?? 0,
+	};
+
+	/**
+	 * "Actions" column — only injected when onOpenReviewModal is provided
+	 * (AORM-8B.5). Contains a "View Match" button per row.
+	 */
+	const actionsColumn = {
+		key:    'actions',
+		label:  __( 'Actions', 'wicket-aorm' ),
+		render: ( record ) => (
+			<Button
+				variant="tertiary"
+				isSmall
+				onClick={ () => onOpenReviewModal?.( record ) }
+			>
+				{ __( 'View Match', 'wicket-aorm' ) }
+			</Button>
+		),
+	};
+
 	const extraColumns = [
-		{
-			key:    'match_count',
-			label:  MATCHES_COLUMN_LABEL,
-			render: ( record ) => record.match_count ?? 0,
-		},
+		matchCountColumn,
+		...( onOpenReviewModal ? [ actionsColumn ] : [] ),
 	];
 
 	return (
