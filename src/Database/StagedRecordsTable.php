@@ -616,8 +616,8 @@ class StagedRecordsTable
                 "SELECT id, record_status, sync_status, raw_data, previous_category, matched_persons
                  FROM {$table}
                  WHERE upload_session_id = %s
-                   AND validation_status  = 'valid'
-                   AND record_status      = 'remove_existing'
+                   AND validation_status = 'valid'
+                   AND record_status = 'remove_existing'
                  ORDER BY id ASC",
                 $sessionId,
             ),
