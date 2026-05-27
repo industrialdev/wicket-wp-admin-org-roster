@@ -374,11 +374,6 @@ export default function RecordsTable( {
 									className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY }` }
 								>
 									<CheckboxControl
-										label={ sprintf(
-											/* translators: %s: person first name or record ID */
-											__( 'Select record for %s', 'wicket-aorm' ),
-											record.raw_data?.first_name ?? record.id
-										) }
 										hideLabelFromVision
 										checked={ selectedIds.has( record.id ) }
 										onChange={ ( checked ) =>

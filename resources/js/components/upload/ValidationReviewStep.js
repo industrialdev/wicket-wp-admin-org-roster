@@ -191,11 +191,13 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 								{ key === 'ready_to_sync' ? (
 									/* AORM-8.4: Session header + tables.
 									 * AORM-8B.1: onRecordDiscarded re-fetches after Discard;
-									 *            onOpenReviewModal wired in AORM-8B.10. */
+									 *            onOpenReviewModal wired in AORM-8B.10.
+									 * AORM-8B.4: sessionId enables dedicated replacements fetch. */
 									<ReadyToSyncPanel
 										records={ bucket.records ?? [] }
 										actionType={ actionType }
 										fileName={ selectedFile?.name ?? null }
+										sessionId={ sessionId }
 										onRecordDiscarded={ refetchStaged }
 									/>
 								) : key === 'possible_match' ? (

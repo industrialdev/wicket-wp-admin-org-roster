@@ -588,6 +588,74 @@ class StagedRecordsTable
     }
 
     /**
+     * Return all remove_existing staged records for the given session.
+     *
+     * Used by ReplacementDiffController (AORM-8B.4) to power the dedicated
+     * GET /uploads/{session_id}/replacements endpoint. Each record represents
+     * a current roster member who would be removed in replace mode.
+     *
+     * @param  string $sessionId  The upload_session_id UUID.
+     * @return list<array{
+     *   id:                int,
+     *   record_status:     string,
+     *   sync_status:       string,
+     *   raw_data:          array<string, mixed>,
+     *   previous_category: string|null,
+     *   matched_persons:   array<int, array<string, mixed>>|null,
+     * }>
+     */
+    public function getRemoveExistingRecords(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT id, record_status, sync_status, raw_data, previous_category, matched_persons
+                 FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status  = 'valid'
+                   AND record_status      = 'remove_existing'
+                 ORDER BY id ASC",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        $records = [];
+
+        foreach (is_array($rows) ? $rows : [] as $row) {
+            $prevCat = isset($row['previous_category']) && $row['previous_category'] !== ''
+                ? (string) $row['previous_category']
+                : null;
+
+            $matchedPersonsRaw = isset($row['matched_persons']) && $row['matched_persons'] !== ''
+                ? $row['matched_persons']
+                : null;
+
+            $matchedPersons = null;
+
+            if ($matchedPersonsRaw !== null) {
+                $decoded = json_decode((string) $matchedPersonsRaw, true);
+                $matchedPersons = is_array($decoded) ? $decoded : null;
+            }
+
+            $records[] = [
+                'id'                => (int) $row['id'],
+                'record_status'     => (string) ($row['record_status'] ?? ''),
+                'sync_status'       => (string) ($row['sync_status'] ?? ''),
+                'raw_data'          => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
+                'previous_category' => $prevCat,
+                'matched_persons'   => $matchedPersons,
+            ];
+        }
+
+        return $records;
+    }
+
+    /**
      * Return true when at least one row with record_status = 'remove_existing'
      * already exists for the given session.
      *

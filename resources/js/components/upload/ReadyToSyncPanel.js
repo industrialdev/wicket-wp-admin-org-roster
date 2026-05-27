@@ -1,5 +1,5 @@
 /**
- * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3.
+ * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3 / 8B.4.
  *
  * Renders the full content area for the "Ready to Sync" PanelBody in the
  * ValidationReviewStep accordion.
@@ -43,13 +43,21 @@
  *   fileName:             string|null,   — original CSV file name (null after a page reload)
  *   onOpenReviewModal?:   (record: Object) => void, — callback for See Details (AORM-8B.10)
  *   onRecordDiscarded?:   () => void,    — called after a successful Discard to refresh data
- *   onSyncSelected?:      (ids: number[]) => void, — bulk Sync to MDP (AORM-9 stub)
+ *   onSyncSelected?:      (ids: number[]) => void,  — bulk Sync to MDP (AORM-9 stub)
+ *   sessionId?:           string|null,             — session UUID; enables AORM-8B.4 replacements fetch
  * }} props
+ *
+ * AORM-8B.4: When sessionId is provided and actionType === 'replace', the
+ * "Records being removed" table is populated by fetching
+ * GET /wicket-aorm/v1/uploads/{sessionId}/replacements rather than filtering
+ * the records prop. The component maintains its own removalRecords /
+ * isLoadingRemovals / removalFetchError state and re-fetches (via
+ * removalRefetchKey) after each successful Discard Removal action.
  */
 
-import { useState } from '@wordpress/element';
+import { useState, useEffect } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
-import { Button, ExternalLink, Notice } from '@wordpress/components';
+import { Button, ExternalLink, Notice, Spinner } from '@wordpress/components';
 import { apiFetch } from '../../utils/apiFetch';
 import RecordsTable from './RecordsTable';
 
@@ -135,6 +143,7 @@ export default function ReadyToSyncPanel( {
 	records,
 	actionType,
 	fileName,
+	sessionId,
 	onOpenReviewModal,
 	onRecordDiscarded,
 	onSyncSelected,
@@ -150,6 +159,54 @@ export default function ReadyToSyncPanel( {
 	// ── AORM-8B.3: Removal table discard state ───────────────────────────────
 	const [ discardingRemovedIds, setDiscardingRemovedIds ] = useState( new Set() );
 	const [ discardRemovedError,  setDiscardRemovedError  ] = useState( null );
+
+	// ── AORM-8B.4: Replacements endpoint state ───────────────────────────────
+	/** Records fetched from GET /uploads/{sessionId}/replacements */
+	const [ removalRecords,      setRemovalRecords      ] = useState( null );
+	const [ isLoadingRemovals,   setIsLoadingRemovals   ] = useState( false );
+	const [ removalFetchError,   setRemovalFetchError   ] = useState( null );
+	/**
+	 * Incrementing key used to re-trigger the replacements fetch after a
+	 * successful Discard Removal action without changing sessionId.
+	 */
+	const [ removalRefetchKey, setRemovalRefetchKey ] = useState( 0 );
+
+	/**
+	 * AORM-8B.4: Fetch remove_existing records from the dedicated replacements
+	 * endpoint whenever we are in replace mode and have a valid sessionId.
+	 * Re-runs when removalRefetchKey is incremented (post-discard refresh).
+	 */
+	useEffect( () => {
+		if ( actionType !== 'replace' || ! sessionId ) {
+			return;
+		}
+
+		let cancelled = false;
+
+		setIsLoadingRemovals( true );
+		setRemovalFetchError( null );
+
+		apiFetch( { path: `/wicket-aorm/v1/uploads/${ sessionId }/replacements` } )
+			.then( ( response ) => {
+				if ( ! cancelled ) {
+					setRemovalRecords( response?.records ?? [] );
+					setIsLoadingRemovals( false );
+				}
+			} )
+			.catch( ( err ) => {
+				if ( ! cancelled ) {
+					setRemovalFetchError(
+						err?.message ??
+							__( 'Could not load removal records. Please refresh the page.', 'wicket-aorm' )
+					);
+					setIsLoadingRemovals( false );
+				}
+			} );
+
+		return () => {
+			cancelled = true;
+		};
+	}, [ actionType, sessionId, removalRefetchKey ] );
 
 	const actionLabel = ACTION_TYPE_LABELS[ actionType ] ?? actionType;
 
@@ -268,6 +325,8 @@ export default function ReadyToSyncPanel( {
 
 					return next;
 				} );
+				// Refresh the dedicated replacements fetch (AORM-8B.4)
+				setRemovalRefetchKey( ( k ) => k + 1 );
 				onRecordDiscarded?.();
 			} )
 			.catch( ( err ) => {
@@ -430,11 +489,13 @@ export default function ReadyToSyncPanel( {
 		},
 	};
 
-	// ── AORM-8.6: Derive "Records being removed" subset (replace mode only) ──
+	// ── AORM-8B.4: Resolve "Records being removed" from dedicated endpoint ────
+	// When sessionId is provided, use the fetched removalRecords. Fall back to
+	// filtering the records prop (e.g. when sessionId is unavailable in tests).
 
-	const removedRecords = records.filter(
-		( r ) => REMOVED_STATUSES.includes( r.record_status )
-	);
+	const removedRecords = removalRecords !== null
+		? removalRecords
+		: records.filter( ( r ) => REMOVED_STATUSES.includes( r.record_status ) );
 
 	return (
 		<div className="aorm-ready-to-sync-panel">
@@ -554,18 +615,41 @@ export default function ReadyToSyncPanel( {
 				</Notice>
 			) }
 
-			{ /* AORM-8.6: "Records being removed" table (replace mode only) */ }
+			{ /* AORM-8.6: "Records being removed" table (replace mode only)    */ }
 			{ /* AORM-8B.3: Actions column added — View in MDP, Discard Removal */ }
+			{ /* AORM-8B.4: Table populated via GET /uploads/{id}/replacements   */ }
 			{ actionType === 'replace' && (
 				<div className="aorm-ready-to-sync-panel__section aorm-ready-to-sync-panel__section--removed">
 					<h3 className="aorm-ready-to-sync-panel__section-heading">
 						{ __( 'Records being removed', 'wicket-aorm' ) }
 					</h3>
-					<RecordsTable
-						records={ removedRecords }
-						extraColumns={ [ removedActionsColumn ] }
-						noRecordsText={ __( 'No records to remove.', 'wicket-aorm' ) }
-					/>
+
+					{ /* AORM-8B.4: Loading state while fetching replacements */ }
+					{ isLoadingRemovals && (
+						<div className="aorm-ready-to-sync-panel__removals-loading">
+							<Spinner />
+						</div>
+					) }
+
+					{ /* AORM-8B.4: Error state if replacements fetch failed */ }
+					{ removalFetchError && ! isLoadingRemovals && (
+						<Notice
+							status="error"
+							isDismissible
+							onRemove={ () => setRemovalFetchError( null ) }
+							className="aorm-ready-to-sync-panel__removals-error"
+						>
+							{ removalFetchError }
+						</Notice>
+					) }
+
+					{ ! isLoadingRemovals && ! removalFetchError && (
+						<RecordsTable
+							records={ removedRecords }
+							extraColumns={ [ removedActionsColumn ] }
+							noRecordsText={ __( 'No records to remove.', 'wicket-aorm' ) }
+						/>
+					) }
 				</div>
 			) }
 
