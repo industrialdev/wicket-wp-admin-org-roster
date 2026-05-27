@@ -1,5 +1,5 @@
 /**
- * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2.
+ * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3.
  *
  * Renders the full content area for the "Ready to Sync" PanelBody in the
  * ValidationReviewStep accordion.
@@ -25,6 +25,17 @@
  *       - "Discard"     — calls PATCH staged-records/{id} for every selected
  *                         record in parallel via Promise.allSettled; shows a
  *                         partial-failure Notice and keeps failed IDs selected.
+ *
+ * AORM-8B.3: Per-row actions in the "Records being removed" table:
+ *   - View in MDP     — all remove_existing records; ExternalLink to
+ *                       {appEndpoint}/people/{raw_data.person_uuid}. Omitted
+ *                       when appEndpoint or person_uuid is unavailable.
+ *   - Discard Removal — all remove_existing records; calls PATCH
+ *                       staged-records/{id} with {category:'discard'} to
+ *                       remove the row from the removal list. Uses
+ *                       `discardingRemovedIds` Set state to track in-flight
+ *                       requests; dismissible Notice surfaces errors. Calls
+ *                       onRecordDiscarded?() on success.
  *
  * @param {{
  *   records:              Array<Object>,  — all ready_to_sync staged records
@@ -90,6 +101,18 @@ export const ADDED_STATUSES = Object.keys( RECORD_STATUS_LABELS );
 export const REMOVED_STATUSES = [ 'remove_existing' ];
 
 /**
+ * record_status values whose rows in the "Records being removed" table show
+ * a "View in MDP" link (AORM-8B.3).
+ *
+ * The MDP URL is built from raw_data.person_uuid (matched_persons is null
+ * for remove_existing rows — they are synthetic rows inserted by the
+ * matching job, not matched against an uploaded CSV row).
+ *
+ * @type {string[]}
+ */
+export const VIEW_IN_MDP_REMOVAL_STATUSES = [ 'remove_existing' ];
+
+/**
  * record_status values whose rows show a "See Details" button (AORM-8B.1).
  * These records have a probable or possible MDP match requiring admin review
  * via the Review Match modal (built in AORM-8B.10).
@@ -116,13 +139,17 @@ export default function ReadyToSyncPanel( {
 	onRecordDiscarded,
 	onSyncSelected,
 } ) {
-	const [ discardingIds,    setDiscardingIds    ] = useState( new Set() );
-	const [ discardError,     setDiscardError     ] = useState( null );
+	const [ discardingIds,       setDiscardingIds       ] = useState( new Set() );
+	const [ discardError,        setDiscardError        ] = useState( null );
 
 	// ── AORM-8B.2: Bulk selection + bulk action state ────────────────────────
 	const [ selectedAddedIds, setSelectedAddedIds ] = useState( new Set() );
 	const [ isBulkDiscarding, setIsBulkDiscarding ] = useState( false );
 	const [ bulkDiscardError, setBulkDiscardError ] = useState( null );
+
+	// ── AORM-8B.3: Removal table discard state ───────────────────────────────
+	const [ discardingRemovedIds, setDiscardingRemovedIds ] = useState( new Set() );
+	const [ discardRemovedError,  setDiscardRemovedError  ] = useState( null );
 
 	const actionLabel = ACTION_TYPE_LABELS[ actionType ] ?? actionType;
 
@@ -214,6 +241,49 @@ export default function ReadyToSyncPanel( {
 		} );
 	}
 
+	// ── AORM-8B.3: Discard Removal handler ──────────────────────────────────
+
+	/**
+	 * Move a single "removed" record to the Discard category via PATCH
+	 * /wicket-aorm/v1/staged-records/{id} (endpoint built in AORM-8B.8).
+	 *
+	 * Discarding a removal record means the person will NOT be removed from the
+	 * roster during the replace-mode sync — effectively reinstating them.
+	 *
+	 * @param {number} recordId
+	 */
+	function handleDiscardRemoval( recordId ) {
+		setDiscardingRemovedIds( ( prev ) => new Set( [ ...prev, recordId ] ) );
+		setDiscardRemovedError( null );
+
+		apiFetch( {
+			path:   `/wicket-aorm/v1/staged-records/${ recordId }`,
+			method: 'PATCH',
+			data:   { category: 'discard' },
+		} )
+			.then( () => {
+				setDiscardingRemovedIds( ( prev ) => {
+					const next = new Set( prev );
+					next.delete( recordId );
+
+					return next;
+				} );
+				onRecordDiscarded?.();
+			} )
+			.catch( ( err ) => {
+				setDiscardingRemovedIds( ( prev ) => {
+					const next = new Set( prev );
+					next.delete( recordId );
+
+					return next;
+				} );
+				setDiscardRemovedError(
+					err?.message ??
+						__( 'Failed to discard removal. Please try again.', 'wicket-aorm' )
+				);
+			} );
+	}
+
 	// ── AORM-8.5: Derive "Records being added" subset ────────────────────────
 
 	const addedRecords = records.filter(
@@ -302,6 +372,63 @@ export default function ReadyToSyncPanel( {
 		},
 		actionsColumn,
 	];
+
+	// ── AORM-8B.3: Build the "Actions" extra column for the removal table ────
+
+	/**
+	 * Renders per-row action buttons for the "Records being removed" table.
+	 *
+	 * Actions for all remove_existing records:
+	 *   View in MDP     — ExternalLink built from raw_data.person_uuid.
+	 *                     Omitted when appEndpoint or person_uuid is missing.
+	 *   Discard Removal — PATCH staged-records/{id} with {category:'discard'}
+	 *                     (built in AORM-8B.8).
+	 */
+	const removedActionsColumn = {
+		key:   'actions',
+		label: __( 'Actions', 'wicket-aorm' ),
+		render: ( record ) => {
+			const isDiscarding = discardingRemovedIds.has( record.id );
+			const appEndpoint  = String( window.aormContext?.appEndpoint ?? '' ).replace( /\/$/, '' );
+			const personUuid   = record.raw_data?.person_uuid ?? '';
+			const mdpUrl = appEndpoint && personUuid
+				? `${ appEndpoint }/people/${ personUuid }`
+				: '';
+
+			return (
+				<div className="aorm-rts-row-actions">
+
+					{ /* View in MDP — all remove_existing records (AORM-8B.3) */ }
+					{ VIEW_IN_MDP_REMOVAL_STATUSES.includes( record.record_status ) && mdpUrl && (
+						<ExternalLink
+							href={ mdpUrl }
+							className="aorm-rts-row-actions__view-in-mdp-removal"
+						>
+							{ __( 'View in MDP', 'wicket-aorm' ) }
+						</ExternalLink>
+					) }
+
+					{ /* Discard Removal — all remove_existing records (AORM-8B.8 endpoint) */ }
+					<Button
+						variant="tertiary"
+						isDestructive
+						isBusy={ isDiscarding }
+						disabled={ isDiscarding }
+						onClick={ () => handleDiscardRemoval( record.id ) }
+						className="aorm-rts-row-actions__discard-removal"
+						aria-label={ sprintf(
+							/* translators: %s: person email or record id */
+							__( 'Discard removal of %s', 'wicket-aorm' ),
+							record.raw_data?.email ?? record.id
+						) }
+					>
+						{ __( 'Discard Removal', 'wicket-aorm' ) }
+					</Button>
+
+				</div>
+			);
+		},
+	};
 
 	// ── AORM-8.6: Derive "Records being removed" subset (replace mode only) ──
 
@@ -415,7 +542,20 @@ export default function ReadyToSyncPanel( {
 				/>
 			</div>
 
+			{ /* AORM-8B.3: Removal discard error notice */ }
+			{ discardRemovedError && (
+				<Notice
+					status="error"
+					isDismissible
+					onRemove={ () => setDiscardRemovedError( null ) }
+					className="aorm-ready-to-sync-panel__discard-removal-error"
+				>
+					{ discardRemovedError }
+				</Notice>
+			) }
+
 			{ /* AORM-8.6: "Records being removed" table (replace mode only) */ }
+			{ /* AORM-8B.3: Actions column added — View in MDP, Discard Removal */ }
 			{ actionType === 'replace' && (
 				<div className="aorm-ready-to-sync-panel__section aorm-ready-to-sync-panel__section--removed">
 					<h3 className="aorm-ready-to-sync-panel__section-heading">
@@ -423,6 +563,7 @@ export default function ReadyToSyncPanel( {
 					</h3>
 					<RecordsTable
 						records={ removedRecords }
+						extraColumns={ [ removedActionsColumn ] }
 						noRecordsText={ __( 'No records to remove.', 'wicket-aorm' ) }
 					/>
 				</div>
