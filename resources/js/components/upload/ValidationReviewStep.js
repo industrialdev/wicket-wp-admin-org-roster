@@ -1,5 +1,5 @@
 /**
- * Upload validation review step — AORM-8.2 / AORM-8B.1.
+ * Upload validation review step — AORM-8.2 / AORM-8B.1 / AORM-8B.6.
  *
  * Fetches the categorised staged records for the active upload session from
  * GET /wicket-aorm/v1/uploads/{sessionId}/staged (built in AORM-8.1) and
@@ -27,6 +27,10 @@
  * ProbableMatchPanel (currently undefined — will be wired in AORM-8B.10).
  * Both panels conditionally render the "View Match" Actions column only when
  * the prop is a function.
+ *
+ * AORM-8B.6: Passes onRecordCategorized={refetchStaged} to ManualUpdatePanel
+ * so the accordion counts update after per-row or bulk Reinstate/Remove
+ * actions move records to a different category.
  *
  * Table content within each panel was added in AORM-8.3 – 8.10.
  *
@@ -219,9 +223,11 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 										records={ bucket.records ?? [] }
 									/>
 								) : key === 'manual_update' ? (
-									/* AORM-8.9: Manual Updates panel — table with Previous Category column. */
+									/* AORM-8.9: Manual Updates panel — table with Previous Category column.
+									 * AORM-8B.6: onRecordCategorized re-fetches after Reinstate/Remove. */
 									<ManualUpdatePanel
 										records={ bucket.records ?? [] }
+										onRecordCategorized={ refetchStaged }
 									/>
 								) : (
 									/* AORM-8.10: Discard panel — table with Previous Category column. */

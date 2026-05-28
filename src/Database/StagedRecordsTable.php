@@ -118,6 +118,33 @@ class StagedRecordsTable
     }
 
     /**
+     * Fetch a single staged record by its primary-key ID.
+     *
+     * Used by the PATCH /staged-records/{id} endpoint (AORM-8B.8 / AORM-8B.6)
+     * to verify the record exists and read its current category before updating.
+     *
+     * @param int $id  The auto-increment primary-key ID of the row.
+     * @return array<string, mixed>|null  Associative row array, or null when not found.
+     */
+    public function getRecordById(int $id): ?array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT * FROM {$table} WHERE id = %d LIMIT 1",
+                $id,
+            ),
+            \ARRAY_A,
+        );
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
      * Insert a new row into wp_wicket_aorm_staged_records.
      *
      * Accepts a pre-built data array whose keys match the table columns.
