@@ -230,9 +230,10 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 										onRecordCategorized={ refetchStaged }
 									/>
 								) : (
-									/* AORM-8.10: Discard panel — table with Previous Category column. */
+									/* AORM-8.10 / AORM-8B.7: Discard panel — table with Previous Category column + Reinstate actions. */
 									<DiscardPanel
 										records={ bucket.records ?? [] }
+										onRecordCategorized={ refetchStaged }
 									/>
 								) }
 							</PanelBody>
