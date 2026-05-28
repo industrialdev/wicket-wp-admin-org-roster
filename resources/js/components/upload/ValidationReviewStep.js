@@ -20,13 +20,17 @@
  *
  * AORM-8B.1: Passes onRecordDiscarded={refetchStaged} to ReadyToSyncPanel
  * so the accordion refreshes automatically after a per-row Discard action.
- * onOpenReviewModal is passed as undefined to ReadyToSyncPanel until
- * AORM-8B.10 builds the modal.
+ * onOpenReviewModal is now wired (AORM-8B.10) so the Review Match modal opens
+ * when "See Details" is clicked on a merging_to_record row.
  *
  * AORM-8B.5: Passes onOpenReviewModal to PossibleMatchPanel and
- * ProbableMatchPanel (currently undefined — will be wired in AORM-8B.10).
- * Both panels conditionally render the "View Match" Actions column only when
- * the prop is a function.
+ * ProbableMatchPanel. Both panels render the "View Match" Actions column now
+ * that onOpenReviewModal is a function (wired in AORM-8B.10).
+ *
+ * AORM-8B.10: Review Match modal wired. reviewRecord state holds the staged
+ * record currently open in the modal (null = closed). openReviewModal(record)
+ * sets it; closeReviewModal() clears it. ReviewMatchModal is rendered above
+ * the accordion when reviewRecord is non-null.
  *
  * AORM-8B.6: Passes onRecordCategorized={refetchStaged} to ManualUpdatePanel
  * so the accordion counts update after per-row or bulk Reinstate/Remove
@@ -54,6 +58,7 @@ import ManualUpdatePanel from './ManualUpdatePanel';
 import PossibleMatchPanel from './PossibleMatchPanel';
 import ProbableMatchPanel from './ProbableMatchPanel';
 import ReadyToSyncPanel from './ReadyToSyncPanel';
+import ReviewMatchModal from './ReviewMatchModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -108,6 +113,33 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 		setRefetchKey( ( k ) => k + 1 );
 	}, [] );
 
+	// ── AORM-8B.10: Review Match modal state ─────────────────────────────────
+
+	/**
+	 * The staged record currently open in the Review Match modal.
+	 * null when the modal is closed.
+	 */
+	const [ reviewRecord, setReviewRecord ] = useState( null );
+
+	/**
+	 * Open the Review Match modal for the given staged record.
+	 * Passed to ReadyToSyncPanel (See Details — AORM-8B.1),
+	 * PossibleMatchPanel (View Match — AORM-8B.5), and
+	 * ProbableMatchPanel (View Match — AORM-8B.5).
+	 *
+	 * @param {Object} record — the staged record to review
+	 */
+	const openReviewModal = useCallback( ( record ) => {
+		setReviewRecord( record );
+	}, [] );
+
+	/**
+	 * Close the Review Match modal without making any state changes (AORM-8B.20).
+	 */
+	const closeReviewModal = useCallback( () => {
+		setReviewRecord( null );
+	}, [] );
+
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
 	useEffect( () => {
@@ -146,6 +178,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 
 	return (
 		<div className="aorm-wizard-step aorm-wizard-step--validation-review">
+
+			{ /* AORM-8B.10: Review Match modal — rendered when reviewRecord is set */ }
+			{ reviewRecord && (
+				<ReviewMatchModal
+					record={ reviewRecord }
+					onClose={ closeReviewModal }
+				/>
+			) }
 
 			<h2 className="aorm-validation-review__heading">
 				{ __( 'Review Upload', 'wicket-aorm' ) }
@@ -200,27 +240,30 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 							>
 								{ key === 'ready_to_sync' ? (
 									/* AORM-8.4: Session header + tables.
-									 * AORM-8B.1: onRecordDiscarded re-fetches after Discard;
-									 *            onOpenReviewModal wired in AORM-8B.10.
-									 * AORM-8B.4: sessionId enables dedicated replacements fetch. */
+									 * AORM-8B.1: onRecordDiscarded re-fetches after Discard.
+									 * AORM-8B.4: sessionId enables dedicated replacements fetch.
+									 * AORM-8B.10: onOpenReviewModal opens Review Match modal. */
 									<ReadyToSyncPanel
 										records={ bucket.records ?? [] }
 										actionType={ actionType }
 										fileName={ selectedFile?.name ?? null }
 										sessionId={ sessionId }
 										onRecordDiscarded={ refetchStaged }
+										onOpenReviewModal={ openReviewModal }
 									/>
 								) : key === 'possible_match' ? (
 									/* AORM-8.7: Possible Match panel — table with # Matches column.
-									 * AORM-8B.5: onOpenReviewModal wired in AORM-8B.10. */
+									 * AORM-8B.5 / AORM-8B.10: onOpenReviewModal opens Review Match modal. */
 									<PossibleMatchPanel
 										records={ bucket.records ?? [] }
+										onOpenReviewModal={ openReviewModal }
 									/>
 								) : key === 'probable_match' ? (
 									/* AORM-8.8: Probable Match panel — table with # Matches column.
-									 * AORM-8B.5: onOpenReviewModal wired in AORM-8B.10. */
+									 * AORM-8B.5 / AORM-8B.10: onOpenReviewModal opens Review Match modal. */
 									<ProbableMatchPanel
 										records={ bucket.records ?? [] }
+										onOpenReviewModal={ openReviewModal }
 									/>
 								) : key === 'manual_update' ? (
 									/* AORM-8.9: Manual Updates panel — table with Previous Category column.
