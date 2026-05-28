@@ -170,6 +170,29 @@ class StagedRecordsTable
     }
 
     /**
+     * Permanently delete a single staged record by its primary-key ID.
+     *
+     * Used by the DELETE /wicket-aorm/v1/staged-records/{id} endpoint (AORM-8B.9)
+     * to hard-remove a record that is no longer needed. Unlike re-categorisation
+     * (PATCH endpoint, AORM-8B.8), deletion is irreversible.
+     *
+     * Returns true when exactly one row was deleted, false when no row matched
+     * (e.g. the record was already deleted or the ID never existed).
+     *
+     * @param int $id  The auto-increment primary-key ID of the row to delete.
+     * @return bool  True when the row was deleted; false when not found.
+     */
+    public function deleteRecord(int $id): bool
+    {
+        global $wpdb;
+
+        $table  = $wpdb->prefix . 'wicket_aorm_staged_records';
+        $result = $wpdb->delete($table, ['id' => $id]);
+
+        return $result === 1;
+    }
+
+    /**
      * Delete all staged records for a given upload session.
      *
      * Used by the abandon endpoint (DELETE /wicket-aorm/v1/uploads/{session_id})

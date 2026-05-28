@@ -26,7 +26,7 @@ wicket-admin-org-roster/
 │   │   ├── RestController.php          # Base controller (namespace, permissions)
 │   │   ├── RosterController.php        # Roster list/detail endpoints
 │   │   ├── UploadController.php        # File upload + parse → staged records
-│   │   ├── StagedRecordController.php  # GET /staged-records/{session_id} + PATCH /staged-records/{id} — review & re-categorise (AORM-8B.8)
+│   │   ├── StagedRecordController.php  # GET /staged-records/{session_id} + PATCH /staged-records/{id} + DELETE /staged-records/{id} — review, re-categorise (AORM-8B.8), permanently delete (AORM-8B.9)
 │   │   ├── UploadStatusController.php  # GET /uploads/{id}/status — matching progress
 │   │   ├── UploadStagedController.php     # GET /uploads/{id}/staged — categorised review (AORM-8.1)
 │   │   ├── ReplacementDiffController.php  # GET /uploads/{id}/replacements — remove_existing diff (AORM-8B.4)
@@ -136,6 +136,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 - `POST /wicket-aorm/v1/upload` — file upload + parse to staged records
 - `GET   /wicket-aorm/v1/staged-records/{session_id}` — review staged rows
 - `PATCH /wicket-aorm/v1/staged-records/{id}` — re-categorise a single record (AORM-8B.8); accepts `{category}` body param; valid values: `ready_to_sync`, `possible_match`, `probable_match`, `manual_update`, `discard`; stores old category as `previous_category`; 400 on invalid category, 404 on unknown id
+- `DELETE /wicket-aorm/v1/staged-records/{id}` — permanently remove a single staged record (AORM-8B.9); 404 on unknown id; 200 with `{deleted: true, id}` on success
 - `POST /wicket-aorm/v1/sync/{session_id}` — sync staged records to MDP
 
 ## Testing Guidelines

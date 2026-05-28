@@ -20,6 +20,11 @@ use WicketAORM\Database\StagedRecordsTable;
  *       category as previous_category before writing the new value.
  *       Built to support per-row and bulk Discard / Reinstate / Remove
  *       actions across multiple accordion panels (AORM-8B.1, 8B.6, 8B.7).
+ *
+ *   DELETE /wicket-aorm/v1/staged-records/{id}
+ *       Permanently remove a single staged record from the database (AORM-8B.9).
+ *       Returns 404 when the record does not exist, 200 with
+ *       {deleted: true, id} on success.
  */
 class StagedRecordController extends RestController
 {
@@ -86,6 +91,25 @@ class StagedRecordController extends RestController
                         'category' => [
                             'required'          => true,
                             'sanitize_callback' => 'sanitize_text_field',
+                        ],
+                    ],
+                ],
+            ],
+        );
+
+        // DELETE /staged-records/{id} — permanently remove a single record (AORM-8B.9)
+        register_rest_route(
+            $this->namespace,
+            '/staged-records/(?P<id>\d+)',
+            [
+                [
+                    'methods'             => \WP_REST_Server::DELETABLE,
+                    'callback'            => [$this, 'delete_record'],
+                    'permission_callback' => [$this, 'delete_record_permissions_check'],
+                    'args'                => [
+                        'id' => [
+                            'required'          => true,
+                            'sanitize_callback' => 'absint',
                         ],
                     ],
                 ],
@@ -202,6 +226,52 @@ class StagedRecordController extends RestController
                 'id'                => $id,
                 'category'          => $category,
                 'previous_category' => $previousCategory,
+            ],
+            200,
+        );
+    }
+
+    /**
+     * Permission check for DELETE /staged-records/{id}.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function delete_record_permissions_check($request): bool
+    {
+        return current_user_can('manage_options');
+    }
+
+    /**
+     * Handle DELETE /staged-records/{id}.
+     *
+     * Permanently removes the staged record identified by {id} from the
+     * database. Unlike PATCH re-categorisation, this action is irreversible.
+     *
+     * Returns 404 when no record exists for the given ID.
+     * Returns 200 with {deleted: true, id} on success.
+     *
+     * @param \WP_REST_Request $request
+     */
+    public function delete_record($request): \WP_REST_Response
+    {
+        $id    = (int) $request->get_param('id');
+        $table = $this->stagedRecordsTable ?? new StagedRecordsTable();
+
+        $record = $table->getRecordById($id);
+
+        if ($record === null) {
+            return new \WP_REST_Response(
+                ['message' => 'Staged record not found.'],
+                404,
+            );
+        }
+
+        $table->deleteRecord($id);
+
+        return new \WP_REST_Response(
+            [
+                'deleted' => true,
+                'id'      => $id,
             ],
             200,
         );
