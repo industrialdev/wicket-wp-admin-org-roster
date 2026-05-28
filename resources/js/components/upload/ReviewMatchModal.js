@@ -8,8 +8,8 @@
  * AORM-8B.10: Modal scaffold using @wordpress/components Modal. Contains two
  * sections — an imported record summary (full panel built in AORM-8B.11) and
  * a matches section (full table built in AORM-8B.13, using the endpoint from
- * AORM-8B.12). Both sections are stubs at this stage, showing basic data
- * already present on the staged record object.
+ * AORM-8B.12). The imported record section uses ImportedRecordSummary
+ * (AORM-8B.11); the matches section remains a stub at this stage.
  *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
@@ -22,6 +22,7 @@
 
 import { __, sprintf } from '@wordpress/i18n';
 import { Button, Modal } from '@wordpress/components';
+import ImportedRecordSummary from './ImportedRecordSummary';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -59,14 +60,6 @@ export default function ReviewMatchModal( { record, onClose } ) {
 	const rawData        = record.raw_data ?? {};
 	const matchedPersons = record.matched_persons ?? [];
 
-	/**
-	 * Full name derived from raw_data. Falls back to "—" when both parts are
-	 * absent (e.g. a synthetic remove_existing row with no upload data).
-	 */
-	const fullName = [ rawData.first_name, rawData.last_name ]
-		.filter( Boolean )
-		.join( ' ' ) || '—';
-
 	return (
 		<Modal
 			title={ MODAL_TITLE }
@@ -75,9 +68,8 @@ export default function ReviewMatchModal( { record, onClose } ) {
 		>
 
 			{ /* ── Imported Record summary ──────────────────────────────────────
-			     AORM-8B.10 stub: shows basic raw_data fields from the staged
-			     record. AORM-8B.11 will replace this section with the full
-			     ImportedRecordSummary component (full name, email, phone, title). */ }
+			     AORM-8B.11: full ImportedRecordSummary component (full name,
+			     email, phone, title). */ }
 			<section
 				className="aorm-review-match-modal__imported-record"
 				aria-labelledby="aorm-review-match-imported-heading"
@@ -89,45 +81,7 @@ export default function ReviewMatchModal( { record, onClose } ) {
 					{ IMPORTED_RECORD_HEADING }
 				</h3>
 
-				<dl className="aorm-review-match-modal__record-details">
-
-					<dt className="aorm-review-match-modal__record-term">
-						{ __( 'Name', 'wicket-aorm' ) }
-					</dt>
-					<dd className="aorm-review-match-modal__record-value">
-						{ fullName }
-					</dd>
-
-					<dt className="aorm-review-match-modal__record-term">
-						{ __( 'Email', 'wicket-aorm' ) }
-					</dt>
-					<dd className="aorm-review-match-modal__record-value">
-						{ rawData.email_address || '—' }
-					</dd>
-
-					{ rawData.mobile_phone && (
-						<>
-							<dt className="aorm-review-match-modal__record-term">
-								{ __( 'Phone', 'wicket-aorm' ) }
-							</dt>
-							<dd className="aorm-review-match-modal__record-value">
-								{ rawData.mobile_phone }
-							</dd>
-						</>
-					) }
-
-					{ rawData.title && (
-						<>
-							<dt className="aorm-review-match-modal__record-term">
-								{ __( 'Title', 'wicket-aorm' ) }
-							</dt>
-							<dd className="aorm-review-match-modal__record-value">
-								{ rawData.title }
-							</dd>
-						</>
-					) }
-
-				</dl>
+				<ImportedRecordSummary rawData={ rawData } />
 			</section>
 
 			{ /* ── Matches section ───────────────────────────────────────────────
