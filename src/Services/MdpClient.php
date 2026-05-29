@@ -696,6 +696,223 @@ class MdpClient
     }
 
     /**
+     * Fetch full details for a single person from the MDP.
+     *
+     * Issues two requests:
+     *   1. GET people/{uuid}?include=phones,emails,addresses — base attributes,
+     *      all email addresses, all phone numbers, and address-based location.
+     *   2. GET people/{uuid}/organizations?page[size]=5 — employer name (lazy-
+     *      loaded via a secondary call because employer is not a direct attribute
+     *      on the person resource).
+     *
+     * Returns an empty array when `wicket_api_client()` is unavailable, the person
+     * does not exist, or the request throws.
+     *
+     * Response shape:
+     * ```
+     * [
+     *   'uuid'          => string,
+     *   'given_name'    => string,
+     *   'family_name'   => string,
+     *   'full_name'     => string,
+     *   'primary_email' => string,
+     *   'emails'        => list<array{address: string, type: string, primary: bool}>,
+     *   'primary_phone' => string,
+     *   'phones'        => list<array{number: string, type: string, primary: bool}>,
+     *   'location'      => array{city: string, country: string},
+     *   'title'         => string,
+     *   'employer'      => string,
+     * ]
+     * ```
+     *
+     * @param string $uuid  Person UUID to fetch.
+     * @return array<string,mixed>  Normalized person detail, or [] on failure.
+     */
+    public function getPersonDetails(string $uuid): array
+    {
+        if ($uuid === '') {
+            return [];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return [];
+        }
+
+        $query = http_build_query(['include' => 'phones,emails,addresses']);
+
+        try {
+            $response = $client->get('people/' . $uuid . '?' . $query);
+        } catch (\Exception $e) {
+            return [];
+        }
+
+        if (! is_array($response) || empty($response['data'])) {
+            return [];
+        }
+
+        $person = $this->normalizePersonDetail($response);
+
+        // Lazy-load employer via a secondary organizations call.
+        $person['employer'] = $this->fetchPersonEmployer($client, $uuid);
+
+        return $person;
+    }
+
+    /**
+     * Normalize a single-person JSON:API response into a flat detail array.
+     *
+     * Resolves phones, emails, and addresses from sideloaded `included` resources.
+     * Primary phone / primary email are promoted to top-level fields for convenient
+     * use in table cells. Location is taken from the primary address (city + country).
+     *
+     * @param array{
+     *   data: array<string,mixed>,
+     *   included?: list<array<string,mixed>>,
+     * } $response
+     * @return array<string,mixed>
+     */
+    private function normalizePersonDetail(array $response): array
+    {
+        $item  = $response['data'];
+        $attrs = $item['attributes'] ?? [];
+        $uuid  = (string) ($item['id'] ?? '');
+
+        // Index included resources by type:id.
+        $included = [];
+
+        foreach ($response['included'] ?? [] as $inc) {
+            $type = (string) ($inc['type'] ?? '');
+            $id   = (string) ($inc['id'] ?? '');
+
+            if ($type !== '' && $id !== '') {
+                $included[$type . ':' . $id] = $inc['attributes'] ?? [];
+            }
+        }
+
+        // -- Phones --
+        $phones       = [];
+        $primaryPhone = '';
+
+        foreach ($item['relationships']['phones']['data'] ?? [] as $rel) {
+            $relId    = (string) ($rel['id'] ?? '');
+            $relAttrs = $included['phones:' . $relId] ?? [];
+            $number   = (string) ($relAttrs['number'] ?? '');
+            $type     = (string) ($relAttrs['phone_type'] ?? '');
+            $primary  = (bool) ($relAttrs['primary'] ?? false);
+
+            if ($number === '') {
+                continue;
+            }
+
+            $phones[] = ['number' => $number, 'type' => $type, 'primary' => $primary];
+
+            if ($primary && $primaryPhone === '') {
+                $primaryPhone = $number;
+            }
+        }
+
+        // Fall back to first phone if no primary was flagged.
+        if ($primaryPhone === '' && ! empty($phones)) {
+            $primaryPhone = $phones[0]['number'];
+        }
+
+        // -- Emails --
+        $emails       = [];
+        $primaryEmail = (string) ($attrs['primary_email_address'] ?? '');
+
+        foreach ($item['relationships']['emails']['data'] ?? [] as $rel) {
+            $relId    = (string) ($rel['id'] ?? '');
+            $relAttrs = $included['emails:' . $relId] ?? [];
+            $address  = (string) ($relAttrs['address'] ?? '');
+            $type     = (string) ($relAttrs['email_type'] ?? '');
+            $primary  = (bool) ($relAttrs['primary'] ?? false);
+
+            if ($address === '') {
+                continue;
+            }
+
+            $emails[] = ['address' => $address, 'type' => $type, 'primary' => $primary];
+        }
+
+        // Ensure primary_email_address is present in the emails list even when the
+        // emails relationship is absent or empty (common in test fixtures).
+        if ($primaryEmail !== '' && empty($emails)) {
+            $emails[] = ['address' => $primaryEmail, 'type' => '', 'primary' => true];
+        }
+
+        // -- Location (primary address) --
+        $city    = '';
+        $country = '';
+
+        foreach ($item['relationships']['addresses']['data'] ?? [] as $rel) {
+            $relId    = (string) ($rel['id'] ?? '');
+            $relAttrs = $included['addresses:' . $relId] ?? [];
+            $isPrimary = (bool) ($relAttrs['primary'] ?? false);
+
+            // Take the first address; prefer primary if one is flagged.
+            if ($city === '' || $isPrimary) {
+                $city    = (string) ($relAttrs['city'] ?? '');
+                $country = (string) ($relAttrs['country_name'] ?? '');
+            }
+
+            if ($isPrimary) {
+                break;
+            }
+        }
+
+        return [
+            'uuid'          => $uuid,
+            'given_name'    => (string) ($attrs['given_name'] ?? ''),
+            'family_name'   => (string) ($attrs['family_name'] ?? ''),
+            'full_name'     => (string) ($attrs['full_name'] ?? ''),
+            'primary_email' => $primaryEmail,
+            'emails'        => $emails,
+            'primary_phone' => $primaryPhone,
+            'phones'        => $phones,
+            'location'      => ['city' => $city, 'country' => $country],
+            'title'         => (string) ($attrs['job_title'] ?? ''),
+            'employer'      => '', // populated separately by getPersonDetails()
+        ];
+    }
+
+    /**
+     * Fetch the employer name for a person via their organizations relationship.
+     *
+     * Calls `GET people/{uuid}/organizations?page[size]=5` and returns the legal
+     * name of the first organization found. Returns an empty string when the
+     * client is unavailable, no organizations are found, or the request throws.
+     *
+     * This is intentionally a secondary (lazy) call rather than an `?include=`
+     * parameter because the MDP organizations relationship on people does not
+     * consistently appear in the base people response.
+     *
+     * @param object $client  Live MDP API client (must be non-null).
+     * @param string $uuid    Person UUID.
+     * @return string  First organization's legal name, or '' on failure.
+     */
+    private function fetchPersonEmployer(object $client, string $uuid): string
+    {
+        $query = http_build_query(['page' => ['size' => 5]]);
+
+        try {
+            $response = $client->get('people/' . $uuid . '/organizations?' . $query);
+
+            if (! is_array($response) || empty($response['data'])) {
+                return '';
+            }
+
+            // Return the first organization's English legal name.
+            $first = $response['data'][0] ?? [];
+
+            return (string) ($first['attributes']['legal_name_en'] ?? '');
+        } catch (\Exception $e) {
+            return '';
+        }
+    }
+
+    /**
      * Check whether a person is currently a member of a given org roster.
      *
      * Queries `organization_memberships/{membership_uuid}/person_memberships`

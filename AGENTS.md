@@ -139,6 +139,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 - `GET   /wicket-aorm/v1/staged-records/{session_id}` — review staged rows
 - `PATCH /wicket-aorm/v1/staged-records/{id}` — re-categorise a single record (AORM-8B.8); accepts `{category}` body param; valid values: `ready_to_sync`, `possible_match`, `probable_match`, `manual_update`, `discard`; stores old category as `previous_category`; 400 on invalid category, 404 on unknown id
 - `DELETE /wicket-aorm/v1/staged-records/{id}` — permanently remove a single staged record (AORM-8B.9); 404 on unknown id; 200 with `{deleted: true, id}` on success
+- `GET  /wicket-aorm/v1/staged/{id}/matches` — full MDP person details for each candidate in a staged record's `matched_persons` field (AORM-8B.12); employer lazy-loaded via a secondary `people/{uuid}/organizations` call; 404 on unknown id; 200 with `{staged_record_id, matches: [...]}` — matches is empty when no candidates are stored
 - `POST /wicket-aorm/v1/sync/{session_id}` — sync staged records to MDP
 
 ## Testing Guidelines
