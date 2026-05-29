@@ -128,7 +128,14 @@ function normalizeForCompare( value ) {
 
 // ── MatchesTable ───────────────────────────────────────────────────────────────
 
-export default function MatchesTable( { recordId, rawData = {} } ) {
+/**
+ * @param {{
+ *   recordId:         number,
+ *   rawData?:         Object,
+ *   onMatchesLoaded?: (matches: Object[]) => void,
+ * }} props
+ */
+export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded } ) {
 	const [ matches, setMatches ]     = useState( null );
 	const [ isLoading, setIsLoading ] = useState( false );
 	const [ error, setError ]         = useState( null );
@@ -147,7 +154,9 @@ export default function MatchesTable( { recordId, rawData = {} } ) {
 		apiFetch( { path: `/wicket-aorm/v1/staged/${ recordId }/matches` } )
 			.then( ( data ) => {
 				if ( ! cancelled ) {
-					setMatches( data.matches ?? [] );
+					const loaded = data.matches ?? [];
+					setMatches( loaded );
+					onMatchesLoaded?.( loaded );
 				}
 			} )
 			.catch( ( err ) => {
