@@ -9,7 +9,12 @@
  * sections — an imported record summary (full panel built in AORM-8B.11) and
  * a matches section (full table built in AORM-8B.13, using the endpoint from
  * AORM-8B.12). The imported record section uses ImportedRecordSummary
- * (AORM-8B.11); the matches section remains a stub at this stage.
+ * (AORM-8B.11); the matches section uses MatchesTable (AORM-8B.13).
+ *
+ * AORM-8B.13: The stub matches section is replaced with the MatchesTable
+ * component, which fetches GET /wicket-aorm/v1/staged/{id}/matches and
+ * renders a table with columns: Name/ID, Email, Location, Phone, Title,
+ * Employer, Membership Status, MDP Link.
  *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
@@ -20,9 +25,10 @@
  * }} props
  */
 
-import { __, sprintf } from '@wordpress/i18n';
+import { __ } from '@wordpress/i18n';
 import { Button, Modal } from '@wordpress/components';
 import ImportedRecordSummary from './ImportedRecordSummary';
+import MatchesTable from './MatchesTable';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -35,16 +41,14 @@ import ImportedRecordSummary from './ImportedRecordSummary';
 export const MODAL_TITLE = __( 'Review Match', 'wicket-aorm' );
 
 /**
- * Heading for the imported record summary section (AORM-8B.10 stub).
- * Full panel built in AORM-8B.11.
+ * Heading for the imported record summary section (AORM-8B.11).
  *
  * @type {string}
  */
 export const IMPORTED_RECORD_HEADING = __( 'Imported Record', 'wicket-aorm' );
 
 /**
- * Heading for the matches section (AORM-8B.10 stub).
- * Full matches table built in AORM-8B.13.
+ * Heading for the matches section (AORM-8B.13).
  *
  * @type {string}
  */
@@ -57,8 +61,7 @@ export default function ReviewMatchModal( { record, onClose } ) {
 		return null;
 	}
 
-	const rawData        = record.raw_data ?? {};
-	const matchedPersons = record.matched_persons ?? [];
+	const rawData = record.raw_data ?? {};
 
 	return (
 		<Modal
@@ -68,8 +71,8 @@ export default function ReviewMatchModal( { record, onClose } ) {
 		>
 
 			{ /* ── Imported Record summary ──────────────────────────────────────
-			     AORM-8B.11: full ImportedRecordSummary component (full name,
-			     email, phone, title). */ }
+			     AORM-8B.11: ImportedRecordSummary renders full name, email,
+			     phone, and title drawn from the staged record's raw_data. */ }
 			<section
 				className="aorm-review-match-modal__imported-record"
 				aria-labelledby="aorm-review-match-imported-heading"
@@ -85,11 +88,9 @@ export default function ReviewMatchModal( { record, onClose } ) {
 			</section>
 
 			{ /* ── Matches section ───────────────────────────────────────────────
-			     AORM-8B.10 stub: shows a candidate count. AORM-8B.12 adds a REST
-			     endpoint for full MDP person details (with lazy employer load).
-			     AORM-8B.13 replaces this stub with the full MatchesTable
-			     component (user/ID, emails, location, phone, title, employer,
-			     membership status, MDP link). */ }
+			     AORM-8B.13: MatchesTable fetches GET /wicket-aorm/v1/staged/{id}/matches
+			     (AORM-8B.12 endpoint) and renders columns: Name/ID, Email,
+			     Location, Phone, Title, Employer, Membership Status, MDP Link. */ }
 			<section
 				className="aorm-review-match-modal__matches"
 				aria-labelledby="aorm-review-match-matches-heading"
@@ -101,19 +102,7 @@ export default function ReviewMatchModal( { record, onClose } ) {
 					{ MATCHES_HEADING }
 				</h3>
 
-				{ matchedPersons.length === 0 ? (
-					<p className="aorm-review-match-modal__no-matches">
-						{ __( 'No match candidates found.', 'wicket-aorm' ) }
-					</p>
-				) : (
-					<p className="aorm-review-match-modal__matches-count">
-						{ sprintf(
-							/* translators: %d: number of match candidates */
-							__( '%d match candidate(s) found.', 'wicket-aorm' ),
-							matchedPersons.length
-						) }
-					</p>
-				) }
+				<MatchesTable recordId={ record.id } />
 			</section>
 
 			{ /* ── Footer ────────────────────────────────────────────────────────

@@ -19,27 +19,30 @@ use WicketAORM\Services\MdpClient;
  *       table (AORM-8B.13) with richer fields than the slim summary already
  *       stored in the DB (uuid, name, email, given_name, family_name).
  *
- *       For each matched-person UUID a live MDP fetch is performed:
+ *       For each matched-person UUID live MDP fetches are performed:
  *         - Primary call: GET people/{uuid}?include=phones,emails,addresses
  *         - Employer: GET people/{uuid}/organizations (lazy secondary call)
+ *         - Membership status: GET people/{uuid}/person_memberships?page[size]=1
+ *           (AORM-8B.13 — populates the Membership Status column in MatchesTable)
  *
  * Response shape (200):
  *   {
  *     "staged_record_id": int,
  *     "matches": [
  *       {
- *         "uuid":          string,
- *         "given_name":    string,
- *         "family_name":   string,
- *         "full_name":     string,
- *         "primary_email": string,
- *         "emails":        [{"address": string, "type": string, "primary": bool}],
- *         "primary_phone": string,
- *         "phones":        [{"number": string, "type": string, "primary": bool}],
- *         "location":      {"city": string, "country": string},
- *         "title":         string,
- *         "employer":      string,
- *         "mdp_url":       string
+ *         "uuid":              string,
+ *         "given_name":        string,
+ *         "family_name":       string,
+ *         "full_name":         string,
+ *         "primary_email":     string,
+ *         "emails":            [{"address": string, "type": string, "primary": bool}],
+ *         "primary_phone":     string,
+ *         "phones":            [{"number": string, "type": string, "primary": bool}],
+ *         "location":          {"city": string, "country": string},
+ *         "title":             string,
+ *         "employer":          string,
+ *         "membership_status": string,
+ *         "mdp_url":           string
  *       },
  *       …
  *     ]
@@ -149,17 +152,18 @@ class StagedMatchesController extends RestController
             if (empty($details)) {
                 // Candidate not resolvable — fall back to the slim stored values.
                 $details = [
-                    'uuid'          => $uuid,
-                    'given_name'    => (string) ($candidate['given_name'] ?? ''),
-                    'family_name'   => (string) ($candidate['family_name'] ?? ''),
-                    'full_name'     => (string) ($candidate['name'] ?? ''),
-                    'primary_email' => (string) ($candidate['email'] ?? ''),
-                    'emails'        => [],
-                    'primary_phone' => '',
-                    'phones'        => [],
-                    'location'      => ['city' => '', 'country' => ''],
-                    'title'         => '',
-                    'employer'      => '',
+                    'uuid'              => $uuid,
+                    'given_name'        => (string) ($candidate['given_name'] ?? ''),
+                    'family_name'       => (string) ($candidate['family_name'] ?? ''),
+                    'full_name'         => (string) ($candidate['name'] ?? ''),
+                    'primary_email'     => (string) ($candidate['email'] ?? ''),
+                    'emails'            => [],
+                    'primary_phone'     => '',
+                    'phones'            => [],
+                    'location'          => ['city' => '', 'country' => ''],
+                    'title'             => '',
+                    'employer'          => '',
+                    'membership_status' => '',
                 ];
             }
 

@@ -698,12 +698,14 @@ class MdpClient
     /**
      * Fetch full details for a single person from the MDP.
      *
-     * Issues two requests:
+     * Issues three requests:
      *   1. GET people/{uuid}?include=phones,emails,addresses — base attributes,
      *      all email addresses, all phone numbers, and address-based location.
      *   2. GET people/{uuid}/organizations?page[size]=5 — employer name (lazy-
      *      loaded via a secondary call because employer is not a direct attribute
      *      on the person resource).
+     *   3. GET people/{uuid}/person_memberships?page[size]=1 — membership status
+     *      of the person's most recent membership record (AORM-8B.13).
      *
      * Returns an empty array when `wicket_api_client()` is unavailable, the person
      * does not exist, or the request throws.
@@ -711,17 +713,18 @@ class MdpClient
      * Response shape:
      * ```
      * [
-     *   'uuid'          => string,
-     *   'given_name'    => string,
-     *   'family_name'   => string,
-     *   'full_name'     => string,
-     *   'primary_email' => string,
-     *   'emails'        => list<array{address: string, type: string, primary: bool}>,
-     *   'primary_phone' => string,
-     *   'phones'        => list<array{number: string, type: string, primary: bool}>,
-     *   'location'      => array{city: string, country: string},
-     *   'title'         => string,
-     *   'employer'      => string,
+     *   'uuid'              => string,
+     *   'given_name'        => string,
+     *   'family_name'       => string,
+     *   'full_name'         => string,
+     *   'primary_email'     => string,
+     *   'emails'            => list<array{address: string, type: string, primary: bool}>,
+     *   'primary_phone'     => string,
+     *   'phones'            => list<array{number: string, type: string, primary: bool}>,
+     *   'location'          => array{city: string, country: string},
+     *   'title'             => string,
+     *   'employer'          => string,
+     *   'membership_status' => string,
      * ]
      * ```
      *
@@ -756,6 +759,9 @@ class MdpClient
 
         // Lazy-load employer via a secondary organizations call.
         $person['employer'] = $this->fetchPersonEmployer($client, $uuid);
+
+        // Lazy-load membership status via a tertiary person_memberships call (AORM-8B.13).
+        $person['membership_status'] = $this->fetchPersonMembershipStatus($client, $uuid);
 
         return $person;
     }
@@ -871,9 +877,10 @@ class MdpClient
             'emails'        => $emails,
             'primary_phone' => $primaryPhone,
             'phones'        => $phones,
-            'location'      => ['city' => $city, 'country' => $country],
-            'title'         => (string) ($attrs['job_title'] ?? ''),
-            'employer'      => '', // populated separately by getPersonDetails()
+            'location'          => ['city' => $city, 'country' => $country],
+            'title'             => (string) ($attrs['job_title'] ?? ''),
+            'employer'          => '', // populated separately by getPersonDetails()
+            'membership_status' => '', // populated separately by getPersonDetails() (AORM-8B.13)
         ];
     }
 
@@ -907,6 +914,39 @@ class MdpClient
             $first = $response['data'][0] ?? [];
 
             return (string) ($first['attributes']['legal_name_en'] ?? '');
+        } catch (\Exception $e) {
+            return '';
+        }
+    }
+
+    /**
+     * Fetch the membership status for a person via their person_memberships relationship.
+     *
+     * Calls `GET people/{uuid}/person_memberships?page[size]=1` and returns the
+     * `status` attribute of the first record found. Returns an empty string when
+     * the client is unavailable, no memberships exist, or the request throws.
+     *
+     * Used by the AORM-8B.13 matches table to show whether a candidate is an
+     * Active, Inactive, or Grace Period member.
+     *
+     * @param object $client  Live MDP API client (must be non-null).
+     * @param string $uuid    Person UUID.
+     * @return string  Status string (e.g. "Active", "Inactive"), or '' on failure.
+     */
+    private function fetchPersonMembershipStatus(object $client, string $uuid): string
+    {
+        $query = http_build_query(['page' => ['size' => 1]]);
+
+        try {
+            $response = $client->get('people/' . $uuid . '/person_memberships?' . $query);
+
+            if (! is_array($response) || empty($response['data'])) {
+                return '';
+            }
+
+            $first = $response['data'][0] ?? [];
+
+            return (string) ($first['attributes']['status'] ?? '');
         } catch (\Exception $e) {
             return '';
         }
