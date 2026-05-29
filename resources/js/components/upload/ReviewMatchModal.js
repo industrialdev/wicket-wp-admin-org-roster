@@ -19,6 +19,13 @@
  * AORM-8B.14: ReviewMatchModal passes rawData to MatchesTable so it can
  * highlight cells whose value matches the corresponding imported field.
  *
+ * AORM-8B.15: Action RadioControl with four options — Create as New Record,
+ * Manual Updates, Merge to Existing, Discard — rendered between the Matches
+ * section and the footer. Initial selection is derived from the record's
+ * record_status: merging_to_record defaults to ACTION_MERGE, all others
+ * default to ACTION_CREATE_NEW. The selected action is held in local state;
+ * wiring to the save endpoint happens in AORM-8B.18/19.
+ *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
  *
@@ -28,8 +35,9 @@
  * }} props
  */
 
+import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, Modal } from '@wordpress/components';
+import { Button, Modal, RadioControl } from '@wordpress/components';
 import ImportedRecordSummary from './ImportedRecordSummary';
 import MatchesTable from './MatchesTable';
 
@@ -57,9 +65,77 @@ export const IMPORTED_RECORD_HEADING = __( 'Imported Record', 'wicket-aorm' );
  */
 export const MATCHES_HEADING = __( 'Matches', 'wicket-aorm' );
 
+// ── Action constants (AORM-8B.15) ─────────────────────────────────────────────
+
+/**
+ * Heading for the action selection section (AORM-8B.15).
+ *
+ * @type {string}
+ */
+export const ACTION_HEADING = __( 'Action', 'wicket-aorm' );
+
+/**
+ * Action value: create a brand-new MDP person from the imported record.
+ *
+ * @type {string}
+ */
+export const ACTION_CREATE_NEW = 'create_new_record';
+
+/**
+ * Action value: move the record to Manual Updates for offline resolution.
+ *
+ * @type {string}
+ */
+export const ACTION_MANUAL_UPDATE = 'manual_update';
+
+/**
+ * Action value: merge the imported record into a selected existing MDP person.
+ *
+ * @type {string}
+ */
+export const ACTION_MERGE = 'merge_to_existing';
+
+/**
+ * Action value: discard the record entirely.
+ *
+ * @type {string}
+ */
+export const ACTION_DISCARD = 'discard';
+
+/**
+ * Ordered action options for the RadioControl.
+ * Exported so tests can assert labels and values without string duplication.
+ *
+ * @type {Array<{label: string, value: string}>}
+ */
+export const ACTION_OPTIONS = [
+	{ label: __( 'Create as New Record', 'wicket-aorm' ), value: ACTION_CREATE_NEW },
+	{ label: __( 'Manual Updates', 'wicket-aorm' ),       value: ACTION_MANUAL_UPDATE },
+	{ label: __( 'Merge to Existing', 'wicket-aorm' ),    value: ACTION_MERGE },
+	{ label: __( 'Discard', 'wicket-aorm' ),              value: ACTION_DISCARD },
+];
+
+/**
+ * Derive the initial RadioControl selection from a record's record_status.
+ * merging_to_record records default to ACTION_MERGE; everything else defaults
+ * to ACTION_CREATE_NEW.
+ *
+ * @param {Object} record Staged record object.
+ * @return {string} Initial action value.
+ */
+function defaultAction( record ) {
+	return record?.record_status === 'merging_to_record'
+		? ACTION_MERGE
+		: ACTION_CREATE_NEW;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReviewMatchModal( { record, onClose } ) {
+	const [ selectedAction, setSelectedAction ] = useState(
+		() => defaultAction( record )
+	);
+
 	if ( ! record ) {
 		return null;
 	}
@@ -108,9 +184,33 @@ export default function ReviewMatchModal( { record, onClose } ) {
 				<MatchesTable recordId={ record.id } rawData={ rawData } />
 			</section>
 
+			{ /* ── Action selection (AORM-8B.15) ─────────────────────────────────
+			     RadioControl lets the admin choose what to do with this record:
+			     Create as New Record, Manual Updates, Merge to Existing, or Discard.
+			     The merge sub-flow (AORM-8B.16) and save behaviour (AORM-8B.19)
+			     are wired up in subsequent tickets. */ }
+			<section
+				className="aorm-review-match-modal__action"
+				aria-labelledby="aorm-review-match-action-heading"
+			>
+				<h3
+					id="aorm-review-match-action-heading"
+					className="aorm-review-match-modal__section-heading"
+				>
+					{ ACTION_HEADING }
+				</h3>
+
+				<RadioControl
+					className="aorm-review-match-modal__action-radio"
+					selected={ selectedAction }
+					options={ ACTION_OPTIONS }
+					onChange={ ( value ) => setSelectedAction( value ) }
+				/>
+			</section>
+
 			{ /* ── Footer ────────────────────────────────────────────────────────
 			     AORM-8B.20: Cancel closes the modal without any state changes.
-			     Additional action buttons (Save Update etc.) added in AORM-8B.19. */ }
+			     Save Update button and wiring added in AORM-8B.19. */ }
 			<div className="aorm-review-match-modal__footer">
 				<Button
 					variant="secondary"
