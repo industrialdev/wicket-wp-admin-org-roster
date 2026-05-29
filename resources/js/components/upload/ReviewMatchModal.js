@@ -16,6 +16,9 @@
  * renders a table with columns: Name/ID, Email, Location, Phone, Title,
  * Employer, Membership Status, MDP Link.
  *
+ * AORM-8B.14: ReviewMatchModal passes rawData to MatchesTable so it can
+ * highlight cells whose value matches the corresponding imported field.
+ *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
  *
@@ -102,7 +105,7 @@ export default function ReviewMatchModal( { record, onClose } ) {
 					{ MATCHES_HEADING }
 				</h3>
 
-				<MatchesTable recordId={ record.id } />
+				<MatchesTable recordId={ record.id } rawData={ rawData } />
 			</section>
 
 			{ /* ── Footer ────────────────────────────────────────────────────────

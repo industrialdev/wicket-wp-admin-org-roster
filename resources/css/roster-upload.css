@@ -507,3 +507,17 @@
 	font-size: 12px;
 	margin-top: 4px;
 }
+
+/* -----------------------------------------------------------------------
+   Matches table — field highlight (AORM-8B.14)
+   ----------------------------------------------------------------------- */
+
+/**
+ * Applied to table cells in the MatchesTable whose value matches the
+ * corresponding imported record field.  Uses a subtle green tint so the
+ * admin can quickly spot which candidate best aligns with the uploaded row.
+ */
+.aorm-matches-table__cell--match {
+	background-color: #edfaef;
+	color: inherit;
+}
