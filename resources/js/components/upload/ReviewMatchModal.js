@@ -303,6 +303,14 @@ function buildMergePreviewFields( rawData, targetMatch ) {
  */
 export const SAVE_UPDATE_LABEL = __( 'Save Update', 'wicket-aorm' );
 
+/**
+ * Label for the Cancel button (AORM-8B.20).
+ * Exported so test assertions can reference the same value without duplication.
+ *
+ * @type {string}
+ */
+export const CANCEL_LABEL = __( 'Cancel', 'wicket-aorm' );
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReviewMatchModal( { record, onClose, onResolved } ) {
@@ -592,7 +600,7 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 					disabled={ isSaving }
 					className="aorm-review-match-modal__cancel"
 				>
-					{ __( 'Cancel', 'wicket-aorm' ) }
+					{ CANCEL_LABEL }
 				</Button>
 
 				<Button
