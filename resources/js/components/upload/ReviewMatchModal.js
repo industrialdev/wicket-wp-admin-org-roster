@@ -45,18 +45,26 @@
  * Exports MERGE_PREVIEW_SECTION_CLASS, MERGE_PREVIEW_HEADING, and
  * MERGE_PREVIEW_MERGED_CLASS constants for test assertions.
  *
+ * AORM-8B.19: Save Update button. Calls PATCH /wicket-aorm/v1/staged/{id}/resolve
+ * with the selected action and, when ACTION_MERGE is chosen, the selectedMergeTargetUuid.
+ * isSaving state disables the button during the request. A dismissible Notice surfaces
+ * any API error. On success the onResolved() callback is invoked, which (in
+ * ValidationReviewStep) calls refetchStaged() + closeReviewModal().
+ *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
  *
  * @param {{
- *   record:   Object|null,  — the staged record being reviewed; null = modal closed
- *   onClose:  () => void,  — callback to dismiss the modal
+ *   record:      Object|null,  — the staged record being reviewed; null = modal closed
+ *   onClose:     () => void,   — callback to dismiss the modal without saving
+ *   onResolved?: () => void,   — callback fired after a successful save (AORM-8B.19)
  * }} props
  */
 
 import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, Modal, RadioControl } from '@wordpress/components';
+import apiFetch from '@wordpress/api-fetch';
+import { Button, Modal, Notice, RadioControl } from '@wordpress/components';
 import ImportedRecordSummary from './ImportedRecordSummary';
 import MatchesTable from './MatchesTable';
 
@@ -285,9 +293,19 @@ function buildMergePreviewFields( rawData, targetMatch ) {
 	return fields;
 }
 
+// ── Save Update label constant (AORM-8B.19) ───────────────────────────────────
+
+/**
+ * Label for the Save Update button (AORM-8B.19).
+ * Exported so test assertions can reference the same value without duplication.
+ *
+ * @type {string}
+ */
+export const SAVE_UPDATE_LABEL = __( 'Save Update', 'wicket-aorm' );
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ReviewMatchModal( { record, onClose } ) {
+export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 	const [ selectedAction, setSelectedAction ] = useState(
 		() => defaultAction( record )
 	);
@@ -300,6 +318,12 @@ export default function ReviewMatchModal( { record, onClose } ) {
 	 * null until the admin selects one (or auto-initialised on first load).
 	 */
 	const [ selectedMergeTargetUuid, setSelectedMergeTargetUuid ] = useState( null );
+
+	/** Whether the save request is in-flight (AORM-8B.19). */
+	const [ isSaving, setIsSaving ] = useState( false );
+
+	/** Error message from the save request, or null (AORM-8B.19). */
+	const [ saveError, setSaveError ] = useState( null );
 
 	if ( ! record ) {
 		return null;
@@ -347,6 +371,46 @@ export default function ReviewMatchModal( { record, onClose } ) {
 	}
 
 	const mergeTargetOptions = buildMergeTargetOptions( loadedMatches );
+
+	/**
+	 * Send the resolve action to the API (AORM-8B.19).
+	 * On success, call onResolved() so the parent can close the modal and
+	 * refresh the accordion counts.
+	 */
+	async function handleSave() {
+		setSaveError( null );
+		setIsSaving( true );
+
+		const body = { action: selectedAction };
+
+		if ( selectedAction === ACTION_MERGE ) {
+			body.merge_target_uuid = selectedMergeTargetUuid;
+		}
+
+		try {
+			await apiFetch( {
+				path: `/wicket-aorm/v1/staged/${ record.id }/resolve`,
+				method: 'PATCH',
+				data: body,
+			} );
+
+			if ( onResolved ) {
+				onResolved();
+			}
+		} catch ( error ) {
+			setSaveError(
+				error?.message ||
+				__( 'An error occurred while saving. Please try again.', 'wicket-aorm' )
+			);
+		} finally {
+			setIsSaving( false );
+		}
+	}
+
+	/** Whether the Save Update button should be disabled. */
+	const isSaveDisabled =
+		isSaving ||
+		( selectedAction === ACTION_MERGE && ! selectedMergeTargetUuid );
 
 	return (
 		<Modal
@@ -505,16 +569,40 @@ export default function ReviewMatchModal( { record, onClose } ) {
 				);
 			} )() }
 
-			{ /* ── Footer ────────────────────────────────────────────────────────
-			     AORM-8B.20: Cancel closes the modal without any state changes.
-			     Save Update button and wiring added in AORM-8B.19. */ }
+			{ /* ── Save error notice (AORM-8B.19) ─────────────────────────────────── */ }
+			{ saveError && (
+				<Notice
+					status="error"
+					isDismissible
+					onRemove={ () => setSaveError( null ) }
+					className="aorm-review-match-modal__save-error"
+				>
+					{ saveError }
+				</Notice>
+			) }
+
+			{ /* ── Footer ────────────────────────────────────────────────────────────
+			     AORM-8B.19: Save Update calls PATCH staged/{id}/resolve and fires
+			     onResolved() on success.
+			     AORM-8B.20: Cancel closes the modal without any state changes. */ }
 			<div className="aorm-review-match-modal__footer">
 				<Button
 					variant="secondary"
 					onClick={ onClose }
+					disabled={ isSaving }
 					className="aorm-review-match-modal__cancel"
 				>
 					{ __( 'Cancel', 'wicket-aorm' ) }
+				</Button>
+
+				<Button
+					variant="primary"
+					onClick={ handleSave }
+					disabled={ isSaveDisabled }
+					isBusy={ isSaving }
+					className="aorm-review-match-modal__save"
+				>
+					{ SAVE_UPDATE_LABEL }
 				</Button>
 			</div>
 

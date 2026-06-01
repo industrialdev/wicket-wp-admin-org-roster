@@ -140,6 +140,15 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 		setReviewRecord( null );
 	}, [] );
 
+	/**
+	 * Called by ReviewMatchModal after a successful save (AORM-8B.19).
+	 * Closes the modal and refreshes the accordion so category counts update.
+	 */
+	const handleModalResolved = useCallback( () => {
+		setReviewRecord( null );
+		refetchStaged();
+	}, [ refetchStaged ] );
+
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
 	useEffect( () => {
@@ -184,6 +193,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 				<ReviewMatchModal
 					record={ reviewRecord }
 					onClose={ closeReviewModal }
+					onResolved={ handleModalResolved }
 				/>
 			) }
 
