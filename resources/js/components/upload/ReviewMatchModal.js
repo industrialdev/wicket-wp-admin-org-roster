@@ -36,6 +36,15 @@
  * no second fetch is needed. Exports MERGE_TARGET_HEADING and
  * MERGE_TARGET_SECTION_CLASS constants.
  *
+ * AORM-8B.17: Merge preview section. When ACTION_MERGE is selected and a
+ * target UUID is chosen, a "Merge Preview" section renders below the merge
+ * target selector. It shows a <dl> of the final merged-person field values.
+ * Fields that will be overwritten from the imported record (name, email,
+ * phone, title) receive a "Merged" badge via MERGE_PREVIEW_MERGED_CLASS.
+ * Fields with no imported value and no existing value render as "—".
+ * Exports MERGE_PREVIEW_SECTION_CLASS, MERGE_PREVIEW_HEADING, and
+ * MERGE_PREVIEW_MERGED_CLASS constants for test assertions.
+ *
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
  *
@@ -143,6 +152,30 @@ export const MERGE_TARGET_HEADING = __( 'Select merge target', 'wicket-aorm' );
  */
 export const MERGE_TARGET_SECTION_CLASS = 'aorm-review-match-modal__merge-target';
 
+// ── Merge preview constants (AORM-8B.17) ──────────────────────────────────────
+
+/**
+ * CSS class on the merge preview section element (AORM-8B.17).
+ *
+ * @type {string}
+ */
+export const MERGE_PREVIEW_SECTION_CLASS = 'aorm-review-match-modal__merge-preview';
+
+/**
+ * Heading for the merge preview section (AORM-8B.17).
+ *
+ * @type {string}
+ */
+export const MERGE_PREVIEW_HEADING = __( 'Merge Preview', 'wicket-aorm' );
+
+/**
+ * CSS class applied to a <dd> whose value is overwritten from the imported
+ * record (shown as "Merged" badge). (AORM-8B.17)
+ *
+ * @type {string}
+ */
+export const MERGE_PREVIEW_MERGED_CLASS = 'aorm-review-match-modal__merge-preview-field--merged';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -185,6 +218,71 @@ function buildMergeTargetOptions( matches ) {
 
 		return { label, value: match.uuid };
 	} );
+}
+
+/**
+ * Build the merged field list for the preview section (AORM-8B.17).
+ *
+ * Merge strategy (from AORM-9): use imported first/last/title, add imported
+ * email as primary, add imported phone. Each entry has:
+ *   - label   {string}  — display label
+ *   - value   {string}  — final value (or "—" when empty)
+ *   - merged  {boolean} — true when the value comes from the imported record
+ *
+ * @param {Object} rawData        Imported record's raw_data object.
+ * @param {Object|null} targetMatch The selected MDP match candidate, or null.
+ * @return {Array<{label: string, value: string, merged: boolean}>}
+ */
+function buildMergePreviewFields( rawData, targetMatch ) {
+	const importedName = [
+		rawData.first_name ?? '',
+		rawData.last_name  ?? '',
+	].filter( Boolean ).join( ' ' );
+
+	const importedEmail = ( rawData.email_address ?? '' ).trim();
+	const importedPhone = ( rawData.mobile_phone   ?? '' ).trim();
+	const importedTitle = ( rawData.title           ?? '' ).trim();
+
+	const existingName  = ( targetMatch?.full_name      ?? '' ).trim();
+	const existingEmail = ( targetMatch?.primary_email  ?? '' ).trim();
+	const existingPhone = ( targetMatch?.primary_phone  ?? '' ).trim();
+	const existingTitle = ( targetMatch?.title          ?? '' ).trim();
+
+	const fields = [];
+
+	// Name — always from imported record.
+	fields.push( {
+		label:  __( 'Name', 'wicket-aorm' ),
+		value:  importedName || existingName || '—',
+		merged: !! importedName,
+	} );
+
+	// Email — imported email becomes primary.
+	fields.push( {
+		label:  __( 'Email', 'wicket-aorm' ),
+		value:  importedEmail || existingEmail || '—',
+		merged: !! importedEmail,
+	} );
+
+	// Phone — imported phone used when present.
+	if ( importedPhone || existingPhone ) {
+		fields.push( {
+			label:  __( 'Phone', 'wicket-aorm' ),
+			value:  importedPhone || existingPhone,
+			merged: !! importedPhone,
+		} );
+	}
+
+	// Title — imported title overwrites existing.
+	if ( importedTitle || existingTitle ) {
+		fields.push( {
+			label:  __( 'Title', 'wicket-aorm' ),
+			value:  importedTitle || existingTitle,
+			merged: !! importedTitle,
+		} );
+	}
+
+	return fields;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -351,6 +449,61 @@ export default function ReviewMatchModal( { record, onClose } ) {
 					) }
 				</section>
 			) }
+
+			{ /* ── Merge preview (AORM-8B.17) ──────────────────────────────────
+			     Rendered only when ACTION_MERGE is selected and a target UUID is
+			     chosen. Shows the final merged field values; fields overwritten
+			     from the imported record carry a "Merged" badge. */ }
+			{ selectedAction === ACTION_MERGE && selectedMergeTargetUuid && ( () => {
+				const targetMatch = loadedMatches.find(
+					( m ) => m.uuid === selectedMergeTargetUuid
+				) ?? null;
+				const previewFields = buildMergePreviewFields( rawData, targetMatch );
+
+				return (
+					<section
+						className={ MERGE_PREVIEW_SECTION_CLASS }
+						aria-labelledby="aorm-review-match-merge-preview-heading"
+					>
+						<h3
+							id="aorm-review-match-merge-preview-heading"
+							className="aorm-review-match-modal__section-heading"
+						>
+							{ MERGE_PREVIEW_HEADING }
+						</h3>
+
+						<dl className="aorm-review-match-modal__merge-preview-list">
+							{ previewFields.map( ( field ) => (
+								<div
+									key={ field.label }
+									className="aorm-review-match-modal__merge-preview-row"
+								>
+									<dt className="aorm-review-match-modal__merge-preview-label">
+										{ field.label }
+									</dt>
+									<dd
+										className={
+											field.merged
+												? MERGE_PREVIEW_MERGED_CLASS
+												: 'aorm-review-match-modal__merge-preview-field'
+										}
+									>
+										{ field.value }
+										{ field.merged && (
+											<span
+												className="aorm-review-match-modal__merge-badge"
+												aria-label={ __( 'Merged from imported record', 'wicket-aorm' ) }
+											>
+												{ __( 'Merged', 'wicket-aorm' ) }
+											</span>
+										) }
+									</dd>
+								</div>
+							) ) }
+						</dl>
+					</section>
+				);
+			} )() }
 
 			{ /* ── Footer ────────────────────────────────────────────────────────
 			     AORM-8B.20: Cancel closes the modal without any state changes.
