@@ -142,6 +142,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 - `PATCH /wicket-aorm/v1/staged-records/{id}` — re-categorise a single record (AORM-8B.8); accepts `{category}` body param; valid values: `ready_to_sync`, `possible_match`, `probable_match`, `manual_update`, `discard`; stores old category as `previous_category`; 400 on invalid category, 404 on unknown id
 - `DELETE /wicket-aorm/v1/staged-records/{id}` — permanently remove a single staged record (AORM-8B.9); 404 on unknown id; 200 with `{deleted: true, id}` on success
 - `GET  /wicket-aorm/v1/staged/{id}/matches` — full MDP person details for each candidate in a staged record's `matched_persons` field (AORM-8B.12); employer lazy-loaded via a secondary `people/{uuid}/organizations` call; 404 on unknown id; 200 with `{staged_record_id, matches: [...]}` — matches is empty when no candidates are stored
+- `PATCH /wicket-aorm/v1/staged/{id}/resolve` — save admin action from ReviewMatchModal (AORM-8B.18); accepts `{action, merge_target_uuid?}` body; valid actions: `create_new_record` (→ ready_to_sync / new_record), `manual_update` (→ manual_update), `merge_to_existing` (→ ready_to_sync / merging_to_record, merge_target_uuid required), `discard` (→ discard); stores old category as `previous_category`; clears or sets `merge_target_uuid`; 400 on invalid action or missing merge target, 404 on unknown id; 200 with `{id, action, category, record_status, previous_category, merge_target_uuid}`
 - `POST /wicket-aorm/v1/sync/{session_id}` — sync staged records to MDP
 
 ## Testing Guidelines
