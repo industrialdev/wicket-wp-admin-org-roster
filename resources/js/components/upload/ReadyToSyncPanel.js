@@ -1,5 +1,5 @@
 /**
- * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3 / 8B.4.
+ * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3 / 8B.4 / 8B.21.
  *
  * Renders the full content area for the "Ready to Sync" PanelBody in the
  * ValidationReviewStep accordion.
@@ -53,6 +53,12 @@
  * the records prop. The component maintains its own removalRecords /
  * isLoadingRemovals / removalFetchError state and re-fetches (via
  * removalRefetchKey) after each successful Discard Removal action.
+ *
+ * AORM-8B.21: When records with `exact_match` or `merging_to_record` status
+ * are present in the "Records being added" list, a warning Notice is displayed
+ * above the table. It informs the admin that syncing these records will end
+ * their existing relationships to other organizations. Phase 1 always uses
+ * the relationship path, so the warning fires unconditionally on those statuses.
  */
 
 import { useState, useEffect } from '@wordpress/element';
@@ -136,6 +142,29 @@ export const SEE_DETAILS_STATUSES = [ 'merging_to_record' ];
  * @type {string[]}
  */
 export const VIEW_IN_MDP_STATUSES = [ 'exact_match', 'already_on_roster' ];
+
+/**
+ * record_status values that trigger the cross-org relationship warning
+ * Notice (AORM-8B.21). When any added record has one of these statuses,
+ * the warning is shown above the "Records being added" table to alert
+ * the admin that syncing will end those persons' relationships to other
+ * organizations (relationship mode — Phase 1 always).
+ *
+ * @type {string[]}
+ */
+export const CROSS_ORG_WARNING_STATUSES = [ 'exact_match', 'merging_to_record' ];
+
+/**
+ * The translatable warning message shown in the cross-org Notice
+ * (AORM-8B.21). Exported so tests can assert the display string without
+ * duplicating it.
+ *
+ * @type {string}
+ */
+export const CROSS_ORG_WARNING_MESSAGE = __(
+	'One or more records will have their existing relationships to other organizations ended when synced.',
+	'wicket-aorm'
+);
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -349,6 +378,14 @@ export default function ReadyToSyncPanel( {
 		( r ) => ADDED_STATUSES.includes( r.record_status )
 	);
 
+	// ── AORM-8B.21: Cross-org warning flag ───────────────────────────────────
+	// True when any added record has a status that will trigger cross-org
+	// relationship removal during sync (exact_match or merging_to_record).
+
+	const hasCrossOrgRecords = addedRecords.some(
+		( r ) => CROSS_ORG_WARNING_STATUSES.includes( r.record_status )
+	);
+
 	// ── AORM-8B.1: Build the "Actions" extra column ───────────────────────────
 
 	/**
@@ -554,6 +591,17 @@ export default function ReadyToSyncPanel( {
 				<h3 className="aorm-ready-to-sync-panel__section-heading">
 					{ __( 'Records being added', 'wicket-aorm' ) }
 				</h3>
+
+				{ /* AORM-8B.21: Cross-org relationship warning Notice */ }
+				{ hasCrossOrgRecords && (
+					<Notice
+						status="warning"
+						isDismissible={ false }
+						className="aorm-ready-to-sync-panel__cross-org-warning"
+					>
+						{ CROSS_ORG_WARNING_MESSAGE }
+					</Notice>
+				) }
 
 				{ /* AORM-8B.2: Bulk action toolbar — visible when rows are selected */ }
 				{ selectedAddedIds.size > 0 && (
