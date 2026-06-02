@@ -227,6 +227,15 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 	return (
 		<div className="aorm-wizard-step aorm-wizard-step--validation-review">
 
+			{ /* AORM-9.1: Sync confirmation modal — rendered when syncConfirmIds is set */ }
+			{ syncConfirmIds !== null && (
+				<SyncConfirmModal
+					isOpen
+					onConfirm={ handleSyncConfirmed }
+					onClose={ closeSyncConfirmModal }
+				/>
+			) }
+
 			{ /* AORM-8B.10: Review Match modal — rendered when reviewRecord is set */ }
 			{ reviewRecord && (
 				<ReviewMatchModal
@@ -325,6 +334,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 										sessionId={ sessionId }
 										onRecordDiscarded={ refetchStaged }
 										onOpenReviewModal={ openReviewModal }
+										onSyncSelected={ handleSyncSelected }
 									/>
 								) : key === 'possible_match' ? (
 									/* AORM-8.7: Possible Match panel — table with # Matches column.
