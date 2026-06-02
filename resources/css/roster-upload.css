@@ -521,3 +521,120 @@
 	background-color: #edfaef;
 	color: inherit;
 }
+
+.aorm-matches-table__uuid {
+	display: block;
+	font-size: 9px;
+}
+/* -----------------------------------------------------------------------
+   Imported Record Summary — AORM-8B.11
+   ----------------------------------------------------------------------- */
+
+.aorm-imported-record-summary {
+	margin: 0;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.aorm-imported-record-summary__row {
+	display: grid;
+	grid-template-columns: 120px 1fr;
+	align-items: baseline;
+	gap: 8px;
+	padding: 8px 14px;
+	border-bottom: 1px solid #dcdcde;
+}
+
+.aorm-imported-record-summary__row:last-child {
+	border-bottom: none;
+}
+
+.aorm-imported-record-summary__label {
+	font-size: 12px;
+	font-weight: 600;
+	color: #646970;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.aorm-imported-record-summary__value {
+	margin: 0;
+	font-size: 13px;
+	color: #1d2327;
+}
+
+/* -----------------------------------------------------------------------
+   Review Match Modal — Merge Preview — AORM-8B.17
+   ----------------------------------------------------------------------- */
+
+.aorm-review-match-modal__merge-preview-list {
+	margin: 0;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.aorm-review-match-modal__merge-preview-row {
+	display: grid;
+	grid-template-columns: 120px 1fr;
+	align-items: baseline;
+	gap: 8px;
+	padding: 8px 14px;
+	border-bottom: 1px solid #dcdcde;
+}
+
+.aorm-review-match-modal__merge-preview-row:last-child {
+	border-bottom: none;
+}
+
+.aorm-review-match-modal__merge-preview-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: #646970;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.aorm-review-match-modal__merge-preview-field,
+.aorm-review-match-modal__merge-preview-field--merged {
+	margin: 0;
+	font-size: 13px;
+	color: #1d2327;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.aorm-review-match-modal__merge-preview-field--merged {
+	font-weight: 500;
+}
+
+.aorm-review-match-modal__merge-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 7px;
+	border-radius: 10px;
+	background: #d8f0d8;
+	color: #1a6e1a;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	line-height: 1.6;
+}
+
+/* -----------------------------------------------------------------------
+   Review Match Modal — Footer — AORM-8B.19/20
+   ----------------------------------------------------------------------- */
+
+.aorm-review-match-modal__footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 24px;
+	padding-top: 16px;
+	border-top: 1px solid #dcdcde;
+}

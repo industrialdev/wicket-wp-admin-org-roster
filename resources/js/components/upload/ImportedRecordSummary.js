@@ -64,40 +64,44 @@ export default function ImportedRecordSummary( { rawData = {} } ) {
 	return (
 		<dl className="aorm-imported-record-summary">
 
-			<dt className="aorm-imported-record-summary__term">
-				{ FIELD_LABEL_NAME }
-			</dt>
-			<dd className="aorm-imported-record-summary__value">
-				{ fullName }
-			</dd>
+			<div className="aorm-imported-record-summary__row">
+				<dt className="aorm-imported-record-summary__label">
+					{ FIELD_LABEL_NAME }
+				</dt>
+				<dd className="aorm-imported-record-summary__value">
+					{ fullName }
+				</dd>
+			</div>
 
-			<dt className="aorm-imported-record-summary__term">
-				{ FIELD_LABEL_EMAIL }
-			</dt>
-			<dd className="aorm-imported-record-summary__value">
-				{ rawData.email_address || '—' }
-			</dd>
+			<div className="aorm-imported-record-summary__row">
+				<dt className="aorm-imported-record-summary__label">
+					{ FIELD_LABEL_EMAIL }
+				</dt>
+				<dd className="aorm-imported-record-summary__value">
+					{ rawData.email_address || '—' }
+				</dd>
+			</div>
 
 			{ rawData.mobile_phone && (
-				<>
-					<dt className="aorm-imported-record-summary__term">
+				<div className="aorm-imported-record-summary__row">
+					<dt className="aorm-imported-record-summary__label">
 						{ FIELD_LABEL_PHONE }
 					</dt>
 					<dd className="aorm-imported-record-summary__value">
 						{ rawData.mobile_phone }
 					</dd>
-				</>
+				</div>
 			) }
 
 			{ rawData.title && (
-				<>
-					<dt className="aorm-imported-record-summary__term">
+				<div className="aorm-imported-record-summary__row">
+					<dt className="aorm-imported-record-summary__label">
 						{ FIELD_LABEL_TITLE }
 					</dt>
 					<dd className="aorm-imported-record-summary__value">
 						{ rawData.title }
 					</dd>
-				</>
+				</div>
 			) }
 
 		</dl>
