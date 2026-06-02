@@ -522,6 +522,10 @@
 	color: inherit;
 }
 
+.aorm-ready-to-sync-panel__cross-org-warning {
+	margin-bottom: 16px;
+}
+
 .aorm-matches-table__uuid {
 	display: block;
 	font-size: 9px;
@@ -637,4 +641,59 @@
 	margin-top: 24px;
 	padding-top: 16px;
 	border-top: 1px solid #dcdcde;
+}
+
+/* -----------------------------------------------------------------------
+   Ready-to-Sync row actions — pipe separators
+   ----------------------------------------------------------------------- */
+
+.aorm-rts-row-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+/* -----------------------------------------------------------------------
+   Validation review — session header
+   ----------------------------------------------------------------------- */
+
+.aorm-validation-review__session-header {
+	display: inline-flex;
+	align-items: center;
+	gap: 24px;
+	margin-bottom: 16px;
+	padding: 10px 16px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	font-size: 13px;
+}
+
+.aorm-validation-review__session-header-details {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+}
+
+.aorm-validation-review__session-header-term {
+	color: #646970;
+	font-weight: 400;
+}
+
+.aorm-validation-review__session-header-term::after {
+	content: ":";
+}
+
+.aorm-validation-review__session-header-value {
+	font-weight: 600;
+	color: #1d2327;
+	margin: 0;
+}
+
+/* Visually separate each dt/dd pair with a divider */
+.aorm-validation-review__session-header-value:not(:last-child) {
+	padding-right: 16px;
+	margin-right: 8px;
+	border-right: 1px solid #dcdcde;
 }

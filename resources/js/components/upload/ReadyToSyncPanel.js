@@ -1,11 +1,12 @@
 /**
- * Ready to Sync accordion panel content — AORM-8.4 / 8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3 / 8B.4 / 8B.21.
+ * Ready to Sync accordion panel content — AORM-8.5 / 8.6 / 8B.1 / 8B.2 / 8B.3 / 8B.4 / 8B.21.
  *
  * Renders the full content area for the "Ready to Sync" PanelBody in the
  * ValidationReviewStep accordion.
  *
- * AORM-8.4: Session header — shows the uploaded file name (when available)
- * and the action type label ("Add to Roster" or "Replace Roster").
+ * Note: the session header (file name + action type) was moved to
+ * ValidationReviewStep (above the accordion) as it is general information
+ * not specific to the Ready to Sync category.
  *
  * AORM-8.5: "Records being added" table (New Record, Exact Match,
  * Merging to Record, Already on Roster) — added in AORM-8.5.
@@ -40,7 +41,6 @@
  * @param {{
  *   records:              Array<Object>,  — all ready_to_sync staged records
  *   actionType:           string,        — 'add' | 'replace' from the staged API response
- *   fileName:             string|null,   — original CSV file name (null after a page reload)
  *   onOpenReviewModal?:   (record: Object) => void, — callback for See Details (AORM-8B.10)
  *   onRecordDiscarded?:   () => void,    — called after a successful Discard to refresh data
  *   onSyncSelected?:      (ids: number[]) => void,  — bulk Sync to MDP (AORM-9 stub)
@@ -171,7 +171,6 @@ export const CROSS_ORG_WARNING_MESSAGE = __(
 export default function ReadyToSyncPanel( {
 	records,
 	actionType,
-	fileName,
 	sessionId,
 	onOpenReviewModal,
 	onRecordDiscarded,
@@ -236,8 +235,6 @@ export default function ReadyToSyncPanel( {
 			cancelled = true;
 		};
 	}, [ actionType, sessionId, removalRefetchKey ] );
-
-	const actionLabel = ACTION_TYPE_LABELS[ actionType ] ?? actionType;
 
 	// ── Discard handler ──────────────────────────────────────────────────────
 
@@ -536,31 +533,6 @@ export default function ReadyToSyncPanel( {
 
 	return (
 		<div className="aorm-ready-to-sync-panel">
-
-			{ /* AORM-8.4: Session header */ }
-			<div className="aorm-ready-to-sync-panel__header">
-				<dl className="aorm-ready-to-sync-panel__header-details">
-
-					{ fileName && (
-						<>
-							<dt className="aorm-ready-to-sync-panel__header-term">
-								{ __( 'File', 'wicket-aorm' ) }
-							</dt>
-							<dd className="aorm-ready-to-sync-panel__header-value">
-								{ fileName }
-							</dd>
-						</>
-					) }
-
-					<dt className="aorm-ready-to-sync-panel__header-term">
-						{ __( 'Action', 'wicket-aorm' ) }
-					</dt>
-					<dd className="aorm-ready-to-sync-panel__header-value">
-						{ actionLabel }
-					</dd>
-
-				</dl>
-			</div>
 
 			{ /* AORM-8B.1: Per-row discard error notice */ }
 			{ discardError && (

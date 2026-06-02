@@ -164,7 +164,7 @@ export default function MatchingProgressStep( { goToStep, sessionId } ) {
 
 			<p className="aorm-matching-progress__description">
 				{ __(
-					'Member records are being matched against the MDP database. This may take a few minutes.',
+					'Member records are being matched against the MDP database. This may take a few minutes. You can leave this page and come back later.',
 					'wicket-aorm'
 				) }
 			</p>

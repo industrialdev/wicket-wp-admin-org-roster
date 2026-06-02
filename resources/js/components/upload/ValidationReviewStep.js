@@ -13,8 +13,9 @@
  *   4. manual_update   — Manual Updates
  *   5. discard         — Discard
  *
- * AORM-8.4: The Ready to Sync panel renders a session header (via
- * ReadyToSyncPanel) showing the uploaded file name and action type.
+ * AORM-8.4: A session header showing the uploaded file name and action type
+ * is rendered above the accordion (not inside the Ready to Sync panel) since
+ * this information is general and applies to the whole upload session.
  * The action_type is read from the staged API response so it remains
  * accurate after a page reload (when selectedFile is no longer in state).
  *
@@ -53,6 +54,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
+import { ACTION_TYPE_LABELS } from './ReadyToSyncPanel';
 import DiscardPanel from './DiscardPanel';
 import ManualUpdatePanel from './ManualUpdatePanel';
 import PossibleMatchPanel from './PossibleMatchPanel';
@@ -220,6 +222,33 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 				</Notice>
 			) }
 
+			{ /* Session header — file name + action type (general, not category-specific) */ }
+			{ actionType && (
+				<div className="aorm-validation-review__session-header">
+					<dl className="aorm-validation-review__session-header-details">
+
+						{ selectedFile?.name && (
+							<>
+								<dt className="aorm-validation-review__session-header-term">
+									{ __( 'File', 'wicket-aorm' ) }
+								</dt>
+								<dd className="aorm-validation-review__session-header-value">
+									{ selectedFile.name }
+								</dd>
+							</>
+						) }
+
+						<dt className="aorm-validation-review__session-header-term">
+							{ __( 'Action', 'wicket-aorm' ) }
+						</dt>
+						<dd className="aorm-validation-review__session-header-value">
+							{ ACTION_TYPE_LABELS[ actionType ] ?? actionType }
+						</dd>
+
+					</dl>
+				</div>
+			) }
+
 			{ /* Accordion — rendered once data arrives */ }
 			{ ! isLoading && ! error && categories && (
 				<Panel
@@ -256,7 +285,6 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 									<ReadyToSyncPanel
 										records={ bucket.records ?? [] }
 										actionType={ actionType }
-										fileName={ selectedFile?.name ?? null }
 										sessionId={ sessionId }
 										onRecordDiscarded={ refetchStaged }
 										onOpenReviewModal={ openReviewModal }

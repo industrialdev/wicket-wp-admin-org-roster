@@ -301,21 +301,21 @@ export default function RecordsTable( {
 					<tr>
 						{ /* AORM-8B.2: Select-all checkbox column header */ }
 						{ selectable && (
-							<th
+							<td
 								scope="col"
-								className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY }` }
+								className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY } check-column` }
 								aria-label={ __( 'Select rows', 'wicket-aorm' ) }
 							>
 								<div ref={ headerCheckboxRef }>
 									<CheckboxControl
-										label={ __( 'Select all', 'wicket-aorm' ) }
+										// label={ __( 'Select all', 'wicket-aorm' ) }
 										hideLabelFromVision
 										checked={ allFilteredSelected }
 										onChange={ handleSelectAll }
 										disabled={ filteredIds.length === 0 }
 									/>
 								</div>
-							</th>
+							</td>
 						) }
 
 						{ BASE_COLUMNS.map( ( col ) => (
