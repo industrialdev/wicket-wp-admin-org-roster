@@ -61,6 +61,7 @@ import PossibleMatchPanel from './PossibleMatchPanel';
 import ProbableMatchPanel from './ProbableMatchPanel';
 import ReadyToSyncPanel from './ReadyToSyncPanel';
 import ReviewMatchModal from './ReviewMatchModal';
+import SyncConfirmModal from './SyncConfirmModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,42 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 		setReviewRecord( null );
 		refetchStaged();
 	}, [ refetchStaged ] );
+
+	// ── AORM-9.1: Sync confirmation modal state ───────────────────────────────
+
+	/**
+	 * IDs selected for sync — non-null when the SyncConfirmModal is open.
+	 * null means the modal is closed.
+	 *
+	 * @type {number[]|null}
+	 */
+	const [ syncConfirmIds, setSyncConfirmIds ] = useState( null );
+
+	/**
+	 * Called when the admin clicks "Sync to MDP" in the bulk action toolbar.
+	 * Opens the confirmation modal before committing anything to MDP.
+	 *
+	 * @param {number[]} ids — the staged record IDs selected for sync
+	 */
+	const handleSyncSelected = useCallback( ( ids ) => {
+		setSyncConfirmIds( ids );
+	}, [] );
+
+	/**
+	 * Dismiss the sync confirmation modal without starting a sync.
+	 */
+	const closeSyncConfirmModal = useCallback( () => {
+		setSyncConfirmIds( null );
+	}, [] );
+
+	/**
+	 * Admin confirmed the sync. Closes the modal.
+	 * Actual commit logic is added in AORM-9.2+.
+	 */
+	const handleSyncConfirmed = useCallback( () => {
+		setSyncConfirmIds( null );
+		// TODO AORM-9.2: fire POST /wicket-aorm/v1/uploads/{id}/commit
+	}, [] );
 
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
