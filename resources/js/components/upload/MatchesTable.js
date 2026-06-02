@@ -9,8 +9,8 @@
  * raw_data object) is provided, cells whose value matches the corresponding
  * imported field receive the HIGHLIGHT_CLASS CSS class. Compared fields:
  *   - Name  — imported first_name+last_name vs match full_name
- *   - Email — imported email_address vs match primary_email
- *   - Phone — imported mobile_phone vs match primary_phone
+ *   - Email — imported email vs match primary_email
+ *   - Phone — imported phone vs match primary_phone
  *   - Title — imported title vs match title
  * Comparison is case-insensitive and whitespace-normalised.
  *
@@ -294,11 +294,11 @@ function MatchRow( { match, rawData = {} } ) {
 
 	const nameHighlight  = highlightClass( importedFullName, match.full_name );
 	const emailHighlight = highlightClass(
-		normalizeForCompare( rawData.email_address ),
+		normalizeForCompare( rawData.email ),
 		match.primary_email
 	);
 	const phoneHighlight = highlightClass(
-		normalizeForCompare( rawData.mobile_phone ),
+		normalizeForCompare( rawData.phone ),
 		match.primary_phone
 	);
 	const titleHighlight = highlightClass(

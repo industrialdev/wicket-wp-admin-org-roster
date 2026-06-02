@@ -8,8 +8,8 @@
  *
  * Categories (fixed display order):
  *   1. ready_to_sync   — Ready to Sync
- *   2. possible_match  — Possible Match
- *   3. probable_match  — Probable Match
+ *   2. probable_match  — Probable Match
+ *   3. possible_match  — Possible Match
  *   4. manual_update   — Manual Updates
  *   5. discard         — Discard
  *
@@ -70,8 +70,8 @@ import ReviewMatchModal from './ReviewMatchModal';
  */
 export const CATEGORY_ORDER = [
 	'ready_to_sync',
-	'possible_match',
 	'probable_match',
+	'possible_match',
 	'manual_update',
 	'discard',
 ];

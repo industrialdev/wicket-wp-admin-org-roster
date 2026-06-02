@@ -8,8 +8,8 @@
  * Displayed fields (drawn from the staged record's raw_data object):
  *   - Full Name   — first_name + last_name joined by a space; falls back to "—"
  *                   when both parts are absent.
- *   - Email       — email_address; falls back to "—" when absent.
- *   - Phone       — mobile_phone; row omitted entirely when absent/empty.
+ *   - Email       — email; falls back to "—" when absent.
+ *   - Phone       — phone; row omitted entirely when absent/empty.
  *   - Title       — title; row omitted entirely when absent/empty.
  *
  * @param {{
@@ -78,17 +78,17 @@ export default function ImportedRecordSummary( { rawData = {} } ) {
 					{ FIELD_LABEL_EMAIL }
 				</dt>
 				<dd className="aorm-imported-record-summary__value">
-					{ rawData.email_address || '—' }
+					{ rawData.email || '—' }
 				</dd>
 			</div>
 
-			{ rawData.mobile_phone && (
+			{ rawData.phone && (
 				<div className="aorm-imported-record-summary__row">
 					<dt className="aorm-imported-record-summary__label">
 						{ FIELD_LABEL_PHONE }
 					</dt>
 					<dd className="aorm-imported-record-summary__value">
-						{ rawData.mobile_phone }
+						{ rawData.phone }
 					</dd>
 				</div>
 			) }

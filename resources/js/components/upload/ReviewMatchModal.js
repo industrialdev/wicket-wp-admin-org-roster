@@ -247,8 +247,8 @@ function buildMergePreviewFields( rawData, targetMatch ) {
 		rawData.last_name  ?? '',
 	].filter( Boolean ).join( ' ' );
 
-	const importedEmail = ( rawData.email_address ?? '' ).trim();
-	const importedPhone = ( rawData.mobile_phone   ?? '' ).trim();
+	const importedEmail = ( rawData.email ?? '' ).trim();
+	const importedPhone = ( rawData.phone   ?? '' ).trim();
 	const importedTitle = ( rawData.title           ?? '' ).trim();
 
 	const existingName  = ( targetMatch?.full_name      ?? '' ).trim();
