@@ -45,19 +45,22 @@ if (is_file(WICKET_AORM_PATH . 'vendor/autoload.php')) {
 |--------------------------------------------------------------------------
 |
 | AORM vendors the wicket-lib-org-roster library at lib/wicket-lib-org-roster/.
-| If the standalone wicket-wp-organization-roster plugin is present on disk,
-| it provides the WicketORM\ namespace via its own autoloader. In that case
-| we skip loading the vendored copy so the plugin's version is the single
-| source of truth.
+| If the standalone wicket-wp-organization-roster plugin is active and has
+| successfully loaded its autoloader, it provides the WicketORM\ namespace.
+| In that case we skip loading the vendored copy.
 |
-| When the standalone plugin is not installed, we register a PSR-4
-| autoloader pointing at the local lib/ copy so AORM can use the
-| WicketORM\ services it depends on.
+| The check is deferred to plugins_loaded priority 0 so all plugins have
+| had a chance to register their autoloaders. This handles:
+| - New plugin deactivated (but on disk) → fallback loads
+| - New plugin present but vendor/ missing (early return) → fallback loads
+| - New plugin fully active → fallback is dormant
 |
 */
-$wicketOrgRosterPluginFile = WP_PLUGIN_DIR . '/wicket-wp-organization-roster/wicket-wp-organization-roster.php';
+add_action('plugins_loaded', static function (): void {
+    if (class_exists(WicketORM\OrgMan::class, false)) {
+        return;
+    }
 
-if (! file_exists($wicketOrgRosterPluginFile)) {
     spl_autoload_register(static function (string $class): void {
         $prefix = 'WicketORM\\';
         $baseDir = WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/';
@@ -76,7 +79,7 @@ if (! file_exists($wicketOrgRosterPluginFile)) {
 
     // Load the OrgManagement\OrgMan -> WicketORM\OrgMan compat alias.
     require_once WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/compat.php';
-}
+}, 0);
 
 /**
  * Global accessor for the Admin Org Roster plugin singleton.
