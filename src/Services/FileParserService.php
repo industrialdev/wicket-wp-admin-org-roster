@@ -91,7 +91,7 @@ class FileParserService
      * 'aliases' are matched case-insensitively against actual CSV header cells.
      * The canonical 'header' value is always included in the aliases list.
      *
-     * Ported from OrgManagement\Services\BulkMemberUploadService (AORM-6.10).
+     * Ported from WicketORM\Services\BulkMemberUploadService (AORM-6.10).
      *
      * @return array<int, array{header: string, field: string, required: bool, aliases: string[]}>
      */

@@ -34,9 +34,48 @@ if (! defined('WICKET_AORM_BASENAME')) {
     define('WICKET_AORM_BASENAME', plugin_basename(__FILE__));
 }
 
-// Composer autoloader.
+// Composer autoloader (WicketAORM\ only).
 if (is_file(WICKET_AORM_PATH . 'vendor/autoload.php')) {
     require_once WICKET_AORM_PATH . 'vendor/autoload.php';
+}
+
+/*
+|--------------------------------------------------------------------------
+| WicketORM\ Autoloader — Vendored Library
+|--------------------------------------------------------------------------
+|
+| AORM vendors the wicket-lib-org-roster library at lib/wicket-lib-org-roster/.
+| If the standalone wicket-wp-organization-roster plugin is present on disk,
+| it provides the WicketORM\ namespace via its own autoloader. In that case
+| we skip loading the vendored copy so the plugin's version is the single
+| source of truth.
+|
+| When the standalone plugin is not installed, we register a PSR-4
+| autoloader pointing at the local lib/ copy so AORM can use the
+| WicketORM\ services it depends on.
+|
+*/
+$wicketOrgRosterPluginFile = WP_PLUGIN_DIR . '/wicket-wp-organization-roster/wicket-wp-organization-roster.php';
+
+if (! file_exists($wicketOrgRosterPluginFile)) {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'WicketORM\\';
+        $baseDir = WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/';
+
+        if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
+            return;
+        }
+
+        $relativeClass = substr($class, strlen($prefix));
+        $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+
+        if (is_file($file)) {
+            require_once $file;
+        }
+    });
+
+    // Load the OrgManagement\OrgMan -> WicketORM\OrgMan compat alias.
+    require_once WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/compat.php';
 }
 
 /**

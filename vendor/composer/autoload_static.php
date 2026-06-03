@@ -6,31 +6,14 @@ namespace Composer\Autoload;
 
 class ComposerStaticInit350a45f041837708b6b40913031b392f
 {
-    public static $files = array (
-        '2ec07f0bc7c10a85b2c1312743c4c070' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/compat.php',
-    );
-
     public static $prefixLengthsPsr4 = array (
-        's' =>
-        array (
-            'starfederation\\datastar\\' => 24,
-        ),
         'W' =>
         array (
-            'WicketORM\\' => 10,
             'WicketAORM\\' => 11,
         ),
     );
 
     public static $prefixDirsPsr4 = array (
-        'starfederation\\datastar\\' =>
-        array (
-            0 => __DIR__ . '/..' . '/starfederation/datastar-php/src',
-        ),
-        'WicketORM\\' =>
-        array (
-            0 => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src',
-        ),
         'WicketAORM\\' =>
         array (
             0 => __DIR__ . '/../..' . '/src',
@@ -47,75 +30,27 @@ class ComposerStaticInit350a45f041837708b6b40913031b392f
         'WicketAORM\\Database\\RosterMetaTable' => __DIR__ . '/../..' . '/src/Database/RosterMetaTable.php',
         'WicketAORM\\Database\\StagedRecordsTable' => __DIR__ . '/../..' . '/src/Database/StagedRecordsTable.php',
         'WicketAORM\\Main' => __DIR__ . '/../..' . '/src/Main.php',
+        'WicketAORM\\Rest\\ActiveSessionController' => __DIR__ . '/../..' . '/src/Rest/ActiveSessionController.php',
         'WicketAORM\\Rest\\IndividualController' => __DIR__ . '/../..' . '/src/Rest/IndividualController.php',
+        'WicketAORM\\Rest\\ReplacementDiffController' => __DIR__ . '/../..' . '/src/Rest/ReplacementDiffController.php',
         'WicketAORM\\Rest\\RestController' => __DIR__ . '/../..' . '/src/Rest/RestController.php',
         'WicketAORM\\Rest\\RosterController' => __DIR__ . '/../..' . '/src/Rest/RosterController.php',
+        'WicketAORM\\Rest\\StagedMatchesController' => __DIR__ . '/../..' . '/src/Rest/StagedMatchesController.php',
         'WicketAORM\\Rest\\StagedRecordController' => __DIR__ . '/../..' . '/src/Rest/StagedRecordController.php',
+        'WicketAORM\\Rest\\StagedResolveController' => __DIR__ . '/../..' . '/src/Rest/StagedResolveController.php',
         'WicketAORM\\Rest\\SyncController' => __DIR__ . '/../..' . '/src/Rest/SyncController.php',
         'WicketAORM\\Rest\\UploadController' => __DIR__ . '/../..' . '/src/Rest/UploadController.php',
+        'WicketAORM\\Rest\\UploadStagedController' => __DIR__ . '/../..' . '/src/Rest/UploadStagedController.php',
+        'WicketAORM\\Rest\\UploadStatusController' => __DIR__ . '/../..' . '/src/Rest/UploadStatusController.php',
         'WicketAORM\\Services\\ActivityLogger' => __DIR__ . '/../..' . '/src/Services/ActivityLogger.php',
         'WicketAORM\\Services\\FileParserService' => __DIR__ . '/../..' . '/src/Services/FileParserService.php',
+        'WicketAORM\\Services\\MatchingJobRunner' => __DIR__ . '/../..' . '/src/Services/MatchingJobRunner.php',
         'WicketAORM\\Services\\MatchingService' => __DIR__ . '/../..' . '/src/Services/MatchingService.php',
         'WicketAORM\\Services\\MdpClient' => __DIR__ . '/../..' . '/src/Services/MdpClient.php',
         'WicketAORM\\Services\\SchedulerService' => __DIR__ . '/../..' . '/src/Services/SchedulerService.php',
+        'WicketAORM\\Services\\ScoringService' => __DIR__ . '/../..' . '/src/Services/ScoringService.php',
         'WicketAORM\\Services\\SyncService' => __DIR__ . '/../..' . '/src/Services/SyncService.php',
         'WicketAORM\\Services\\ValidationService' => __DIR__ . '/../..' . '/src/Services/ValidationService.php',
-        'WicketORM\\Config\\OrgManConfig' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Config/OrgManConfig.php',
-        'WicketORM\\Controllers\\ApiController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/ApiController.php',
-        'WicketORM\\Controllers\\BusinessInfoController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/BusinessInfoController.php',
-        'WicketORM\\Controllers\\ConfigurationController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/ConfigurationController.php',
-        'WicketORM\\Controllers\\DocumentController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/DocumentController.php',
-        'WicketORM\\Controllers\\EngagementController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/EngagementController.php',
-        'WicketORM\\Controllers\\MemberExportController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/MemberExportController.php',
-        'WicketORM\\Controllers\\SubsidiaryController' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Controllers/SubsidiaryController.php',
-        'WicketORM\\Helpers\\ConfigHelper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/ConfigHelper.php',
-        'WicketORM\\Helpers\\DatastarSSE' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/DatastarSSE.php',
-        'WicketORM\\Helpers\\GravityFormsHelper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/GravityFormsHelper.php',
-        'WicketORM\\Helpers\\Helper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/Helper.php',
-        'WicketORM\\Helpers\\MemberListRefresh' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/MemberListRefresh.php',
-        'WicketORM\\Helpers\\PermissionHelper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/PermissionHelper.php',
-        'WicketORM\\Helpers\\RelationshipHelper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/RelationshipHelper.php',
-        'WicketORM\\Helpers\\TemplateHelper' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Helpers/TemplateHelper.php',
-        'WicketORM\\OrgMan' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/OrgMan.php',
-        'WicketORM\\Services\\AdditionalSeatsService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/AdditionalSeatsService.php',
-        'WicketORM\\Services\\BulkMemberUploadService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/BulkMemberUploadService.php',
-        'WicketORM\\Services\\BusinessInfoService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/BusinessInfoService.php',
-        'WicketORM\\Services\\CacheService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/CacheService.php',
-        'WicketORM\\Services\\ConfigService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/ConfigService.php',
-        'WicketORM\\Services\\ConnectionService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/ConnectionService.php',
-        'WicketORM\\Services\\DocumentService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/DocumentService.php',
-        'WicketORM\\Services\\EngagementService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/EngagementService.php',
-        'WicketORM\\Services\\GroupService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/GroupService.php',
-        'WicketORM\\Services\\MemberExportService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/MemberExportService.php',
-        'WicketORM\\Services\\MemberService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/MemberService.php',
-        'WicketORM\\Services\\MembershipRosterReader' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/MembershipRosterReader.php',
-        'WicketORM\\Services\\MembershipRosterWriter' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/MembershipRosterWriter.php',
-        'WicketORM\\Services\\MembershipService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/MembershipService.php',
-        'WicketORM\\Services\\NotificationService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/NotificationService.php',
-        'WicketORM\\Services\\OrganizationBatchService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/OrganizationBatchService.php',
-        'WicketORM\\Services\\OrganizationService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/OrganizationService.php',
-        'WicketORM\\Services\\PermissionService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/PermissionService.php',
-        'WicketORM\\Services\\PersonService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/PersonService.php',
-        'WicketORM\\Services\\Strategies\\CascadeStrategy' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/Strategies/CascadeStrategy.php',
-        'WicketORM\\Services\\Strategies\\DirectAssignmentStrategy' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/Strategies/DirectAssignmentStrategy.php',
-        'WicketORM\\Services\\Strategies\\GroupsStrategy' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/Strategies/GroupsStrategy.php',
-        'WicketORM\\Services\\Strategies\\MembershipCycleStrategy' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/Strategies/MembershipCycleStrategy.php',
-        'WicketORM\\Services\\Strategies\\RosterManagementStrategy' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/Strategies/RosterManagementStrategy.php',
-        'WicketORM\\Services\\SubsidiaryService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/SubsidiaryService.php',
-        'WicketORM\\Services\\TouchpointService' => __DIR__ . '/..' . '/industrialdev/wicket-lib-org-roster/src/Services/TouchpointService.php',
-        'starfederation\\datastar\\Consts' => __DIR__ . '/..' . '/starfederation/datastar-php/src/Consts.php',
-        'starfederation\\datastar\\ServerSentEventData' => __DIR__ . '/..' . '/starfederation/datastar-php/src/ServerSentEventData.php',
-        'starfederation\\datastar\\ServerSentEventGenerator' => __DIR__ . '/..' . '/starfederation/datastar-php/src/ServerSentEventGenerator.php',
-        'starfederation\\datastar\\enums\\ElementPatchMode' => __DIR__ . '/..' . '/starfederation/datastar-php/src/enums/ElementPatchMode.php',
-        'starfederation\\datastar\\enums\\EventType' => __DIR__ . '/..' . '/starfederation/datastar-php/src/enums/EventType.php',
-        'starfederation\\datastar\\enums\\NamespaceType' => __DIR__ . '/..' . '/starfederation/datastar-php/src/enums/NamespaceType.php',
-        'starfederation\\datastar\\events\\EventInterface' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/EventInterface.php',
-        'starfederation\\datastar\\events\\EventTrait' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/EventTrait.php',
-        'starfederation\\datastar\\events\\ExecuteScript' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/ExecuteScript.php',
-        'starfederation\\datastar\\events\\Location' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/Location.php',
-        'starfederation\\datastar\\events\\PatchElements' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/PatchElements.php',
-        'starfederation\\datastar\\events\\PatchSignals' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/PatchSignals.php',
-        'starfederation\\datastar\\events\\RemoveElements' => __DIR__ . '/..' . '/starfederation/datastar-php/src/events/RemoveElements.php',
     );
 
     public static function getInitializer(ClassLoader $loader)
