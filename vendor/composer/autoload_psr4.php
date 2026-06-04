@@ -6,7 +6,5 @@ $vendorDir = dirname(__DIR__);
 $baseDir = dirname($vendorDir);
 
 return array(
-    'starfederation\\datastar\\' => array($vendorDir . '/starfederation/datastar-php/src'),
-    'WicketORM\\' => array($vendorDir . '/industrialdev/wicket-lib-org-roster/src'),
     'WicketAORM\\' => array($baseDir . '/src'),
 );
