@@ -202,6 +202,87 @@ class ActivityLogger
     }
 
     /**
+     * Log a sync-complete event to wp_wicket_aorm_logs and update roster_meta.
+     *
+     * Written by SyncJobRunner when the final batch of a sync session has been
+     * processed (i.e. the batch was partial or empty). Updates roster_meta with
+     * `roster_status = 'synced'` and `last_synced_at` so the list view reflects
+     * the completed sync without scanning the full staged_records table.
+     *
+     * @param string $uploadSessionId UUID of the completed upload session.
+     * @param string $orgUuid         Organisation UUID from the session context.
+     * @param string $membershipUuid  Membership UUID from the session context.
+     * @param int    $uploadedBy      WordPress user ID that initiated the upload (0 = system).
+     *
+     * @see AORM-9.3
+     * @see AORM-9.30  — full sync logging (per-record entries, has_failures status)
+     */
+    public function logSyncComplete(
+        string $uploadSessionId,
+        string $orgUuid,
+        string $membershipUuid,
+        int $uploadedBy,
+    ): void {
+        $db  = $this->wpdb ?? $GLOBALS['wpdb'];
+        $now = current_time('mysql', true);
+
+        $logsTable = $db->prefix . 'wicket_aorm_logs';
+
+        $db->insert(
+            $logsTable,
+            [
+                'upload_session_id' => $uploadSessionId,
+                'org_uuid'          => $orgUuid,
+                'user_id'           => $uploadedBy,
+                'level'             => 'info',
+                'action'            => 'sync_complete',
+                'object_type'       => 'session',
+                'object_id'         => $uploadSessionId,
+                'message'           => 'Sync complete.',
+                'context'           => json_encode([
+                    'upload_session_id' => $uploadSessionId,
+                    'membership_uuid'   => $membershipUuid,
+                ]),
+                'created_at'        => $now,
+            ],
+            [
+                '%s', // upload_session_id
+                '%s', // org_uuid
+                '%d', // user_id
+                '%s', // level
+                '%s', // action
+                '%s', // object_type
+                '%s', // object_id
+                '%s', // message
+                '%s', // context
+                '%s', // created_at
+            ],
+        );
+
+        // Upsert roster_meta: mark the roster as synced and record last_synced_at.
+        $metaTable = $db->prefix . 'wicket_aorm_roster_meta';
+
+        $db->query(
+            $db->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "INSERT INTO {$metaTable}
+                   (org_uuid, membership_uuid, roster_status, last_updated_at, last_updated_by, last_synced_at)
+                 VALUES (%s, %s, 'synced', %s, %s, %s)
+                 ON DUPLICATE KEY UPDATE
+                   roster_status   = VALUES(roster_status),
+                   last_updated_at = VALUES(last_updated_at),
+                   last_updated_by = VALUES(last_updated_by),
+                   last_synced_at  = VALUES(last_synced_at)",
+                $orgUuid,
+                $membershipUuid,
+                $now,
+                $this->resolveActorName($uploadedBy),
+                $now,
+            ),
+        );
+    }
+
+    /**
      * Resolve a display name for the acting WordPress user.
      *
      * Preference order: user_email → "user:{id}" → "system" (unauthenticated).

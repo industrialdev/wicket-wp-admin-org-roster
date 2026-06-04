@@ -37,7 +37,8 @@ wicket-admin-org-roster/
 │   │   ├── FileParserService.php  # CSV → normalized rows
 │   │   ├── ValidationService.php  # Row-level validation rules
 │   │   ├── MatchingService.php    # Duplicate detection against MDP
-│   │   ├── SyncService.php        # Staged → MDP (relationships, persons)
+│   │   ├── SyncJobRunner.php      # Background sync job handler (AORM-9.3); batching, re-dispatch, hook=wicket_aorm_run_sync
+│   │   ├── SyncService.php        # Staged → MDP (relationships, persons); syncRecord() stub filled in by AORM-9.4+
 │   │   └── MdpClient.php          # Thin wrapper around wicket_api_client()
 │   └── Admin/
 │       ├── MenuPage.php           # Register all admin menu/submenu pages

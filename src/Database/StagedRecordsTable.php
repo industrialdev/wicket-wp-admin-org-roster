@@ -706,6 +706,64 @@ class StagedRecordsTable
     }
 
     /**
+     * Return staged records that are ready for background MDP sync.
+     *
+     * A row is "pending sync" when:
+     *   - It belongs to the given upload session.
+     *   - Its sync_status is 'ready_to_sync' (matching has completed, sync has not).
+     *   - Its category is 'ready_to_sync' (admin has not moved it to discard/manual_update).
+     *
+     * When $ids is an array of integers, only rows whose id is in that list are
+     * returned.  Passing 'all' (or omitting it) fetches every eligible row.
+     *
+     * Rows are returned in insertion order (id ASC) so that partial runs (batching)
+     * are deterministic and each batch advances through the queue linearly.
+     *
+     * Used by SyncJobRunner::handle() (AORM-9.3) to build the per-batch work list.
+     *
+     * @param string       $sessionId  The upload_session_id UUID.
+     * @param string|int[] $ids        'all' to fetch every eligible row, or an array
+     *                                 of integer record IDs to restrict the set.
+     * @param int          $limit      Maximum number of rows to return (0 = no limit).
+     * @return array<int, array<string, mixed>>  Rows as associative arrays; empty array when none found.
+     */
+    public function getPendingSyncRecords(string $sessionId, string|array $ids = 'all', int $limit = 0): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        // Build optional IN clause when specific IDs were requested.
+        $idClause = '';
+
+        if (is_array($ids) && ! empty($ids)) {
+            $sanitized = implode(', ', array_map('absint', $ids));
+            // $sanitized contains only comma-separated integers — safe to interpolate.
+            $idClause = "AND id IN ({$sanitized})";
+        }
+
+        // $limit is a typed int — sprintf is safe and avoids a nested prepare() call.
+        $limitClause = $limit > 0 ? sprintf('LIMIT %d', $limit) : '';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT * FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND sync_status = 'ready_to_sync'
+                   AND category = 'ready_to_sync'
+                   {$idClause}
+                 ORDER BY id ASC
+                 {$limitClause}",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
      * Return true when at least one row with record_status = 'remove_existing'
      * already exists for the given session.
      *

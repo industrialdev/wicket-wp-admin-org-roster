@@ -47,6 +47,15 @@ final class Main
             Services\MatchingJobRunner::HOOK,
             [new Services\MatchingJobRunner(), 'handle'],
         );
+
+        // AORM-9.3: Background MDP sync job — fired by Action Scheduler or
+        // WP-Cron with upload_session_id and ids as arguments.
+        add_action(
+            Services\SyncJobRunner::HOOK,
+            [new Services\SyncJobRunner(), 'handle'],
+            10,
+            2,
+        );
     }
 
     /**
