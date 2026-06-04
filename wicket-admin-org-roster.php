@@ -60,7 +60,11 @@ if (! function_exists('wicket_aorm_check_org_roster_dependency')) {
      */
     function wicket_aorm_check_org_roster_dependency(): bool
     {
-        return class_exists(WicketORM\OrgMan::class, false);
+        if (! function_exists('is_plugin_active')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        return is_plugin_active('wicket-wp-organization-roster/wicket-wp-organization-roster.php');
     }
 }
 
