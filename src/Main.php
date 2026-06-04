@@ -73,6 +73,7 @@ final class Main
         (new Rest\ReplacementDiffController())->register_routes(); // AORM-8B.4
         (new Rest\StagedMatchesController())->register_routes();  // AORM-8B.12
         (new Rest\StagedResolveController())->register_routes();  // AORM-8B.18
+        (new Rest\CommitController())->register_routes();          // AORM-9.2
         (new Rest\ActiveSessionController())->register_routes();  // AORM-7 cross-browser
     }
 
