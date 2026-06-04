@@ -11,7 +11,7 @@
  * Domain Path: /languages
  * Requires at least: 6.6
  * Requires PHP: 8.2
- * Requires Plugins: wicket-wp-base-plugin
+ * Requires Plugins: wicket-wp-base-plugin, wicket-wp-organization-roster
  */
 
 declare(strict_types=1);
@@ -41,45 +41,43 @@ if (is_file(WICKET_AORM_PATH . 'vendor/autoload.php')) {
 
 /*
 |--------------------------------------------------------------------------
-| WicketORM\ Autoloader — Vendored Library
+| Dependency: wicket-wp-organization-roster
 |--------------------------------------------------------------------------
 |
-| AORM vendors the wicket-lib-org-roster library at lib/wicket-lib-org-roster/.
-| If the standalone wicket-wp-organization-roster plugin is active and has
-| successfully loaded its autoloader, it provides the WicketORM\ namespace.
-| In that case we skip loading the vendored copy.
+| This plugin requires wicket-wp-organization-roster to be active. That
+| plugin provides the WicketORM\ namespace (PersonService, ConnectionService,
+| etc.) that AORM relies on for all MDP sync operations.
 |
-| The check is deferred to plugins_loaded priority 0 so all plugins have
-| had a chance to register their autoloaders. This handles:
-| - New plugin deactivated (but on disk) → fallback loads
-| - New plugin present but vendor/ missing (early return) → fallback loads
-| - New plugin fully active → fallback is dormant
+| On activation we abort with a clear message if the dependency is missing.
+| After activation we bail out of the bootstrap and show an admin notice if
+| the dependency is deactivated while AORM is still active.
 |
 */
-add_action('plugins_loaded', static function (): void {
-    if (class_exists(WicketORM\OrgMan::class, false)) {
-        return;
+
+if (! function_exists('wicket_aorm_check_org_roster_dependency')) {
+    /**
+     * Returns true when wicket-wp-organization-roster is active.
+     */
+    function wicket_aorm_check_org_roster_dependency(): bool
+    {
+        return class_exists(WicketORM\OrgMan::class, false);
     }
+}
 
-    spl_autoload_register(static function (string $class): void {
-        $prefix = 'WicketORM\\';
-        $baseDir = WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/';
-
-        if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
-            return;
-        }
-
-        $relativeClass = substr($class, strlen($prefix));
-        $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
-
-        if (is_file($file)) {
-            require_once $file;
-        }
-    });
-
-    // Load the OrgManagement\OrgMan -> WicketORM\OrgMan compat alias.
-    require_once WICKET_AORM_PATH . 'lib/wicket-lib-org-roster/src/compat.php';
-}, 0);
+if (! function_exists('wicket_aorm_dependency_missing_notice')) {
+    /**
+     * Renders the admin notice shown when the required plugin is inactive.
+     */
+    function wicket_aorm_dependency_missing_notice(): void
+    {
+        echo '<div class="notice notice-error"><p>';
+        echo esc_html__(
+            'Wicket Admin Org Roster requires the Wicket Organization Roster plugin to be installed and activated.',
+            'wicket-aorm'
+        );
+        echo '</p></div>';
+    }
+}
 
 /**
  * Global accessor for the Admin Org Roster plugin singleton.
@@ -103,11 +101,25 @@ if (! function_exists('wicket_aorm_activate')) {
     /**
      * Runs on plugin activation.
      *
-     * Creates the staged-records database table via the Migrator and flushes
-     * rewrite rules so any custom REST routes are immediately available.
+     * Aborts with a user-facing error when wicket-wp-organization-roster is
+     * not active. Creates the staged-records database table via the Migrator
+     * and flushes rewrite rules so any custom REST routes are immediately
+     * available.
      */
     function wicket_aorm_activate(): void
     {
+        if (! wicket_aorm_check_org_roster_dependency()) {
+            deactivate_plugins(WICKET_AORM_BASENAME);
+            wp_die(
+                esc_html__(
+                    'Wicket Admin Org Roster requires the Wicket Organization Roster plugin to be installed and activated. Please activate it before enabling this plugin.',
+                    'wicket-aorm'
+                ),
+                esc_html__('Plugin activation failed', 'wicket-aorm'),
+                ['back_link' => true]
+            );
+        }
+
         // Ensure the autoloader is available before touching namespaced classes.
         if (! class_exists(WicketAORM\Database\Migrator::class)) {
             return;
@@ -185,37 +197,38 @@ add_filter(
 | Bootstrap
 |--------------------------------------------------------------------------
 |
-| Initialise the plugin on the 'init' hook. The base plugin defers its
-| helper includes (which define wicket_api_client()) to 'init' priority 0
-| via WicketWP\Includes, so we hook at priority 1 to guarantee the
-| function is available.
+| Deferred to plugins_loaded so all plugin autoloaders are in place before
+| we check the dependency. If wicket-wp-organization-roster is not active
+| we skip initialisation and show an admin notice instead.
 |
 */
 
-add_action('init', static function (): void {
-    // Always initialise the singleton so admin_menu pages are registered by WP.
-    // Gating initialization on wicket_api_client() caused WordPress to never add
-    // the pages to $_registered_pages, resulting in "Sorry, you are not allowed
-    // to access this page" even for admins. Individual MDP operations inside
-    // MdpClient already bail gracefully when wicket_api_client() returns null.
-    WicketAdminOrgRoster();
-}, 1);
+add_action('plugins_loaded', static function (): void {
+    if (! wicket_aorm_check_org_roster_dependency()) {
+        add_action('admin_notices', 'wicket_aorm_dependency_missing_notice');
 
-/*
-|--------------------------------------------------------------------------
-| Dependency notice
-|--------------------------------------------------------------------------
-*/
-
-add_action('admin_notices', static function (): void {
-    if (function_exists('wicket_api_client')) {
         return;
     }
 
-    echo '<div class="notice notice-error"><p>';
-    echo esc_html__(
-        'Wicket Admin Org Roster requires the Wicket Base Plugin to be installed and activated.',
-        'wicket-aorm'
-    );
-    echo '</p></div>';
-});
+    // Initialise the singleton on 'init'. The base plugin defers its helper
+    // includes (which define wicket_api_client()) to 'init' priority 0 via
+    // WicketWP\Includes, so we hook at priority 1 to guarantee the function
+    // is available.
+    add_action('init', static function (): void {
+        WicketAdminOrgRoster();
+    }, 1);
+
+    // Show a notice when the Wicket Base Plugin is missing.
+    add_action('admin_notices', static function (): void {
+        if (function_exists('wicket_api_client')) {
+            return;
+        }
+
+        echo '<div class="notice notice-error"><p>';
+        echo esc_html__(
+            'Wicket Admin Org Roster requires the Wicket Base Plugin to be installed and activated.',
+            'wicket-aorm'
+        );
+        echo '</p></div>';
+    });
+}, 1);
