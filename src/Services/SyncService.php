@@ -40,6 +40,16 @@ class SyncService
     public const ROSTER_TYPE_DIRECT_ASSIGNMENT = 'direct_assignment';
 
     /**
+     * Settings key for the security roles applied to a person when added to a roster.
+     *
+     * Stored under wicket_aorm_settings[security_roles] as an array of role slug strings.
+     * Roles are applied scoped to the roster org after relationship creation.
+     *
+     * @see AORM-9.7
+     */
+    public const SETTINGS_KEY_SECURITY_ROLES = 'security_roles';
+
+    /**
      * Settings key for the email address type used when creating a person in MDP.
      *
      * Stored under wicket_aorm_settings[email_address_type]. Defaults to 'work'.
@@ -78,10 +88,14 @@ class SyncService
      * @param \WicketORM\Services\ConnectionService|null $connectionService
      *   Optional ConnectionService instance for DI / testing. When null, a
      *   fresh instance is created on first use.
+     * @param MdpClient|null                             $mdpClient
+     *   Optional MdpClient instance for DI / testing. When null, a fresh
+     *   instance is created on first use.
      */
     public function __construct(
         private readonly ?\WicketORM\Services\PersonService $personService = null,
         private readonly ?\WicketORM\Services\ConnectionService $connectionService = null,
+        private readonly ?MdpClient $mdpClient = null,
     ) {
     }
 
@@ -149,13 +163,17 @@ class SyncService
      *    via ConnectionService::ensurePersonConnection() (AORM-9.6). The relationship
      *    type is read from OrgManConfig::get()['relationships']['type']; start date and
      *    idempotency are handled by the service — do not reimplement.
+     * 3. Applies the user role (from OrgManConfig::get()['roles']['user']) and any
+     *    configured security roles (from wicket_aorm_settings[security_roles]) to the
+     *    person, scoped to the roster org, via MdpClient::applyPersonOrgRoles() (AORM-9.7).
+     *    Duplicate slugs are deduplicated; empty slugs are filtered out.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
      *
      * @see AORM-9.5 — create person
      * @see AORM-9.6 — create relationship to roster org
-     * @see AORM-9.7 — apply user role + config security roles (next ticket)
+     * @see AORM-9.7 — apply user role + config security roles
      */
     protected function syncNewRecordViaRelationship(array $record): string
     {
@@ -188,6 +206,34 @@ class SyncService
 
         $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
         $connectionService->ensurePersonConnection($personUuid, $orgUuid, ['type' => $relationshipType]);
+
+        // ── AORM-9.7: apply user role + config security roles ─────────────
+        //
+        // User role: OrgManConfig::get()['roles']['user'] — the default role
+        // assigned to a person when they are added to the roster org (e.g. a
+        // basic "org_member" role). May be an empty string when unconfigured.
+        //
+        // Config security roles: wicket_aorm_settings[security_roles] — an
+        // array of additional role slugs configured in the AORM Settings page
+        // (e.g. 'org_editor', 'membership_manager'). May be empty.
+        //
+        // Roles are deduplicated and filtered before being sent to MDP.
+
+        $userRole       = (string) ($orgManConfig['roles']['user'] ?? '');
+        $securityRoles  = array_values(array_filter(
+            array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
+            fn (string $r): bool => $r !== '',
+        ));
+
+        $allRoles = array_values(array_unique(array_filter(
+            array_merge($userRole !== '' ? [$userRole] : [], $securityRoles),
+            fn (string $r): bool => $r !== '',
+        )));
+
+        if (! empty($allRoles)) {
+            $mdpClient = $this->mdpClient ?? new MdpClient();
+            $mdpClient->applyPersonOrgRoles($personUuid, $orgUuid, $allRoles);
+        }
 
         return $personUuid;
     }

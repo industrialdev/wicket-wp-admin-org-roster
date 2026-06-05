@@ -460,6 +460,41 @@ class MdpClient
     }
 
     /**
+     * Apply a set of role slugs for a single person scoped to a roster org.
+     *
+     * Thin public wrapper around the private addPersonOrgRoles() intended for
+     * use by SyncService after creating a new relationship (AORM-9.7) or
+     * ensuring an existing one (AORM-9.10). Does nothing when $roleSlugs is
+     * empty or when the MDP client is unavailable.
+     *
+     * Throws on API failure so the caller (SyncService / SyncJobRunner) can
+     * record the record as failed rather than silently losing role assignments.
+     *
+     * @param string   $personUuid  Person UUID.
+     * @param string   $orgUuid     Organization UUID (roles are scoped to this org).
+     * @param string[] $roleSlugs   Role slugs to assign.
+     *
+     * @throws \Exception When any MDP POST call fails.
+     *
+     * @see AORM-9.7  — new_record: apply roles after relationship creation
+     * @see AORM-9.10 — exact_match / already_on_roster: ensure roles
+     */
+    public function applyPersonOrgRoles(string $personUuid, string $orgUuid, array $roleSlugs): void
+    {
+        if (empty($roleSlugs)) {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        $this->addPersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+    }
+
+    /**
      * Add roles for a person scoped to an org.
      *
      * POSTs one `roles` resource per role name to
