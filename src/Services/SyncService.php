@@ -72,12 +72,16 @@ class SyncService
     public const DEFAULT_PHONE_TYPE = 'work';
 
     /**
-     * @param \WicketORM\Services\PersonService|null $personService
+     * @param \WicketORM\Services\PersonService|null    $personService
      *   Optional PersonService instance for DI / testing. When null, a fresh
      *   instance is created on first use.
+     * @param \WicketORM\Services\ConnectionService|null $connectionService
+     *   Optional ConnectionService instance for DI / testing. When null, a
+     *   fresh instance is created on first use.
      */
     public function __construct(
         private readonly ?\WicketORM\Services\PersonService $personService = null,
+        private readonly ?\WicketORM\Services\ConnectionService $connectionService = null,
     ) {
     }
 
@@ -139,17 +143,19 @@ class SyncService
     /**
      * Handle new_record sync via the Relationship path.
      *
-     * Finds or creates the person in MDP via PersonService::createOrGetPerson(),
-     * using the email and phone types configured in wicket_aorm_settings.
-     *
-     * Returns the MDP person UUID for use by AORM-9.6 (relationship creation)
-     * which will extend this method in the next ticket.
+     * 1. Finds or creates the person in MDP via PersonService::createOrGetPerson(),
+     *    using the email and phone types configured in wicket_aorm_settings (AORM-9.5).
+     * 2. Creates (or confirms existence of) a default-type person-to-org relationship
+     *    via ConnectionService::ensurePersonConnection() (AORM-9.6). The relationship
+     *    type is read from OrgManConfig::get()['relationships']['type']; start date and
+     *    idempotency are handled by the service — do not reimplement.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
      *
      * @see AORM-9.5 — create person
-     * @see AORM-9.6 — create relationship (extends this method)
+     * @see AORM-9.6 — create relationship to roster org
+     * @see AORM-9.7 — apply user role + config security roles (next ticket)
      */
     protected function syncNewRecordViaRelationship(array $record): string
     {
@@ -157,13 +163,15 @@ class SyncService
             ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
             : (array) ($record['raw_data'] ?? []);
 
+        // ── AORM-9.5: find or create the person ──────────────────────────
+
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
         $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
         $phoneType = (string) ($settings[self::SETTINGS_KEY_PHONE_TYPE] ?? self::DEFAULT_PHONE_TYPE);
 
-        $service = $this->personService ?? new \WicketORM\Services\PersonService();
+        $personService = $this->personService ?? new \WicketORM\Services\PersonService();
 
-        $personUuid = $service->createOrGetPerson([
+        $personUuid = (string) $personService->createOrGetPerson([
             'given_name'  => (string) ($rawData['first_name'] ?? ''),
             'family_name' => (string) ($rawData['last_name'] ?? ''),
             'email'       => (string) ($rawData['email_address'] ?? ''),
@@ -172,6 +180,15 @@ class SyncService
             'phone_type'  => $phoneType,
         ]);
 
-        return (string) $personUuid;
+        // ── AORM-9.6: create default-type relationship to roster org ──────
+
+        $orgUuid           = (string) ($record['org_uuid'] ?? '');
+        $orgManConfig      = \WicketORM\Config\OrgManConfig::get();
+        $relationshipType  = (string) ($orgManConfig['relationships']['type'] ?? '');
+
+        $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
+        $connectionService->ensurePersonConnection($personUuid, $orgUuid, ['type' => $relationshipType]);
+
+        return $personUuid;
     }
 }
