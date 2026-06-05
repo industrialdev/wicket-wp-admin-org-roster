@@ -460,6 +460,53 @@ class MdpClient
     }
 
     /**
+     * Update a person's job title in MDP.
+     *
+     * Issues a PATCH to `people/{uuid}` with only the `job_title` attribute so
+     * all other person fields are left untouched. Does nothing when `$title` is
+     * an empty string or when `wicket_api_client()` is unavailable.
+     *
+     * Throws on API failure so the caller (SyncService / SyncJobRunner) can
+     * record the staged record as failed rather than silently losing the update.
+     *
+     * MDP payload shape:
+     * ```json
+     * {"data":{"type":"people","id":"<uuid>","attributes":{"job_title":"<title>"}}}
+     * ```
+     *
+     * @param string $personUuid  Person UUID.
+     * @param string $title       Job title to set; empty string is a no-op.
+     *
+     * @throws \Exception When the MDP PATCH call fails.
+     *
+     * @see AORM-9.8 — exact_match / already_on_roster: update title
+     */
+    public function updatePersonTitle(string $personUuid, string $title): void
+    {
+        if ($title === '') {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        $payload = [
+            'data' => [
+                'type'       => 'people',
+                'id'         => $personUuid,
+                'attributes' => [
+                    'job_title' => $title,
+                ],
+            ],
+        ];
+
+        $client->patch('people/' . $personUuid, ['json' => $payload]);
+    }
+
+    /**
      * Apply a set of role slugs for a single person scoped to a roster org.
      *
      * Thin public wrapper around the private addPersonOrgRoles() intended for

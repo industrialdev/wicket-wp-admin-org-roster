@@ -147,7 +147,9 @@ class SyncService
 
         match ($status) {
             'new_record'        => $this->syncNewRecordViaRelationship($record),
-            // AORM-9.8 through AORM-9.15 — stubs filled in by subsequent tickets.
+            'exact_match'       => $this->syncExactMatchViaRelationship($record),
+            'already_on_roster' => $this->syncAlreadyOnRosterViaRelationship($record),
+            // AORM-9.11 through AORM-9.15 — stubs filled in by subsequent tickets.
             default             => null,
         };
     }
@@ -236,5 +238,127 @@ class SyncService
         }
 
         return $personUuid;
+    }
+
+    /**
+     * Handle exact_match sync via the Relationship path.
+     *
+     * 1. Updates the person's job title in MDP from the imported raw_data.title
+     *    field, when a non-empty title is present (AORM-9.8).
+     * 2. Ends default-type relationships to other orgs and creates one to the
+     *    roster org if missing (AORM-9.9) — stub, implemented in AORM-9.9.
+     * 3. Ensures the user role + configured security roles scoped to the roster
+     *    org (AORM-9.10) — stub, implemented in AORM-9.10.
+     *
+     * The person UUID is resolved from the first entry in `matched_persons`.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.8  — update title
+     * @see AORM-9.9  — end other-org relationships, ensure roster-org relationship
+     * @see AORM-9.10 — ensure roles
+     */
+    protected function syncExactMatchViaRelationship(array $record): void
+    {
+        $personUuid = $this->extractPersonUuidFromMatchedPersons($record);
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        // ── AORM-9.8: update title ────────────────────────────────────────
+
+        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+
+        // AORM-9.9: end other-org relationships and ensure roster-org relationship — stub.
+        // AORM-9.10: ensure user role + config security roles — stub.
+    }
+
+    /**
+     * Handle already_on_roster sync via the Relationship path.
+     *
+     * 1. Updates the person's job title in MDP from the imported raw_data.title
+     *    field, when a non-empty title is present (AORM-9.8).
+     * 2. Ensures the user role + configured security roles scoped to the roster
+     *    org (AORM-9.10) — stub, implemented in AORM-9.10.
+     *
+     * The person UUID is resolved from the first entry in `matched_persons`.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.8  — update title
+     * @see AORM-9.10 — ensure roles
+     */
+    protected function syncAlreadyOnRosterViaRelationship(array $record): void
+    {
+        $personUuid = $this->extractPersonUuidFromMatchedPersons($record);
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        // ── AORM-9.8: update title ────────────────────────────────────────
+
+        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+
+        // AORM-9.10: ensure user role + config security roles — stub.
+    }
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Update a person's title in MDP when the imported row supplies one.
+     *
+     * Reads the `title` key from `$rawData` and delegates to
+     * MdpClient::updatePersonTitle(). Skipped when the title is absent or empty.
+     *
+     * @param string               $personUuid  Person UUID.
+     * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
+     *
+     * @throws \Exception When the MDP PATCH call fails.
+     *
+     * @see AORM-9.8
+     */
+    private function updatePersonTitleIfPresent(string $personUuid, array $rawData): void
+    {
+        $title = (string) ($rawData['title'] ?? '');
+
+        if ($title === '') {
+            return;
+        }
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->updatePersonTitle($personUuid, $title);
+    }
+
+    /**
+     * Extract the person UUID from the first entry in a record's matched_persons.
+     *
+     * `matched_persons` may arrive as a JSON string (raw DB row) or as a decoded
+     * PHP array (pre-processed by StagedRecordsTable). Returns an empty string
+     * when no candidates are present or the UUID field is absent.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     * @return string  Person UUID, or empty string when none is available.
+     */
+    private function extractPersonUuidFromMatchedPersons(array $record): string
+    {
+        $raw = $record['matched_persons'] ?? null;
+
+        $persons = match (true) {
+            is_string($raw) => (array) (json_decode($raw, true) ?? []),
+            is_array($raw)  => $raw,
+            default         => [],
+        };
+
+        return (string) ($persons[0]['uuid'] ?? '');
     }
 }
