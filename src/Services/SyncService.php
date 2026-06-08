@@ -140,6 +140,7 @@ class SyncService
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
      * @see AORM-9.5  through AORM-9.15 — per-status handlers
+     * @see AORM-9.11 — merging_to_record: update name/title from import
      */
     protected function syncViaRelationshipPath(array $record): void
     {
@@ -149,7 +150,8 @@ class SyncService
             'new_record'        => $this->syncNewRecordViaRelationship($record),
             'exact_match'       => $this->syncExactMatchViaRelationship($record),
             'already_on_roster' => $this->syncAlreadyOnRosterViaRelationship($record),
-            // AORM-9.11 through AORM-9.15 — stubs filled in by subsequent tickets.
+            'merging_to_record' => $this->syncMergingToRecordViaRelationship($record),
+            // AORM-9.15 — stub filled in by a subsequent ticket.
             default             => null,
         };
     }
@@ -301,6 +303,46 @@ class SyncService
         $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
+    /**
+     * Handle merging_to_record sync via the Relationship path.
+     *
+     * 1. Updates the merge target's first name, last name, and job title in
+     *    MDP from the imported raw_data fields, when at least one of them is
+     *    present (AORM-9.11).
+     *
+     * The person to update is the admin-selected merge target — NOT the first
+     * `matched_persons` candidate. It is resolved from the staged record's
+     * `merge_target_uuid` column, which is set when the admin chose "Merge to
+     * Existing" in the Review Match modal and saved via
+     * `PATCH /wicket-aorm/v1/staged/{id}/resolve` (AORM-8B.18). The handler is
+     * a no-op when that column is empty.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.11 — update first/last name + title from import
+     * @see AORM-9.12 — add imported email as primary, demote existing
+     * @see AORM-9.13 — add relationship to roster org, end other-org relationships
+     * @see AORM-9.14 — apply config security roles, keep existing
+     */
+    protected function syncMergingToRecordViaRelationship(array $record): void
+    {
+        $personUuid = (string) ($record['merge_target_uuid'] ?? '');
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        // ── AORM-9.11: update first/last name + title from import ─────────
+
+        $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
+
+        // AORM-9.12 through AORM-9.14 — stubs filled in by subsequent tickets.
+    }
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
@@ -326,6 +368,36 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->updatePersonTitle($personUuid, $title);
+    }
+
+    /**
+     * Update a merge target's first name, last name, and title in MDP from the
+     * imported row, when at least one of those fields is present.
+     *
+     * Reads `first_name`, `last_name`, and `title` from `$rawData` and
+     * delegates to MdpClient::updatePersonNameAndTitle(), which omits any
+     * empty fields from the PATCH so untouched MDP attributes are preserved.
+     * Skipped entirely when all three values are empty.
+     *
+     * @param string               $personUuid  Merge target person UUID.
+     * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
+     *
+     * @throws \Exception When the MDP PATCH call fails.
+     *
+     * @see AORM-9.11
+     */
+    private function updatePersonNameAndTitleIfPresent(string $personUuid, array $rawData): void
+    {
+        $givenName  = (string) ($rawData['first_name'] ?? '');
+        $familyName = (string) ($rawData['last_name'] ?? '');
+        $title      = (string) ($rawData['title'] ?? '');
+
+        if ($givenName === '' && $familyName === '' && $title === '') {
+            return;
+        }
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->updatePersonNameAndTitle($personUuid, $givenName, $familyName, $title);
     }
 
     /**

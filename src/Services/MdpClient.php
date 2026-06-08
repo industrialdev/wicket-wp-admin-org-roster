@@ -507,6 +507,71 @@ class MdpClient
     }
 
     /**
+     * Update a person's given name, family name, and job title in MDP.
+     *
+     * Issues a single PATCH to `people/{uuid}` containing only the non-empty
+     * attributes among `given_name`, `family_name`, and `job_title`, so any
+     * field absent from the imported row is left untouched on the MDP person
+     * record. Does nothing when all three values are empty strings, or when
+     * `wicket_api_client()` is unavailable.
+     *
+     * Throws on API failure so the caller (SyncService) can record the staged
+     * record as failed rather than silently losing the update.
+     *
+     * MDP payload shape (only non-empty attributes are included):
+     * ```json
+     * {"data":{"type":"people","id":"<uuid>","attributes":{
+     *   "given_name":"<first>","family_name":"<last>","job_title":"<title>"
+     * }}}
+     * ```
+     *
+     * @param string $personUuid  Person UUID.
+     * @param string $givenName   First name to set; empty string is omitted from the PATCH.
+     * @param string $familyName  Last name to set; empty string is omitted from the PATCH.
+     * @param string $title       Job title to set; empty string is omitted from the PATCH.
+     *
+     * @throws \Exception When the MDP PATCH call fails.
+     *
+     * @see AORM-9.11 — merging_to_record: update name/title from import
+     */
+    public function updatePersonNameAndTitle(string $personUuid, string $givenName, string $familyName, string $title): void
+    {
+        $attributes = [];
+
+        if ($givenName !== '') {
+            $attributes['given_name'] = $givenName;
+        }
+
+        if ($familyName !== '') {
+            $attributes['family_name'] = $familyName;
+        }
+
+        if ($title !== '') {
+            $attributes['job_title'] = $title;
+        }
+
+        if (empty($attributes)) {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        $payload = [
+            'data' => [
+                'type'       => 'people',
+                'id'         => $personUuid,
+                'attributes' => $attributes,
+            ],
+        ];
+
+        $client->patch('people/' . $personUuid, ['json' => $payload]);
+    }
+
+    /**
      * Apply a set of role slugs for a single person scoped to a roster org.
      *
      * Thin public wrapper around the private addPersonOrgRoles() intended for
