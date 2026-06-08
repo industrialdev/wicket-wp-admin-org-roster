@@ -113,6 +113,7 @@ class SyncService
      * @see AORM-9.6  — new_record: create relationship
      * @see AORM-9.8  — exact_match / already_on_roster: update title
      * @see AORM-9.11 — merging_to_record: update name/title
+     * @see AORM-9.12 — merging_to_record: add imported email as primary, demote existing
      * @see AORM-9.15 — remove_existing: end-date relationship
      */
     public function syncRecord(array $record): void
@@ -309,6 +310,9 @@ class SyncService
      * 1. Updates the merge target's first name, last name, and job title in
      *    MDP from the imported raw_data fields, when at least one of them is
      *    present (AORM-9.11).
+     * 2. Adds the imported `email_address` as the merge target's new primary
+     *    email and demotes whichever address(es) currently hold the primary
+     *    flag, when a non-empty email is present (AORM-9.12).
      *
      * The person to update is the admin-selected merge target — NOT the first
      * `matched_persons` candidate. It is resolved from the staged record's
@@ -340,7 +344,11 @@ class SyncService
 
         $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
 
-        // AORM-9.12 through AORM-9.14 — stubs filled in by subsequent tickets.
+        // ── AORM-9.12: add imported email as primary, demote existing ─────
+
+        $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
+
+        // AORM-9.13 and AORM-9.14 — stubs filled in by subsequent tickets.
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -398,6 +406,39 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->updatePersonNameAndTitle($personUuid, $givenName, $familyName, $title);
+    }
+
+    /**
+     * Add a merge target's imported email as their new primary address in MDP,
+     * demoting whichever email(s) currently hold the primary flag, when the
+     * imported row supplies a non-empty `email_address`.
+     *
+     * Reads the `email_address` key from `$rawData` and the configured email
+     * type from `wicket_aorm_settings[email_address_type]` (same setting and
+     * default used by the new_record path — AORM-9.5), then delegates to
+     * MdpClient::addImportedEmailAsPrimary(). Skipped entirely when the
+     * imported email is absent or empty.
+     *
+     * @param string               $personUuid  Merge target person UUID.
+     * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
+     *
+     * @throws \Exception When any MDP POST/PATCH call fails.
+     *
+     * @see AORM-9.12
+     */
+    private function addImportedEmailAsPrimaryIfPresent(string $personUuid, array $rawData): void
+    {
+        $email = (string) ($rawData['email_address'] ?? '');
+
+        if ($email === '') {
+            return;
+        }
+
+        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
+        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->addImportedEmailAsPrimary($personUuid, $email, $emailType);
     }
 
     /**

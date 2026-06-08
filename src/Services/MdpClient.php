@@ -572,6 +572,173 @@ class MdpClient
     }
 
     /**
+     * Add an imported email address as a person's new primary email, demoting
+     * whichever email(s) currently hold the primary flag.
+     *
+     * Used by the merging_to_record sync path (AORM-9.12) when the admin has
+     * chosen to merge an imported row into an existing MDP person: the
+     * imported `email_address` becomes the person's primary contact email
+     * without discarding their existing address(es).
+     *
+     * Steps:
+     *   1. Fetch the person's current emails (with resource IDs) via
+     *      `GET people/{uuid}?include=emails`.
+     *   2. No-op when an email with the same address (case-insensitive) is
+     *      already flagged primary — nothing to add or demote.
+     *   3. POST a new `emails` resource for the person with `primary: true`.
+     *   4. PATCH each other email currently flagged primary to `primary: false`
+     *      so MDP ends up with exactly one primary address.
+     *
+     * Does nothing when `$emailAddress` is empty or `wicket_api_client()` is
+     * unavailable.
+     *
+     * Throws on API failure so the caller (SyncService / SyncJobRunner) can
+     * record the staged record as failed rather than silently losing the update.
+     *
+     * MDP payload shapes:
+     * ```json
+     * // POST people/{uuid}/emails
+     * {"data":{"type":"emails","attributes":{"address":"<email>","email_type":"<type>","primary":true},
+     *   "relationships":{"person":{"data":{"type":"people","id":"<uuid>"}}}}}
+     *
+     * // PATCH emails/{id}
+     * {"data":{"type":"emails","id":"<id>","attributes":{"primary":false}}}
+     * ```
+     *
+     * @param string $personUuid   Merge target person UUID.
+     * @param string $emailAddress Imported email address; empty string is a no-op.
+     * @param string $emailType    Email type to use for the new address (e.g. 'work').
+     *
+     * @throws \Exception When any MDP POST/PATCH call fails.
+     *
+     * @see AORM-9.12 — merging_to_record: add imported email as primary, demote existing
+     */
+    public function addImportedEmailAsPrimary(string $personUuid, string $emailAddress, string $emailType): void
+    {
+        if ($emailAddress === '') {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        $existingEmails = $this->fetchPersonEmails($client, $personUuid);
+
+        // Already primary with the same address — nothing to add or demote.
+        foreach ($existingEmails as $email) {
+            if ($email['primary'] && strcasecmp($email['address'], $emailAddress) === 0) {
+                return;
+            }
+        }
+
+        $payload = [
+            'data' => [
+                'type'          => 'emails',
+                'attributes'    => [
+                    'address'    => $emailAddress,
+                    'email_type' => $emailType,
+                    'primary'    => true,
+                ],
+                'relationships' => [
+                    'person' => [
+                        'data' => [
+                            'type' => 'people',
+                            'id'   => $personUuid,
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $client->post('people/' . $personUuid . '/emails', ['json' => $payload]);
+
+        // Demote any other email(s) currently flagged primary.
+        foreach ($existingEmails as $email) {
+            if (! $email['primary'] || strcasecmp($email['address'], $emailAddress) === 0) {
+                continue;
+            }
+
+            $demotePayload = [
+                'data' => [
+                    'type'       => 'emails',
+                    'id'         => $email['id'],
+                    'attributes' => [
+                        'primary' => false,
+                    ],
+                ],
+            ];
+
+            $client->patch('emails/' . $email['id'], ['json' => $demotePayload]);
+        }
+    }
+
+    /**
+     * Fetch a person's email addresses, including their MDP resource IDs.
+     *
+     * Calls `GET people/{uuid}?include=emails` and resolves the sideloaded
+     * `emails` resources from the `included` array, preserving the resource
+     * `id` so callers can target individual addresses with follow-up PATCH
+     * calls (e.g. to demote a primary email in {@see addImportedEmailAsPrimary()}).
+     *
+     * Returns an empty array when the person has no emails, the request fails,
+     * or the response is malformed.
+     *
+     * @param object $client     MDP API client (must be non-null).
+     * @param string $personUuid Person UUID.
+     *
+     * @return list<array{id: string, address: string, type: string, primary: bool}>
+     */
+    private function fetchPersonEmails(object $client, string $personUuid): array
+    {
+        $query = http_build_query(['include' => 'emails']);
+
+        try {
+            $response = $client->get('people/' . $personUuid . '?' . $query);
+        } catch (\Exception $e) {
+            return [];
+        }
+
+        if (! is_array($response) || empty($response['data'])) {
+            return [];
+        }
+
+        $included = [];
+
+        foreach ($response['included'] ?? [] as $inc) {
+            $type = (string) ($inc['type'] ?? '');
+            $id   = (string) ($inc['id'] ?? '');
+
+            if ($type !== '' && $id !== '') {
+                $included[$type . ':' . $id] = $inc['attributes'] ?? [];
+            }
+        }
+
+        $emails = [];
+
+        foreach ($response['data']['relationships']['emails']['data'] ?? [] as $rel) {
+            $relId    = (string) ($rel['id'] ?? '');
+            $relAttrs = $included['emails:' . $relId] ?? [];
+            $address  = (string) ($relAttrs['address'] ?? '');
+
+            if ($relId === '' || $address === '') {
+                continue;
+            }
+
+            $emails[] = [
+                'id'      => $relId,
+                'address' => $address,
+                'type'    => (string) ($relAttrs['email_type'] ?? ''),
+                'primary' => (bool) ($relAttrs['primary'] ?? false),
+            ];
+        }
+
+        return $emails;
+    }
+
+    /**
      * Apply a set of role slugs for a single person scoped to a roster org.
      *
      * Thin public wrapper around the private addPersonOrgRoles() intended for
