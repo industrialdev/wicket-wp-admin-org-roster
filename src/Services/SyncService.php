@@ -245,8 +245,9 @@ class SyncService
      *
      * 1. Updates the person's job title in MDP from the imported raw_data.title
      *    field, when a non-empty title is present (AORM-9.8).
-     * 2. Ends default-type relationships to other orgs and creates one to the
-     *    roster org if missing (AORM-9.9) — stub, implemented in AORM-9.9.
+     * 2. Ends default-type relationships to other orgs (skipping protected
+     *    relationship types such as admin roles) and ensures a default-type
+     *    relationship exists to the roster org, creating one if missing (AORM-9.9).
      * 3. Ensures the user role + configured security roles scoped to the roster
      *    org (AORM-9.10) — stub, implemented in AORM-9.10.
      *
@@ -274,7 +275,13 @@ class SyncService
 
         $this->updatePersonTitleIfPresent($personUuid, $rawData);
 
-        // AORM-9.9: end other-org relationships and ensure roster-org relationship — stub.
+        // ── AORM-9.9: end other-org relationships, ensure roster-org one ──
+
+        $this->endOtherOrgRelationshipsAndEnsureRosterRelationship(
+            $personUuid,
+            (string) ($record['org_uuid'] ?? ''),
+        );
+
         // AORM-9.10: ensure user role + config security roles — stub.
     }
 
@@ -337,6 +344,93 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->updatePersonTitle($personUuid, $title);
+    }
+
+    /**
+     * End the person's default-type relationships to other orgs and ensure a
+     * default-type relationship exists to the roster org.
+     *
+     * 1. Resolves the distinct set of other orgs the person currently has a
+     *    person-to-organization connection with (excluding the roster org)
+     *    via ConnectionService::getPersonConnectionsById().
+     * 2. For each other org, ends active connections via
+     *    ConnectionService::endActivePersonOrganizationConnections(), passing
+     *    the configured protected relationship types (e.g. admin roles) as
+     *    $skipTypes so they are left untouched.
+     * 3. Ensures (creates if missing) a default-type relationship to the
+     *    roster org via ConnectionService::ensurePersonConnection() — handles
+     *    payload building, start date, and idempotency.
+     *
+     * @param string $personUuid    Person UUID.
+     * @param string $rosterOrgUuid Roster org UUID (record['org_uuid']).
+     *
+     * @see AORM-9.9
+     */
+    private function endOtherOrgRelationshipsAndEnsureRosterRelationship(string $personUuid, string $rosterOrgUuid): void
+    {
+        if ($personUuid === '' || $rosterOrgUuid === '') {
+            return;
+        }
+
+        $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
+        $orgManConfig      = \WicketORM\Config\OrgManConfig::get();
+
+        $skipTypes = array_values(array_filter(
+            array_map('strval', (array) ($orgManConfig['member_management']['addition']['protected_relationship_types'] ?? [])),
+            fn (string $type): bool => $type !== '',
+        ));
+
+        foreach ($this->resolveOtherOrgUuidsFromConnections($connectionService, $personUuid, $rosterOrgUuid) as $otherOrgUuid) {
+            $connectionService->endActivePersonOrganizationConnections($personUuid, $otherOrgUuid, $skipTypes);
+        }
+
+        $relationshipType = (string) ($orgManConfig['relationships']['type'] ?? '');
+        $connectionService->ensurePersonConnection($personUuid, $rosterOrgUuid, ['type' => $relationshipType]);
+    }
+
+    /**
+     * Resolve the distinct set of org UUIDs (excluding the roster org) that the
+     * person currently has a person-to-organization connection with.
+     *
+     * Reads the person's full connection list via
+     * ConnectionService::getPersonConnectionsById() and collects the
+     * organization id from each `person_to_organization` connection entry.
+     * Active-status filtering for end-dating is delegated to
+     * ConnectionService::endActivePersonOrganizationConnections() per org —
+     * not reimplemented here.
+     *
+     * @param \WicketORM\Services\ConnectionService $connectionService
+     * @param string                                 $personUuid
+     * @param string                                 $rosterOrgUuid
+     * @return string[]  Distinct other-org UUIDs.
+     *
+     * @see AORM-9.9
+     */
+    private function resolveOtherOrgUuidsFromConnections(
+        \WicketORM\Services\ConnectionService $connectionService,
+        string $personUuid,
+        string $rosterOrgUuid,
+    ): array {
+        $connections = $connectionService->getPersonConnectionsById($personUuid);
+
+        if (! is_array($connections) || empty($connections['data'])) {
+            return [];
+        }
+
+        $otherOrgUuids = [];
+
+        foreach ((array) $connections['data'] as $connection) {
+            $connectionType = (string) ($connection['attributes']['connection_type'] ?? '');
+            $orgUuid        = (string) ($connection['relationships']['organization']['data']['id'] ?? '');
+
+            if ($connectionType !== 'person_to_organization' || $orgUuid === '' || $orgUuid === $rosterOrgUuid) {
+                continue;
+            }
+
+            $otherOrgUuids[$orgUuid] = true;
+        }
+
+        return array_keys($otherOrgUuids);
     }
 
     /**
