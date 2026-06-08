@@ -167,7 +167,8 @@ class SyncService
      *    idempotency are handled by the service — do not reimplement.
      * 3. Applies the user role (from OrgManConfig::get()['roles']['user']) and any
      *    configured security roles (from wicket_aorm_settings[security_roles]) to the
-     *    person, scoped to the roster org, via MdpClient::applyPersonOrgRoles() (AORM-9.7).
+     *    person, scoped to the roster org, via the shared ensureUserAndSecurityRoles()
+     *    helper, which wraps MdpClient::applyPersonOrgRoles() (AORM-9.7 / AORM-9.10).
      *    Duplicate slugs are deduplicated; empty slugs are filtered out.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
@@ -210,32 +211,8 @@ class SyncService
         $connectionService->ensurePersonConnection($personUuid, $orgUuid, ['type' => $relationshipType]);
 
         // ── AORM-9.7: apply user role + config security roles ─────────────
-        //
-        // User role: OrgManConfig::get()['roles']['user'] — the default role
-        // assigned to a person when they are added to the roster org (e.g. a
-        // basic "org_member" role). May be an empty string when unconfigured.
-        //
-        // Config security roles: wicket_aorm_settings[security_roles] — an
-        // array of additional role slugs configured in the AORM Settings page
-        // (e.g. 'org_editor', 'membership_manager'). May be empty.
-        //
-        // Roles are deduplicated and filtered before being sent to MDP.
 
-        $userRole       = (string) ($orgManConfig['roles']['user'] ?? '');
-        $securityRoles  = array_values(array_filter(
-            array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
-            fn (string $r): bool => $r !== '',
-        ));
-
-        $allRoles = array_values(array_unique(array_filter(
-            array_merge($userRole !== '' ? [$userRole] : [], $securityRoles),
-            fn (string $r): bool => $r !== '',
-        )));
-
-        if (! empty($allRoles)) {
-            $mdpClient = $this->mdpClient ?? new MdpClient();
-            $mdpClient->applyPersonOrgRoles($personUuid, $orgUuid, $allRoles);
-        }
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
 
         return $personUuid;
     }
@@ -249,7 +226,7 @@ class SyncService
      *    relationship types such as admin roles) and ensures a default-type
      *    relationship exists to the roster org, creating one if missing (AORM-9.9).
      * 3. Ensures the user role + configured security roles scoped to the roster
-     *    org (AORM-9.10) — stub, implemented in AORM-9.10.
+     *    org via the shared ensureUserAndSecurityRoles() helper (AORM-9.10).
      *
      * The person UUID is resolved from the first entry in `matched_persons`.
      *
@@ -271,18 +248,19 @@ class SyncService
             ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
             : (array) ($record['raw_data'] ?? []);
 
+        $orgUuid = (string) ($record['org_uuid'] ?? '');
+
         // ── AORM-9.8: update title ────────────────────────────────────────
 
         $this->updatePersonTitleIfPresent($personUuid, $rawData);
 
         // ── AORM-9.9: end other-org relationships, ensure roster-org one ──
 
-        $this->endOtherOrgRelationshipsAndEnsureRosterRelationship(
-            $personUuid,
-            (string) ($record['org_uuid'] ?? ''),
-        );
+        $this->endOtherOrgRelationshipsAndEnsureRosterRelationship($personUuid, $orgUuid);
 
-        // AORM-9.10: ensure user role + config security roles — stub.
+        // ── AORM-9.10: ensure user role + config security roles ───────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     /**
@@ -291,7 +269,7 @@ class SyncService
      * 1. Updates the person's job title in MDP from the imported raw_data.title
      *    field, when a non-empty title is present (AORM-9.8).
      * 2. Ensures the user role + configured security roles scoped to the roster
-     *    org (AORM-9.10) — stub, implemented in AORM-9.10.
+     *    org via the shared ensureUserAndSecurityRoles() helper (AORM-9.10).
      *
      * The person UUID is resolved from the first entry in `matched_persons`.
      *
@@ -312,11 +290,15 @@ class SyncService
             ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
             : (array) ($record['raw_data'] ?? []);
 
+        $orgUuid = (string) ($record['org_uuid'] ?? '');
+
         // ── AORM-9.8: update title ────────────────────────────────────────
 
         $this->updatePersonTitleIfPresent($personUuid, $rawData);
 
-        // AORM-9.10: ensure user role + config security roles — stub.
+        // ── AORM-9.10: ensure user role + config security roles ───────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -344,6 +326,62 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->updatePersonTitle($personUuid, $title);
+    }
+
+    /**
+     * Ensure the user role + configured security roles are applied to a person,
+     * scoped to the roster org.
+     *
+     * User role: OrgManConfig::get()['roles']['user'] — the default role
+     * assigned to a person when they are added to the roster org (e.g. a
+     * basic "org_member" role). May be an empty string when unconfigured.
+     *
+     * Config security roles: wicket_aorm_settings[security_roles] — an array
+     * of additional role slugs configured in the AORM Settings page (e.g.
+     * 'org_editor', 'membership_manager'). May be empty.
+     *
+     * Roles are merged, deduplicated, and filtered for emptiness before being
+     * sent to MDP via MdpClient::applyPersonOrgRoles(). The MDP call is skipped
+     * entirely when the resulting role list is empty.
+     *
+     * Shared by syncNewRecordViaRelationship() (AORM-9.7), and
+     * syncExactMatchViaRelationship() / syncAlreadyOnRosterViaRelationship()
+     * (AORM-9.10).
+     *
+     * @param string $personUuid Person UUID.
+     * @param string $orgUuid    Roster org UUID to scope the roles to.
+     *
+     * @throws \Exception When the MDP API call fails.
+     *
+     * @see AORM-9.7
+     * @see AORM-9.10
+     */
+    private function ensureUserAndSecurityRoles(string $personUuid, string $orgUuid): void
+    {
+        if ($personUuid === '' || $orgUuid === '') {
+            return;
+        }
+
+        $settings     = (array) get_option(self::SETTINGS_OPTION, []);
+        $orgManConfig = \WicketORM\Config\OrgManConfig::get();
+
+        $userRole      = (string) ($orgManConfig['roles']['user'] ?? '');
+        $securityRoles = array_values(array_filter(
+            array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
+            fn (string $r): bool => $r !== '',
+        ));
+
+        $allRoles = array_values(array_unique(array_filter(
+            array_merge($userRole !== '' ? [$userRole] : [], $securityRoles),
+            fn (string $r): bool => $r !== '',
+        )));
+
+        if (empty($allRoles)) {
+            return;
+        }
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->applyPersonOrgRoles($personUuid, $orgUuid, $allRoles);
     }
 
     /**
