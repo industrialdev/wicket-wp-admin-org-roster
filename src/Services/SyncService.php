@@ -115,6 +115,7 @@ class SyncService
      * @see AORM-9.11 — merging_to_record: update name/title
      * @see AORM-9.12 — merging_to_record: add imported email as primary, demote existing
      * @see AORM-9.13 — merging_to_record: end other-org relationships, ensure roster-org relationship
+     * @see AORM-9.14 — merging_to_record: apply config security roles, keep existing
      * @see AORM-9.15 — remove_existing: end-date relationship
      */
     public function syncRecord(array $record): void
@@ -320,6 +321,10 @@ class SyncService
      *    (AORM-9.13). Delegates to the shared
      *    endOtherOrgRelationshipsAndEnsureRosterRelationship() helper —
      *    same logic as the exact_match path (AORM-9.9).
+     * 4. Applies the configured security roles (and user role) scoped to the
+     *    roster org via the shared ensureUserAndSecurityRoles() helper
+     *    (AORM-9.14). Roles are applied additively via POST — existing roles
+     *    on the person are preserved ("keep existing").
      *
      * The person to update is the admin-selected merge target — NOT the first
      * `matched_persons` candidate. It is resolved from the staged record's
@@ -361,7 +366,9 @@ class SyncService
 
         $this->endOtherOrgRelationshipsAndEnsureRosterRelationship($personUuid, $orgUuid);
 
-        // AORM-9.14 — stub filled in by a subsequent ticket.
+        // ── AORM-9.14: apply config security roles, keep existing ─────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
