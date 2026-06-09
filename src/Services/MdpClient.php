@@ -774,6 +774,40 @@ class MdpClient
     }
 
     /**
+     * Revoke a set of role slugs for a single person scoped to a roster org.
+     *
+     * Thin public wrapper around the private removePersonOrgRoles() intended
+     * for use by SyncService when removing a person from a roster (AORM-9.16).
+     * Does nothing when $roleSlugs is empty or when the MDP client is unavailable.
+     *
+     * Unlike the best-effort removeOrgRoles() used in removeRosterMembers(),
+     * this method throws on API failure so the caller (SyncService / SyncJobRunner)
+     * can record the record as failed rather than silently losing role revocations.
+     *
+     * @param string   $personUuid  Person UUID.
+     * @param string   $orgUuid     Organization UUID (roles are scoped to this org).
+     * @param string[] $roleSlugs   Role slugs to revoke.
+     *
+     * @throws \Exception When any MDP GET or DELETE call fails.
+     *
+     * @see AORM-9.16 — remove_existing: revoke config security roles scoped to roster org
+     */
+    public function revokePersonOrgRoles(string $personUuid, string $orgUuid, array $roleSlugs): void
+    {
+        if (empty($roleSlugs)) {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        $this->removePersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+    }
+
+    /**
      * Add roles for a person scoped to an org.
      *
      * POSTs one `roles` resource per role name to

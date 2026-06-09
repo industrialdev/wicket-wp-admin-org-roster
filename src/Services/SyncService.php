@@ -117,6 +117,7 @@ class SyncService
      * @see AORM-9.13 — merging_to_record: end other-org relationships, ensure roster-org relationship
      * @see AORM-9.14 — merging_to_record: apply config security roles, keep existing
      * @see AORM-9.15 — remove_existing: end-date relationship
+     * @see AORM-9.16 — remove_existing: revoke config security roles
      */
     public function syncRecord(array $record): void
     {
@@ -124,7 +125,7 @@ class SyncService
         $rosterType = (string) ($settings['roster_type'] ?? self::ROSTER_TYPE_RELATIONSHIP);
 
         // Phase 1: always route to the Relationship path.
-        // Direct Assignment routing is implemented in Phase 2 (AORM-9.16+).
+        // Direct Assignment routing is unlocked in Phase 2.
         $this->syncViaRelationshipPath($record);
     }
 
@@ -138,7 +139,7 @@ class SyncService
      *   exact_match           → AORM-9.8 / AORM-9.9 / AORM-9.10
      *   already_on_roster     → AORM-9.8 / AORM-9.10
      *   merging_to_record     → AORM-9.11 / AORM-9.12 / AORM-9.13 / AORM-9.14
-     *   remove_existing       → AORM-9.15
+     *   remove_existing       → AORM-9.15 / AORM-9.16
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
@@ -388,7 +389,8 @@ class SyncService
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
-     * @see AORM-9.15
+     * @see AORM-9.15 — end-date relationship
+     * @see AORM-9.16 — revoke config security roles scoped to roster org
      */
     protected function syncRemoveExistingViaRelationship(array $record): void
     {
@@ -411,7 +413,13 @@ class SyncService
             fn (string $type): bool => $type !== '',
         ));
 
+        // ── AORM-9.15: end-date the relationship to the roster org ───────────
+
         $connectionService->endActivePersonOrganizationConnections($personUuid, $orgUuid, $skipTypes);
+
+        // ── AORM-9.16: revoke config security roles scoped to roster org ─────
+
+        $this->revokeConfigSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -558,6 +566,50 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->applyPersonOrgRoles($personUuid, $orgUuid, $allRoles);
+    }
+
+    /**
+     * Revoke the configured security roles for a person, scoped to the roster org.
+     *
+     * Config security roles: wicket_aorm_settings[security_roles] — the array
+     * of role slugs configured in the AORM Settings page (e.g. 'org_editor',
+     * 'membership_manager'). These were applied by ensureUserAndSecurityRoles()
+     * when the person was added; they must be explicitly revoked when the person
+     * is removed.
+     *
+     * Only the security roles from settings are revoked here — the user role
+     * from OrgManConfig is intentionally excluded (it is lifecycle-managed by
+     * the relationship end-dating in AORM-9.15, not by role deletion).
+     *
+     * Roles are filtered for emptiness before being sent to MDP via
+     * MdpClient::revokePersonOrgRoles(). The MDP call is skipped entirely when
+     * the role list is empty or either UUID is absent.
+     *
+     * @param string $personUuid Person UUID.
+     * @param string $orgUuid    Roster org UUID to scope the revocation to.
+     *
+     * @throws \Exception When the MDP API call fails.
+     *
+     * @see AORM-9.16
+     */
+    private function revokeConfigSecurityRoles(string $personUuid, string $orgUuid): void
+    {
+        if ($personUuid === '' || $orgUuid === '') {
+            return;
+        }
+
+        $settings      = (array) get_option(self::SETTINGS_OPTION, []);
+        $securityRoles = array_values(array_filter(
+            array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
+            fn (string $r): bool => $r !== '',
+        ));
+
+        if (empty($securityRoles)) {
+            return;
+        }
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->revokePersonOrgRoles($personUuid, $orgUuid, $securityRoles);
     }
 
     /**
