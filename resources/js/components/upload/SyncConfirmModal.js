@@ -1,5 +1,5 @@
 /**
- * SyncConfirmModal — AORM-9.1.
+ * SyncConfirmModal — AORM-9.1 / AORM-9.29.
  *
  * A @wordpress/components Modal that asks the admin to confirm the sync
  * action before any records are committed to MDP.
@@ -8,19 +8,21 @@
  * of the Ready to Sync panel. Sync cannot be cancelled once started, so
  * the admin must explicitly confirm before proceeding.
  *
- * Intentionally presentational: never talks to the REST API itself.
- * Calls `onConfirm()` when the admin clicks "Proceed", or `onClose()`
- * when they click "Cancel" or the modal's ×.
+ * AORM-9.29: Accepts `isCommitting` (disables both buttons + shows isBusy on
+ * Proceed while the commit POST is in-flight) and `commitError` (renders a
+ * dismissible Notice when the POST returns an error).
  *
  * @param {{
- *   isOpen:    boolean,
- *   onConfirm: function(): void,
- *   onClose:   function(): void,
+ *   isOpen:        boolean,
+ *   onConfirm:     function(): void,
+ *   onClose:       function(): void,
+ *   isCommitting?: boolean,
+ *   commitError?:  string|null,
  * }} props
  */
 
 import { __ } from '@wordpress/i18n';
-import { Button, Modal } from '@wordpress/components';
+import { Button, Modal, Notice } from '@wordpress/components';
 
 // ── Constants (exported for test assertions) ───────────────────────────────────
 
@@ -32,9 +34,11 @@ export const CANCEL_LABEL  = __( 'Cancel',  'wicket-aorm' );
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function SyncConfirmModal( {
-	isOpen    = false,
+	isOpen       = false,
 	onConfirm,
 	onClose,
+	isCommitting = false,
+	commitError  = null,
 } ) {
 	if ( ! isOpen ) {
 		return null;
@@ -50,9 +54,21 @@ export default function SyncConfirmModal( {
 				{ MODAL_MESSAGE }
 			</p>
 
+			{ commitError && (
+				<Notice
+					status="error"
+					isDismissible={ false }
+					className="aorm-sync-confirm-modal__error"
+				>
+					{ commitError }
+				</Notice>
+			) }
+
 			<div className="aorm-sync-confirm-modal__actions">
 				<Button
 					variant="primary"
+					isBusy={ isCommitting }
+					disabled={ isCommitting }
 					onClick={ onConfirm }
 					className="aorm-sync-confirm-modal__proceed"
 				>
@@ -61,6 +77,7 @@ export default function SyncConfirmModal( {
 
 				<Button
 					variant="secondary"
+					disabled={ isCommitting }
 					onClick={ onClose }
 					className="aorm-sync-confirm-modal__cancel"
 				>

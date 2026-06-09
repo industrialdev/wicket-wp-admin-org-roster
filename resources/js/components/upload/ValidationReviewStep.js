@@ -1,5 +1,5 @@
 /**
- * Upload validation review step — AORM-8.2 / AORM-8B.1 / AORM-8B.6.
+ * Upload validation review step — AORM-8.2 / AORM-8B.1 / AORM-8B.6 / AORM-9.29.
  *
  * Fetches the categorised staged records for the active upload session from
  * GET /wicket-aorm/v1/uploads/{sessionId}/staged (built in AORM-8.1) and
@@ -38,6 +38,10 @@
  * actions move records to a different category.
  *
  * Table content within each panel was added in AORM-8.3 – 8.10.
+ *
+ * AORM-9.29: handleSyncConfirmed fires POST /wicket-aorm/v1/uploads/{id}/commit
+ * with the selected IDs, then navigates to the sync-progress step on success.
+ * A commit error is surfaced as a dismissible Notice inside the confirm modal.
  *
  * @param {{
  *   goToStep:       (step: string) => void,
@@ -95,7 +99,7 @@ export const CATEGORY_LABELS = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ValidationReviewStep( { sessionId, selectedFile } ) {
+export default function ValidationReviewStep( { sessionId, selectedFile, goToStep } ) {
 	const [ categories, setCategories ] = useState( null );
 	const [ actionType, setActionType ] = useState( null );
 	const [ isLoading,  setIsLoading  ] = useState( false );
@@ -179,14 +183,45 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 		setSyncConfirmIds( null );
 	}, [] );
 
+	/** Whether the commit POST is in-flight. */
+	const [ isCommitting,   setIsCommitting   ] = useState( false );
+
+	/** Error surfaced in the SyncConfirmModal while committing. */
+	const [ commitError,    setCommitError    ] = useState( null );
+
 	/**
-	 * Admin confirmed the sync. Closes the modal.
-	 * Actual commit logic is added in AORM-9.2+.
+	 * Admin confirmed the sync (AORM-9.29).
+	 * Fires POST /wicket-aorm/v1/uploads/{sessionId}/commit, then
+	 * navigates to sync-progress on success.
 	 */
-	const handleSyncConfirmed = useCallback( () => {
-		setSyncConfirmIds( null );
-		// TODO AORM-9.2: fire POST /wicket-aorm/v1/uploads/{id}/commit
-	}, [] );
+	const handleSyncConfirmed = useCallback( async () => {
+		if ( ! sessionId || isCommitting ) {
+			return;
+		}
+
+		setIsCommitting( true );
+		setCommitError( null );
+
+		const ids = syncConfirmIds ?? 'all';
+
+		try {
+			await apiFetch( {
+				path:   `/wicket-aorm/v1/uploads/${ encodeURIComponent( sessionId ) }/commit`,
+				method: 'POST',
+				data:   { ids },
+			} );
+
+			setSyncConfirmIds( null );
+			goToStep( 'sync-progress' );
+		} catch ( err ) {
+			setCommitError(
+				err?.message ??
+					__( 'Failed to start sync. Please try again.', 'wicket-aorm' )
+			);
+		} finally {
+			setIsCommitting( false );
+		}
+	}, [ sessionId, syncConfirmIds, isCommitting, goToStep ] );
 
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
@@ -233,6 +268,8 @@ export default function ValidationReviewStep( { sessionId, selectedFile } ) {
 					isOpen
 					onConfirm={ handleSyncConfirmed }
 					onClose={ closeSyncConfirmModal }
+					isCommitting={ isCommitting }
+					commitError={ commitError }
 				/>
 			) }
 
