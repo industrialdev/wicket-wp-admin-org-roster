@@ -35,6 +35,9 @@ use WicketAORM\Database\StagedRecordsTable;
  * Milestone coverage:
  *   AORM-9.3  — hook constant, handle() signature, batching, re-dispatch,
  *               per-record processing stub, completion logging
+ *   AORM-9.26 — configurable batch size (wicket_aorm_settings[sync_batch_size],
+ *               default 50); per-row sync_status updates ('synced' on success,
+ *               'failed' + error_details truncated to 255 chars on exception)
  *   AORM-9.4+ — per-record sync logic (processRecord stub filled in by subsequent tickets)
  */
 class SyncJobRunner
