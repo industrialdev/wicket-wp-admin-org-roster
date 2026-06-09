@@ -599,10 +599,10 @@ class SyncService
         }
 
         $settings      = (array) get_option(self::SETTINGS_OPTION, []);
-        $securityRoles = array_values(array_filter(
+        $securityRoles = array_values(array_unique(array_filter(
             array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
             fn (string $r): bool => $r !== '',
-        ));
+        )));
 
         if (empty($securityRoles)) {
             return;
