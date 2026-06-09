@@ -55,7 +55,7 @@
 
 import { useState, useEffect, useCallback } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
-import { Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
+import { Button, Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
 import { ACTION_TYPE_LABELS } from './ReadyToSyncPanel';
@@ -68,6 +68,14 @@ import ReviewMatchModal from './ReviewMatchModal';
 import SyncConfirmModal from './SyncConfirmModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+/**
+ * CSS class for the "Sync All (N)" button.
+ * Exported so tests can assert presence without duplicating the class name.
+ *
+ * @type {string}
+ */
+export const SYNC_ALL_BTN_CLASS = 'aorm-validation-review__sync-all';
 
 /**
  * Fixed display order for the accordion panels.
@@ -181,6 +189,15 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 	 */
 	const closeSyncConfirmModal = useCallback( () => {
 		setSyncConfirmIds( null );
+	}, [] );
+
+	/**
+	 * Sync all ready_to_sync records — opens the confirmation modal with the
+	 * sentinel value 'all' so handleSyncConfirmed sends {ids:'all'} to the
+	 * commit endpoint.
+	 */
+	const handleSyncAll = useCallback( () => {
+		setSyncConfirmIds( 'all' );
 	}, [] );
 
 	/** Whether the commit POST is in-flight. */
@@ -329,6 +346,23 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 						</dd>
 
 					</dl>
+				</div>
+			) }
+
+			{ /* Sync All button — shown when there are ready_to_sync records */ }
+			{ ! isLoading && ! error && ( categories?.ready_to_sync?.count ?? 0 ) > 0 && (
+				<div className="aorm-validation-review__sync-all-wrapper">
+					<Button
+						variant="primary"
+						onClick={ handleSyncAll }
+						className={ SYNC_ALL_BTN_CLASS }
+					>
+						{ sprintf(
+							/* translators: %d: number of records ready to sync */
+							__( 'Sync All Users (%d)', 'wicket-aorm' ),
+							categories.ready_to_sync.count
+						) }
+					</Button>
 				</div>
 			) }
 

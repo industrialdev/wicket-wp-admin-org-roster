@@ -721,6 +721,16 @@
 	border-right: 1px solid #dcdcde;
 }
 
+.aorm-sync-confirm-modal__actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.aorm-validation-review__sync-all-wrapper {
+	margin-bottom: 16px;
+}
+
 /* -----------------------------------------------------------------------
    Sync progress step — AORM-9.29
    ----------------------------------------------------------------------- */
