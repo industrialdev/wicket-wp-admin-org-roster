@@ -880,4 +880,36 @@ class StagedRecordsTable
             'failed_records' => $failedRecords,
         ];
     }
+
+    /**
+     * Return the current roster_status from wp_wicket_aorm_roster_meta for
+     * the given org + membership combination, or null when no row exists.
+     *
+     * Used by Assets.php to detect whether a sync has been dispatched so that
+     * the correct wizard step ('sync-progress') is shown on page reload.
+     *
+     * @param string $orgUuid
+     * @param string $membershipUuid
+     * @return string|null  e.g. 'syncing', 'synced', 'has_failures', or null.
+     */
+    public function getRosterSyncStatus(string $orgUuid, string $membershipUuid): ?string
+    {
+        global $wpdb;
+
+        $metaTable = $wpdb->prefix . 'wicket_aorm_roster_meta';
+
+        $status = $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT roster_status FROM {$metaTable}
+                 WHERE org_uuid = %s
+                   AND membership_uuid = %s
+                 LIMIT 1",
+                $orgUuid,
+                $membershipUuid,
+            ),
+        );
+
+        return is_string($status) ? $status : null;
+    }
 }

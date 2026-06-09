@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\SchedulerService;
 use WicketAORM\Services\SyncJobRunner;
 
@@ -31,6 +32,7 @@ class CommitController extends RestController
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?SchedulerService $schedulerService = null,
+        private readonly ?ActivityLogger $activityLogger = null,
     ) {
     }
 
@@ -117,6 +119,17 @@ class CommitController extends RestController
                 'upload_session_id' => $sessionId,
                 'ids'               => $normalizedIds,
             ],
+        );
+
+        // Mark the roster as syncing immediately so that if the admin navigates
+        // away before the background job starts, the page reload can detect the
+        // in-progress sync and resume at the sync-progress wizard step.
+        // markRosterSyncing() is idempotent, so re-dispatch is safe.
+        $logger = $this->activityLogger ?? new ActivityLogger();
+        $logger->markRosterSyncing(
+            $context['org_uuid'],
+            $context['membership_uuid'],
+            get_current_user_id(),
         );
 
         return new \WP_REST_Response(

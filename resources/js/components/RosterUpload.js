@@ -60,7 +60,10 @@ export const WIZARD_STEPS = [
 /**
  * Derive the initial wizard step from the PHP-injected active session.
  *
- * @param {{ sessionId: string, isComplete: boolean }|null} activeSession
+ * Assets.php resolves the correct step server-side and passes it as
+ * activeSession.step.  The legacy isComplete boolean is no longer used.
+ *
+ * @param {{ sessionId: string, step: string }|null} activeSession
  * @returns {string}
  */
 function initialStep( activeSession ) {
@@ -68,6 +71,12 @@ function initialStep( activeSession ) {
 		return 'landing';
 	}
 
+	// Use the explicit step provided by the server when available.
+	if ( activeSession.step && WIZARD_STEPS.includes( activeSession.step ) ) {
+		return activeSession.step;
+	}
+
+	// Fallback for any cached/older server responses that still use isComplete.
 	return activeSession.isComplete ? 'validation-review' : 'matching-progress';
 }
 

@@ -95,12 +95,13 @@ class Assets
      * parse window.location.search itself or make an extra API call on mount.
      *
      * activeSession shape (null when no session is in progress):
-     *   { sessionId: string, isComplete: bool }
+     *   { sessionId: string, step: string }
      *
      * React reads this to set the wizard's initial step:
-     *   null              → 'landing'
-     *   isComplete=false  → 'matching-progress'
-     *   isComplete=true   → 'validation-review'
+     *   null                        → 'landing'
+     *   step='matching-progress'    → background matching still running
+     *   step='validation-review'    → matching done, no sync dispatched yet
+     *   step='sync-progress'        → sync dispatched or running
      *
      * @param string $hookSuffix
      * @return array<string, mixed>
@@ -143,11 +144,24 @@ class Assets
 
     /**
      * Look up any in-progress upload session for the given roster and return
-     * its status, or null when no session is active.
+     * the wizard step to resume at, or null when no session is active.
+     *
+     * Returned step values:
+     *   'matching-progress' — background matching job is still running
+     *   'validation-review' — matching done; admin hasn't committed a sync yet
+     *   'sync-progress'     — sync has been dispatched or is actively running
+     *
+     * Detection order for sync-progress:
+     *   1. Any staged record already has sync_status = 'synced' or 'failed'
+     *      (background job has processed at least one row).
+     *   2. roster_meta.roster_status = 'syncing' (CommitController writes this
+     *      immediately on dispatch to close the race between job dispatch and
+     *      job start; covers the window where the admin navigates away right
+     *      after clicking "Sync").
      *
      * @param string $orgUuid
      * @param string $membershipUuid
-     * @return array{sessionId: string, isComplete: bool}|null
+     * @return array{sessionId: string, step: string}|null
      */
     private function resolveActiveSession(string $orgUuid, string $membershipUuid): ?array
     {
@@ -162,14 +176,43 @@ class Assets
             return null;
         }
 
-        $progress   = $table->getMatchingProgress($sessionId);
-        $total      = $progress['total'];
-        $processed  = $progress['processed'];
-        $isComplete = $total === 0 || $processed === $total;
+        // Step 1 — is matching still running?
+        $matchingProgress = $table->getMatchingProgress($sessionId);
+        $matchingComplete = $matchingProgress['total'] === 0
+            || $matchingProgress['processed'] === $matchingProgress['total'];
 
+        if (! $matchingComplete) {
+            return [
+                'sessionId' => $sessionId,
+                'step'      => 'matching-progress',
+            ];
+        }
+
+        // Step 2 — has a sync been dispatched or started?
+        $syncProgress = $table->getSyncProgress($sessionId);
+
+        if ($syncProgress['synced'] + $syncProgress['failed'] > 0) {
+            // At least one record was processed by the sync job.
+            return [
+                'sessionId' => $sessionId,
+                'step'      => 'sync-progress',
+            ];
+        }
+
+        $rosterStatus = $table->getRosterSyncStatus($orgUuid, $membershipUuid);
+
+        if ($rosterStatus === 'syncing') {
+            // Job was dispatched but hasn't processed a record yet.
+            return [
+                'sessionId' => $sessionId,
+                'step'      => 'sync-progress',
+            ];
+        }
+
+        // Default — matching is done, no sync in flight.
         return [
-            'sessionId'  => $sessionId,
-            'isComplete' => $isComplete,
+            'sessionId' => $sessionId,
+            'step'      => 'validation-review',
         ];
     }
 
