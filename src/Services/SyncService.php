@@ -114,6 +114,7 @@ class SyncService
      * @see AORM-9.8  — exact_match / already_on_roster: update title
      * @see AORM-9.11 — merging_to_record: update name/title
      * @see AORM-9.12 — merging_to_record: add imported email as primary, demote existing
+     * @see AORM-9.13 — merging_to_record: end other-org relationships, ensure roster-org relationship
      * @see AORM-9.15 — remove_existing: end-date relationship
      */
     public function syncRecord(array $record): void
@@ -313,6 +314,12 @@ class SyncService
      * 2. Adds the imported `email_address` as the merge target's new primary
      *    email and demotes whichever address(es) currently hold the primary
      *    flag, when a non-empty email is present (AORM-9.12).
+     * 3. Ends default-type relationships to other orgs (skipping protected
+     *    relationship types such as admin roles) and ensures a default-type
+     *    relationship exists to the roster org, creating one if missing
+     *    (AORM-9.13). Delegates to the shared
+     *    endOtherOrgRelationshipsAndEnsureRosterRelationship() helper —
+     *    same logic as the exact_match path (AORM-9.9).
      *
      * The person to update is the admin-selected merge target — NOT the first
      * `matched_persons` candidate. It is resolved from the staged record's
@@ -325,7 +332,7 @@ class SyncService
      *
      * @see AORM-9.11 — update first/last name + title from import
      * @see AORM-9.12 — add imported email as primary, demote existing
-     * @see AORM-9.13 — add relationship to roster org, end other-org relationships
+     * @see AORM-9.13 — end other-org relationships, ensure roster-org relationship
      * @see AORM-9.14 — apply config security roles, keep existing
      */
     protected function syncMergingToRecordViaRelationship(array $record): void
@@ -340,6 +347,8 @@ class SyncService
             ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
             : (array) ($record['raw_data'] ?? []);
 
+        $orgUuid = (string) ($record['org_uuid'] ?? '');
+
         // ── AORM-9.11: update first/last name + title from import ─────────
 
         $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
@@ -348,7 +357,11 @@ class SyncService
 
         $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
 
-        // AORM-9.13 and AORM-9.14 — stubs filled in by subsequent tickets.
+        // ── AORM-9.13: end other-org relationships, ensure roster-org one ──
+
+        $this->endOtherOrgRelationshipsAndEnsureRosterRelationship($personUuid, $orgUuid);
+
+        // AORM-9.14 — stub filled in by a subsequent ticket.
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
