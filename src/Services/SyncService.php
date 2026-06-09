@@ -198,14 +198,22 @@ class SyncService
 
         $personService = $this->personService ?? new \WicketORM\Services\PersonService();
 
-        $personUuid = (string) $personService->createOrGetPerson([
-            'given_name'  => (string) ($rawData['first_name'] ?? ''),
-            'family_name' => (string) ($rawData['last_name'] ?? ''),
-            'email'       => (string) ($rawData['email_address'] ?? ''),
-            'phone'       => (string) ($rawData['mobile_phone'] ?? ''),
-            'email_type'  => $emailType,
-            'phone_type'  => $phoneType,
-        ]);
+        $personResult = $personService->createOrGetPerson(
+            (string) ($rawData['first_name'] ?? ''),
+            (string) ($rawData['last_name'] ?? ''),
+            (string) ($rawData['email'] ?? ''),
+            [
+                'phone'      => (string) ($rawData['phone'] ?? ''),
+                'email_type' => $emailType,
+                'phone_type' => $phoneType,
+            ]
+        );
+
+        if (is_wp_error($personResult)) {
+            throw new \Exception($personResult->get_error_message());
+        }
+
+        $personUuid = (string) $personResult;
 
         // ── AORM-9.6: create default-type relationship to roster org ──────
 
@@ -499,7 +507,7 @@ class SyncService
      */
     private function addImportedEmailAsPrimaryIfPresent(string $personUuid, array $rawData): void
     {
-        $email = (string) ($rawData['email_address'] ?? '');
+        $email = (string) ($rawData['email'] ?? '');
 
         if ($email === '') {
             return;
