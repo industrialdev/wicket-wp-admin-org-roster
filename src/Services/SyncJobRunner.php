@@ -111,6 +111,19 @@ class SyncJobRunner
             ? (int) $settings['sync_batch_size']
             : self::DEFAULT_BATCH_SIZE;
 
+        // Resolve session context once — used for logging and meta updates
+        // throughout this invocation (both the syncing marker and completion log).
+        $context        = $table->getSessionContext($uploadSessionId);
+        $orgUuid        = (string) ($context['org_uuid'] ?? '');
+        $membershipUuid = (string) ($context['membership_uuid'] ?? '');
+        $uploadedBy     = (int) ($context['uploaded_by'] ?? 0);
+
+        // Mark roster as 'syncing' before any records are processed.
+        // Idempotent on re-dispatch — safe to call on every batch.
+        if ($orgUuid !== '' && $membershipUuid !== '') {
+            $logger->markRosterSyncing($orgUuid, $membershipUuid, $uploadedBy);
+        }
+
         $records = $table->getPendingSyncRecords($uploadSessionId, $ids, $batchSize);
 
         foreach ($records as $record) {
@@ -124,12 +137,18 @@ class SyncJobRunner
                     'sync_status' => 'synced',
                     'updated_at'  => $now,
                 ]);
+
+                $logger->logSyncRecord($uploadSessionId, $orgUuid, $recordId, 'synced', '', $uploadedBy);
             } catch (\Throwable $e) {
+                $errorDetails = substr($e->getMessage(), 0, 255);
+
                 $table->updateRecord($recordId, [
-                    'sync_status'  => 'failed',
-                    'error_details' => substr($e->getMessage(), 0, 255),
-                    'updated_at'   => $now,
+                    'sync_status'   => 'failed',
+                    'error_details' => $errorDetails,
+                    'updated_at'    => $now,
                 ]);
+
+                $logger->logSyncRecord($uploadSessionId, $orgUuid, $recordId, 'failed', $errorDetails, $uploadedBy);
             }
         }
 
@@ -148,12 +167,17 @@ class SyncJobRunner
         }
 
         // The batch was partial (or empty): all eligible records have been
-        // processed.  Log a sync_complete summary entry.
-        $context    = $table->getSessionContext($uploadSessionId);
-        $orgUuid    = (string) ($context['org_uuid'] ?? '');
-        $membershipUuid = (string) ($context['membership_uuid'] ?? '');
-        $uploadedBy = (int) ($context['uploaded_by'] ?? 0);
+        // processed. Read the full session progress to get accurate totals
+        // across all batches, then write the completion log entry.
+        $progress = $table->getSyncProgress($uploadSessionId);
 
-        $logger->logSyncComplete($uploadSessionId, $orgUuid, $membershipUuid, $uploadedBy);
+        $logger->logSyncComplete(
+            $uploadSessionId,
+            $orgUuid,
+            $membershipUuid,
+            $uploadedBy,
+            $progress['synced'],
+            $progress['failed'],
+        );
     }
 }
