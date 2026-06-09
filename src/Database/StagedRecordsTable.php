@@ -789,4 +789,95 @@ class StagedRecordsTable
             ),
         ) > 0;
     }
+
+    /**
+     * Return sync progress counts and failed record details for a session.
+     *
+     * Only rows whose category is 'ready_to_sync' are considered — records
+     * that an admin has moved to 'discard' or 'manual_update' are excluded
+     * from the sync and must not inflate the counts.
+     *
+     * Returned shape:
+     * [
+     *   'total'          => int,   — total rows eligible for sync
+     *   'synced'         => int,   — rows with sync_status = 'synced'
+     *   'failed'         => int,   — rows with sync_status = 'failed'
+     *   'pending'        => int,   — rows still waiting (sync_status = 'ready_to_sync')
+     *   'failed_records' => [      — one entry per failed row (for retry / error display)
+     *     [
+     *       'id'           => int,
+     *       'error_details' => string,
+     *       'raw_data'     => array,
+     *     ],
+     *     ...
+     *   ],
+     * ]
+     *
+     * Used by SyncStatusController (AORM-9.28) to power the React sync
+     * progress screen (AORM-9.29).
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     * @return array{
+     *   total: int,
+     *   synced: int,
+     *   failed: int,
+     *   pending: int,
+     *   failed_records: list<array{id: int, error_details: string, raw_data: array<string, mixed>}>,
+     * }
+     *
+     * @ticket AORM-9.27
+     */
+    public function getSyncProgress(string $sessionId): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT id, sync_status, error_details, raw_data
+                 FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND category = 'ready_to_sync'
+                 ORDER BY id ASC",
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        $rows = is_array($rows) ? $rows : [];
+
+        $synced        = 0;
+        $failed        = 0;
+        $pending       = 0;
+        $failedRecords = [];
+
+        foreach ($rows as $row) {
+            $status = (string) ($row['sync_status'] ?? '');
+
+            if ($status === 'synced') {
+                $synced++;
+            } elseif ($status === 'failed') {
+                $failed++;
+
+                $failedRecords[] = [
+                    'id'            => (int) $row['id'],
+                    'error_details' => (string) ($row['error_details'] ?? ''),
+                    'raw_data'      => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
+                ];
+            } else {
+                // 'ready_to_sync' or any unrecognised status counts as pending.
+                $pending++;
+            }
+        }
+
+        return [
+            'total'          => count($rows),
+            'synced'         => $synced,
+            'failed'         => $failed,
+            'pending'        => $pending,
+            'failed_records' => $failedRecords,
+        ];
+    }
 }

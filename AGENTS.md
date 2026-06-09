@@ -21,7 +21,7 @@ wicket-admin-org-roster/
 │   ├── Assets.php                 # Enqueue React bundles + WP admin styles
 │   ├── Database/
 │   │   ├── Migrator.php           # Schema create/upgrade on activation
-│   │   └── StagedRecordsTable.php # wp_wicket_orm_staged_records CRUD
+│   │   └── StagedRecordsTable.php # wp_wicket_orm_staged_records CRUD; getSyncProgress($sessionId) returns {total, synced, failed, pending, failed_records[]} scoped to category='ready_to_sync' rows — feeds the AORM-9.28 progress endpoint (AORM-9.27)
 │   ├── Rest/
 │   │   ├── RestController.php          # Base controller (namespace, permissions)
 │   │   ├── RosterController.php        # Roster list/detail endpoints
