@@ -121,6 +121,16 @@ class CommitController extends RestController
             ],
         );
 
+        // Store the committed IDs so the sync-status endpoint can scope its
+        // progress counts to exactly the records being synced in this batch.
+        // 'all' is stored as-is; partial arrays are stored as int[].
+        // Expires after 24 h — long enough for any foreseeable sync job.
+        set_transient(
+            'wicket_aorm_committed_ids_' . $sessionId,
+            $normalizedIds,
+            DAY_IN_SECONDS,
+        );
+
         // Mark the roster as syncing immediately so that if the admin navigates
         // away before the background job starts, the page reload can detect the
         // in-progress sync and resume at the sync-progress wizard step.

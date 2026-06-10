@@ -827,11 +827,22 @@ class StagedRecordsTable
      *
      * @ticket AORM-9.27
      */
-    public function getSyncProgress(string $sessionId): array
+    public function getSyncProgress(string $sessionId, string|array $ids = 'all'): array
     {
         global $wpdb;
 
         $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        // When specific IDs were committed, scope the query to only those rows
+        // so the total / pending counts reflect the current sync batch rather
+        // than every ready_to_sync record in the session.
+        $idClause = '';
+
+        if (is_array($ids) && ! empty($ids)) {
+            $sanitized = implode(', ', array_map('absint', $ids));
+            // $sanitized contains only comma-separated integers — safe to interpolate.
+            $idClause = "AND id IN ({$sanitized})";
+        }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -840,6 +851,7 @@ class StagedRecordsTable
                  FROM {$table}
                  WHERE upload_session_id = %s
                    AND category = 'ready_to_sync'
+                   {$idClause}
                  ORDER BY id ASC",
                 $sessionId,
             ),

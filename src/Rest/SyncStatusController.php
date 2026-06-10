@@ -105,7 +105,13 @@ class SyncStatusController extends RestController
             );
         }
 
-        $progress = $table->getSyncProgress($sessionId);
+        // Retrieve the committed IDs stored by CommitController so progress
+        // counts are scoped to the current batch.  false = transient absent
+        // (e.g. expired or legacy session) → fall back to counting all rows.
+        $committedIds = get_transient('wicket_aorm_committed_ids_' . $sessionId);
+        $idsFilter    = ($committedIds !== false) ? $committedIds : 'all';
+
+        $progress = $table->getSyncProgress($sessionId, $idsFilter);
         $total    = $progress['total'];
         $synced   = $progress['synced'];
         $failed   = $progress['failed'];
