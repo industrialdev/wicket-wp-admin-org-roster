@@ -137,7 +137,7 @@ Audit trail of activities related to the roster. Read-only. Each entry includes:
 
 As an admin, I can add a single member to the roster using a form.
 
-The form is on the Roster Upload tab with fields: first_name, last_name, email (required), mobile_phone, title (optional).
+The form is on the Roster Upload tab with fields: first_name, last_name, email (required), phone, title (optional).
 
 Upon submission, the record goes through the **same validation and MDP matching pipeline as CSV uploads** — there is no instant MDP sync. The record is validated, matched against the MDP, categorized, and appears in the validation view.
 
@@ -168,7 +168,7 @@ Validates submitted import data before duplicate detection. Each row is checked 
 
 **CSV template columns:**
 - Required: first_name, last_name, email
-- Optional: mobile_phone, title
+- Optional: phone, title
 
 **Validation rules:**
 
@@ -229,7 +229,7 @@ Records safe to sync, either through validation or admin action.
 
 **Two tables:**
 
-1. **Records being added** — columns: first_name, last_name, email, title, mobile_phone, Status. Per-row actions: Discard (all), See Details (Merging to Record — opens modal), View in MDP (Exact Match, Already on Roster). Bulk actions: Sync to MDP, Discard.
+1. **Records being added** — columns: first_name, last_name, email, title, phone, Status. Per-row actions: Discard (all), See Details (Merging to Record — opens modal), View in MDP (Exact Match, Already on Roster). Bulk actions: Sync to MDP, Discard.
 
 2. **Records being removed** — only shown in Replace mode. Lists current roster members not in the upload. All rows have status "Remove Existing Record". Per-row actions: View in MDP, Discard Removal (keeps person on roster).
 
