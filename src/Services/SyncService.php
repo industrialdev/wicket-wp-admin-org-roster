@@ -169,7 +169,8 @@ class SyncService
      *    using the email and phone types configured in wicket_aorm_settings (AORM-9.5).
      * 2. Creates (or confirms existence of) a default-type person-to-org relationship
      *    via ConnectionService::ensurePersonConnection() (AORM-9.6). The relationship
-     *    type is read from OrgManConfig::get()['relationships']['type']; start date and
+     *    type defaults are resolved internally by ConnectionService via
+     *    RelationshipHelper::get_default_relationship_type(); start date and
      *    idempotency are handled by the service — do not reimplement.
      * 3. Applies the user role (from OrgManConfig::get()['roles']['user']) and any
      *    configured security roles (from wicket_aorm_settings[security_roles]) to the
@@ -218,11 +219,9 @@ class SyncService
         // ── AORM-9.6: create default-type relationship to roster org ──────
 
         $orgUuid           = (string) ($record['org_uuid'] ?? '');
-        $orgManConfig      = \WicketORM\Config\OrgManConfig::get();
-        $relationshipType  = (string) ($orgManConfig['relationships']['type'] ?? '');
 
         $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
-        $connectionService->ensurePersonConnection($personUuid, $orgUuid, ['type' => $relationshipType]);
+        $connectionService->ensurePersonConnection($personUuid, $orgUuid);
 
         // ── AORM-9.7: apply user role + config security roles ─────────────
 
@@ -658,8 +657,7 @@ class SyncService
             $connectionService->endActivePersonOrganizationConnections($personUuid, $otherOrgUuid, $skipTypes);
         }
 
-        $relationshipType = (string) ($orgManConfig['relationships']['type'] ?? '');
-        $connectionService->ensurePersonConnection($personUuid, $rosterOrgUuid, ['type' => $relationshipType]);
+        $connectionService->ensurePersonConnection($personUuid, $rosterOrgUuid);
     }
 
     /**
