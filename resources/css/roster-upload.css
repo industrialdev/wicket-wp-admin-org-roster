@@ -727,6 +727,67 @@
 	margin-top: 16px;
 }
 
+/* -----------------------------------------------------------------------
+   Matching progress step — AORM-7.13
+   ----------------------------------------------------------------------- */
+
+.aorm-matching-progress__heading {
+	margin-top: 0;
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.aorm-matching-progress__description {
+	color: #646970;
+	margin-bottom: 20px;
+}
+
+.aorm-matching-progress__body {
+	margin-top: 16px;
+}
+
+.aorm-matching-progress__spinner-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.aorm-matching-progress__complete-icon {
+	font-size: 20px;
+	color: #00a32a;
+	line-height: 1;
+}
+
+.aorm-matching-progress__status-text {
+	margin: 0;
+	font-style: italic;
+	color: #646970;
+}
+
+.aorm-matching-progress__bar-track {
+	width: 100%;
+	max-width: 480px;
+	height: 12px;
+	background: #dcdcde;
+	border-radius: 6px;
+	overflow: hidden;
+	margin-bottom: 10px;
+}
+
+.aorm-matching-progress__bar-fill {
+	height: 100%;
+	background: #007cba;
+	border-radius: 6px;
+	transition: width 0.4s ease;
+}
+
+.aorm-matching-progress__percentage {
+	color: #646970;
+	font-size: 13px;
+	margin: 0;
+}
+
 .aorm-validation-review__sync-all-wrapper {
 	margin-bottom: 16px;
 }
@@ -765,7 +826,7 @@
 	color: #646970;
 }
 
-/* Progress bar — mirrors .aorm-matching-progress__bar-track */
+/* Progress bar */
 .aorm-sync-progress__bar-track {
 	width: 100%;
 	max-width: 480px;
