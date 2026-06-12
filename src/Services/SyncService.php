@@ -523,9 +523,9 @@ class SyncService
      * Ensure the user role + configured security roles are applied to a person,
      * scoped to the roster org.
      *
-     * User role: OrgManConfig::get()['roles']['user'] — the default role
-     * assigned to a person when they are added to the roster org (e.g. a
-     * basic "org_member" role). May be an empty string when unconfigured.
+     * Base member role: OrgManConfig::get()['member_management']['addition']['base_member_role']
+     * — the default role assigned to a person when they are added to the roster
+     * org (e.g. 'member'). May be an empty string when unconfigured.
      *
      * Config security roles: wicket_aorm_settings[security_roles] — an array
      * of additional role slugs configured in the AORM Settings page (e.g.
@@ -556,7 +556,7 @@ class SyncService
         $settings     = (array) get_option(self::SETTINGS_OPTION, []);
         $orgManConfig = \WicketORM\Config\OrgManConfig::get();
 
-        $userRole      = (string) ($orgManConfig['roles']['user'] ?? '');
+        $userRole      = (string) ($orgManConfig['member_management']['addition']['base_member_role'] ?? '');
         $securityRoles = array_values(array_filter(
             array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
             fn (string $r): bool => $r !== '',
