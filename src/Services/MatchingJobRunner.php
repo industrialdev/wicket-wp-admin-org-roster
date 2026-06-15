@@ -51,15 +51,16 @@ class MatchingJobRunner
     /**
      * WordPress option key for plugin settings.
      *
-     * The 'matching_batch_size' key within this option controls how many
-     * staged records are processed per job invocation (AORM-7.10).
+     * The 'sync_batch_size' key within this option controls how many
+     * staged records are processed per job invocation (AORM-7.10, AORM-11.12).
+     * Shared with SyncJobRunner — one batch size setting covers all background jobs.
      */
     private const SETTINGS_OPTION = 'wicket_aorm_settings';
 
     /**
      * Default number of staged records processed per job invocation.
      *
-     * Overridden by wicket_aorm_settings[matching_batch_size] (AORM-7.10).
+     * Overridden by wicket_aorm_settings[sync_batch_size] (AORM-11.12).
      */
     public const DEFAULT_BATCH_SIZE = 50;
 
@@ -96,7 +97,7 @@ class MatchingJobRunner
      * Already-on-roster check (AORM-7.8): the top candidate's UUID is checked
      * against the roster via MdpClient::isPersonOnRoster(); when true the record
      * gets category=ready_to_sync and record_status=already_on_roster.
-     * Batch scheduling / re-dispatch (AORM-7.10): reads matching_batch_size from
+     * Batch scheduling / re-dispatch (AORM-7.10, AORM-11.12): reads sync_batch_size from
      * wicket_aorm_settings (default 50). After processing the batch, if the batch
      * was full the job re-dispatches itself so the next batch is processed in a
      * subsequent Action Scheduler / WP-Cron invocation.  Each processed record
@@ -117,10 +118,11 @@ class MatchingJobRunner
         $scheduler = $this->schedulerService ?? new SchedulerService();
         $logger    = $this->activityLogger ?? new ActivityLogger();
 
-        // AORM-7.10: Read configurable batch size (default 50).
+        // AORM-7.10 / AORM-11.12: Read configurable batch size (default 50).
+        // Uses the shared sync_batch_size setting (registered in SettingsPage Section 7).
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
-        $batchSize = isset($settings['matching_batch_size']) && (int) $settings['matching_batch_size'] > 0
-            ? (int) $settings['matching_batch_size']
+        $batchSize = isset($settings['sync_batch_size']) && (int) $settings['sync_batch_size'] > 0
+            ? (int) $settings['sync_batch_size']
             : self::DEFAULT_BATCH_SIZE;
 
         $records = $table->getPendingMatchingRecords($uploadSessionId, $batchSize);

@@ -334,13 +334,30 @@ class MenuPage
     /**
      * Render the Settings page (classic PHP admin page).
      *
-     * TODO: implement settings fields (debug mode toggle, etc.).
+     * Uses the WordPress Settings API — settings_fields() outputs the hidden
+     * option-page nonce/action fields, and do_settings_sections() renders any
+     * sections/fields registered via add_settings_section() / add_settings_field()
+     * for this page slug (added in AORM-11.3+).
+     *
+     * @see AORM-11.2
      */
     public function renderSettingsPage(): void
     {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'wicket-aorm'));
+        }
+
         echo '<div class="wrap">';
         echo '<h1>' . esc_html__('Roster Settings', 'wicket-aorm') . '</h1>';
-        echo '<p>' . esc_html__('Settings coming soon.', 'wicket-aorm') . '</p>';
+
+        settings_errors(SettingsPage::OPTION_NAME);
+
+        echo '<form method="post" action="options.php">';
+        settings_fields(SettingsPage::OPTION_GROUP);
+        do_settings_sections(SettingsPage::PAGE_SLUG);
+        submit_button();
+        echo '</form>';
+
         echo '</div>';
     }
 

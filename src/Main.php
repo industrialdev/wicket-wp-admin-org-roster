@@ -35,6 +35,9 @@ final class Main
         // Admin menu pages.
         add_action('admin_menu', [$this, 'registerAdminMenus']);
 
+        // AORM-11.2: Register AORM settings via the WordPress Settings API.
+        add_action('admin_init', [$this, 'registerSettings']);
+
         // REST API routes.
         add_action('rest_api_init', [$this, 'registerRestRoutes']);
 
@@ -56,6 +59,19 @@ final class Main
             10,
             2,
         );
+    }
+
+    /**
+     * Register AORM settings and settings sections/fields via the WordPress Settings API.
+     *
+     * @see AORM-11.2
+     * @see AORM-11.3
+     */
+    public function registerSettings(): void
+    {
+        $settingsPage = new Admin\SettingsPage();
+        $settingsPage->registerSettings();
+        $settingsPage->registerSections();
     }
 
     /**

@@ -1476,6 +1476,111 @@ class MdpClient
     }
 
     /**
+     * Fetch the list of available email address types from the MDP.
+     *
+     * Attempts to read enum values from the MDP schema definitions endpoint.
+     * Falls back to the well-known Wicket email types when the MDP client is
+     * unavailable, the endpoint does not exist, or the response is malformed.
+     *
+     * Returns a map of {slug => display_label} suitable for rendering a
+     * <select> on the settings page.
+     *
+     * @return array<string, string>  Map of slug → display label.
+     *
+     * @see AORM-11.7
+     */
+    public function getEmailTypes(): array
+    {
+        // Well-known Wicket MDP email types — used as the fallback when the
+        // API is unreachable or returns an unexpected response format.
+        $defaults = [
+            'work'     => __('Work', 'wicket-aorm'),
+            'home'     => __('Home', 'wicket-aorm'),
+            'personal' => __('Personal', 'wicket-aorm'),
+        ];
+
+        if (! function_exists('wicket_get_resource_types')) {
+            return $defaults;
+        }
+
+        try {
+            $response = wicket_get_resource_types('emails');
+
+            if (! is_array($response) || empty($response['data'])) {
+                return $defaults;
+            }
+
+            $types = [];
+
+            foreach ($response['data'] as $item) {
+                $slug  = (string) ($item['attributes']['slug'] ?? '');
+                $label = (string) ($item['attributes']['name'] ?? '');
+
+                if ($slug === '') {
+                    continue;
+                }
+
+                $types[$slug] = $label !== '' ? $label : ucfirst($slug);
+            }
+
+            return ! empty($types) ? $types : $defaults;
+        } catch (\Exception $e) {
+            return $defaults;
+        }
+    }
+
+    /**
+     * Fetch available phone number types from the MDP schema definitions endpoint.
+     *
+     * Queries `schema_definitions?filter[resource_type_eq]=phones&filter[field_name_eq]=phone_type`
+     * and returns a slug → label map. Falls back to the well-known set
+     * (work / home / mobile) when the MDP is unavailable or returns no data.
+     *
+     * @return array<string, string> Map of slug → human-readable label.
+     *
+     * @see AORM-11.8
+     */
+    public function getPhoneTypes(): array
+    {
+        // Well-known Wicket MDP phone types — used as the fallback when the
+        // API is unreachable or returns an unexpected response format.
+        $defaults = [
+            'work'   => __('Work', 'wicket-aorm'),
+            'home'   => __('Home', 'wicket-aorm'),
+            'mobile' => __('Mobile', 'wicket-aorm'),
+        ];
+
+        if (! function_exists('wicket_get_resource_types')) {
+            return $defaults;
+        }
+
+        try {
+            $response = wicket_get_resource_types('phones');
+
+            if (! is_array($response) || empty($response['data'])) {
+                return $defaults;
+            }
+
+            $types = [];
+
+            foreach ($response['data'] as $item) {
+                $slug  = (string) ($item['attributes']['slug'] ?? '');
+                $label = (string) ($item['attributes']['name'] ?? '');
+
+                if ($slug === '') {
+                    continue;
+                }
+
+                $types[$slug] = $label !== '' ? $label : ucfirst($slug);
+            }
+
+            return ! empty($types) ? $types : $defaults;
+        } catch (\Exception $e) {
+            return $defaults;
+        }
+    }
+
+    /**
      * Read the configured security role slugs from plugin settings.
      *
      * Admins configure these in the AORM Settings page under
