@@ -11,13 +11,17 @@
  *
  *   Per-row action (Actions extra column):
  *     Reinstate — PATCH /wicket-aorm/v1/staged-records/{id} with
- *                 {category: 'ready_to_sync'}. Moves the record back into
- *                 the Ready to Sync bucket so it can be synced to MDP.
+ *                 {category: <record's own previous_category>}. Moves the
+ *                 record back into the bucket it was discarded from
+ *                 (possible_match, probable_match, manual_update, or
+ *                 ready_to_sync), falling back to ready_to_sync only when
+ *                 previous_category is missing. See getReinstateTargetCategory().
  *
  *   Bulk action (shown when one or more rows are selected):
- *     Reinstate — calls handleBulkReinstate; PATCHes all selected IDs to
- *                 ready_to_sync in parallel via Promise.allSettled; partial
- *                 failures narrow the selection to failed IDs and show a Notice.
+ *     Reinstate — calls handleBulkReinstate; PATCHes each selected ID to its
+ *                 own previous_category in parallel via Promise.allSettled;
+ *                 partial failures narrow the selection to failed IDs and
+ *                 show a Notice.
  *
  * Both per-row and bulk actions call onRecordCategorized?() on full success
  * to let ValidationReviewStep re-fetch the accordion data and update counts.
@@ -53,12 +57,27 @@ export const DISCARD_STATUS = 'discard';
 export const PREVIOUS_CATEGORY_COLUMN_LABEL = __( 'Previous Category', 'wicket-aorm' );
 
 /**
- * Target category when a discarded record is reinstated (AORM-8B.7).
- * Exported for test assertions.
+ * Fallback target category when a discarded record is reinstated but has no
+ * recorded previous_category (e.g. legacy rows). Exported for test assertions.
  *
  * @type {string}
  */
 export const REINSTATE_CATEGORY = 'ready_to_sync';
+
+/**
+ * Resolve the category a discarded record should move to when reinstated.
+ *
+ * Restores the record to the bucket it was discarded from (its own
+ * previous_category — possible_match, probable_match, manual_update, or
+ * ready_to_sync) rather than always dropping it into Ready to Sync. Falls
+ * back to REINSTATE_CATEGORY when previous_category is missing or empty.
+ *
+ * @param {Object} record
+ * @return {string} The category to PATCH the record to on reinstate.
+ */
+function getReinstateTargetCategory( record ) {
+	return record?.previous_category || REINSTATE_CATEGORY;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -75,18 +94,20 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	/**
-	 * PATCH a single record to REINSTATE_CATEGORY (ready_to_sync).
+	 * PATCH a single record back to its own previous_category.
 	 *
-	 * @param {number} recordId
+	 * @param {Object} record
 	 */
-	function handleReinstate( recordId ) {
+	function handleReinstate( record ) {
+		const recordId = record.id;
+
 		setReinstatingIds( ( prev ) => new Set( [ ...prev, recordId ] ) );
 		setActionError( null );
 
 		apiFetch( {
 			path:   `/wicket-aorm/v1/staged-records/${ recordId }`,
 			method: 'PATCH',
-			data:   { category: REINSTATE_CATEGORY },
+			data:   { category: getReinstateTargetCategory( record ) },
 		} )
 			.then( () => {
 				setReinstatingIds( ( prev ) => {
@@ -112,7 +133,8 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 	}
 
 	/**
-	 * PATCH all selected records to REINSTATE_CATEGORY in parallel.
+	 * PATCH all selected records back to their own previous_category, in
+	 * parallel.
 	 *
 	 * Uses Promise.allSettled so a partial failure does not abort the rest.
 	 * On partial failure: surfaced via bulkActionError; selection narrows to
@@ -126,13 +148,15 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 		setBulkActionError( null );
 
 		Promise.allSettled(
-			ids.map( ( id ) =>
-				apiFetch( {
+			ids.map( ( id ) => {
+				const record = records.find( ( r ) => r.id === id );
+
+				return apiFetch( {
 					path:   `/wicket-aorm/v1/staged-records/${ id }`,
 					method: 'PATCH',
-					data:   { category: REINSTATE_CATEGORY },
-				} )
-			)
+					data:   { category: getReinstateTargetCategory( record ) },
+				} );
+			} )
 		).then( ( results ) => {
 			setIsBulkReinstating( false );
 
@@ -180,12 +204,12 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 
 			return (
 				<div className="aorm-discard-row-actions">
-					{ /* Reinstate — move back to ready_to_sync */ }
+					{ /* Reinstate — move back to the record's previous category */ }
 					<Button
 						variant="secondary"
 						isBusy={ isReinstating }
 						disabled={ isReinstating }
-						onClick={ () => handleReinstate( record.id ) }
+						onClick={ () => handleReinstate( record ) }
 						className="aorm-discard-row-actions__reinstate"
 						aria-label={ sprintf(
 							/* translators: %s: person first name or record id */
