@@ -312,6 +312,12 @@ class MatchingJobRunner
      *
      * Email comparison is case-insensitive (both sides lowercased).
      *
+     * first_name/last_name are populated from the roster member's MDP
+     * given_name/family_name attributes (surfaced via
+     * MdpClient::getAllRosterMembers() → normalizeRosterMembers()) so the
+     * synthetic removal row renders a name in the "Records being removed"
+     * UI table, consistent with rows sourced from the uploaded file.
+     *
      * @param string             $uploadSessionId Upload session UUID.
      * @param StagedRecordsTable $table           DB table accessor.
      * @param MdpClient          $client          MDP API client.
@@ -363,10 +369,9 @@ class MatchingJobRunner
                 'membership_uuid'    => $membershipUuid,
                 'raw_data'           => (string) json_encode([
                     'person_uuid' => (string) ($member['person_uuid'] ?? ''),
-                    'first_name'  => '',
-                    'last_name'   => '',
+                    'first_name'  => (string) ($member['given_name'] ?? ''),
+                    'last_name'   => (string) ($member['family_name'] ?? ''),
                     'email'       => (string) ($member['email'] ?? ''),
-                    'name'        => (string) ($member['name'] ?? ''),
                 ]),
                 'validation_status'  => 'valid',
                 'validation_message' => null,

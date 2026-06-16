@@ -175,6 +175,8 @@ class MdpClient
      *   members: list<array{
      *     person_uuid: string,
      *     name: string,
+     *     given_name: string,
+     *     family_name: string,
      *     email: string,
      *     title: string,
      *     phone: string,
@@ -931,7 +933,7 @@ class MdpClient
      *
      * @param string $orgUuid        Organisation UUID.
      * @param string $membershipUuid Org-membership UUID.
-     * @return list<array{person_uuid: string, email: string, name: string, title: string, phone: string, roles: list<string>, is_owner: bool}>
+     * @return list<array{person_uuid: string, email: string, name: string, given_name: string, family_name: string, title: string, phone: string, roles: list<string>, is_owner: bool}>
      */
     public function getAllRosterMembers(string $orgUuid, string $membershipUuid): array
     {
@@ -1624,6 +1626,8 @@ class MdpClient
      *   members: list<array{
      *     person_uuid: string,
      *     name: string,
+     *     given_name: string,
+     *     family_name: string,
      *     email: string,
      *     title: string,
      *     phone: string,
@@ -1681,6 +1685,8 @@ class MdpClient
             $members[] = [
                 'person_uuid'                => $personRelId,
                 'name'                       => (string) ($personAttrs['full_name'] ?? ''),
+                'given_name'                 => (string) ($personAttrs['given_name'] ?? ''),
+                'family_name'                => (string) ($personAttrs['family_name'] ?? ''),
                 'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
                 'title'                      => (string) ($personAttrs['job_title'] ?? ''),
                 'phone'                      => '', // TODO: clarify MDP phone endpoint — left empty for now
