@@ -522,6 +522,17 @@
 	color: inherit;
 }
 
+/**
+ * First/last name spans inside the Name cell (AORM-8B.14 follow-up). Each
+ * part is highlighted independently, so a small inline tint + radius keeps
+ * a matching word visually distinct without colouring the whole cell.
+ */
+.aorm-matches-table__name-part.aorm-matches-table__cell--match {
+	display: inline-block;
+	border-radius: 2px;
+	padding: 0 3px;
+}
+
 .aorm-ready-to-sync-panel__cross-org-warning {
 	margin-bottom: 16px;
 }

@@ -6,13 +6,18 @@
  * modal (AORM-8B.10).
  *
  * AORM-8B.14: match-field highlighting. When rawData (the imported record's
- * raw_data object) is provided, cells whose value matches the corresponding
- * imported field receive the HIGHLIGHT_CLASS CSS class. Compared fields:
- *   - Name  — imported first_name+last_name vs match full_name
- *   - Email — imported email vs match primary_email
- *   - Phone — imported phone vs match primary_phone
- *   - Title — imported title vs match title
- * Comparison is case-insensitive and whitespace-normalised.
+ * raw_data object) is provided, cells/spans whose value matches the
+ * corresponding imported field receive the HIGHLIGHT_CLASS CSS class.
+ * Compared fields:
+ *   - First name — imported first_name vs match given_name  (highlighted independently)
+ *   - Last name  — imported last_name vs match family_name  (highlighted independently)
+ *   - Email      — imported email vs match primary_email
+ *   - Phone      — imported phone vs match primary_phone
+ *   - Title      — imported title vs match title
+ * Comparison is case-insensitive and whitespace-normalised. First and last
+ * name are compared and highlighted separately so a partial match (e.g. only
+ * the last name lines up) is still visible — the Name cell no longer requires
+ * both parts to match before showing any highlight.
  *
  * Endpoint: GET /wicket-aorm/v1/staged/{id}/matches
  *
@@ -102,12 +107,22 @@ export const COL_LABEL_MEMBERSHIP_STATUS = __( 'Membership Status', 'wicket-aorm
 export const COL_LABEL_MDP_LINK = __( 'MDP', 'wicket-aorm' );
 
 /**
- * CSS class applied to a table cell whose value matches the corresponding
- * imported record field (AORM-8B.14).
+ * CSS class applied to a table cell (or, for the Name column, an individual
+ * first/last name span) whose value matches the corresponding imported
+ * record field (AORM-8B.14).
  *
  * @type {string}
  */
 export const HIGHLIGHT_CLASS = 'aorm-matches-table__cell--match';
+
+/**
+ * CSS class applied to each first/last name span inside the Name cell, so
+ * the highlight (HIGHLIGHT_CLASS) can be scoped to just the part that
+ * matched rather than the whole name.
+ *
+ * @type {string}
+ */
+export const NAME_PART_CLASS = 'aorm-matches-table__name-part';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -258,6 +273,10 @@ export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded 
  *
  * AORM-8B.14: When rawData is provided, cells are highlighted with
  * HIGHLIGHT_CLASS wherever the candidate's value matches the imported field.
+ * First and last name are compared independently (given_name vs first_name,
+ * family_name vs last_name) so each name part highlights on its own —
+ * matching only the last name (for example) still highlights that part even
+ * though the first name differs.
  *
  * @param {{ match: Object, rawData: Object }} props
  */
@@ -267,11 +286,6 @@ function MatchRow( { match, rawData = {} } ) {
 		.join( ', ' );
 
 	// ── AORM-8B.14: field highlight helpers ───────────────────────────────────
-
-	/** Imported full name derived from raw_data (mirrors ImportedRecordSummary). */
-	const importedFullName = normalizeForCompare(
-		[ rawData.first_name, rawData.last_name ].filter( Boolean ).join( ' ' )
-	);
 
 	/**
 	 * Returns HIGHLIGHT_CLASS when the candidate value matches the imported
@@ -292,7 +306,16 @@ function MatchRow( { match, rawData = {} } ) {
 			: '';
 	}
 
-	const nameHighlight  = highlightClass( importedFullName, match.full_name );
+	// First/last name are compared and highlighted independently — a match on
+	// just one part no longer requires the other part to match too.
+	const firstNameHighlight = highlightClass(
+		normalizeForCompare( rawData.first_name ),
+		match.given_name
+	);
+	const lastNameHighlight = highlightClass(
+		normalizeForCompare( rawData.last_name ),
+		match.family_name
+	);
 	const emailHighlight = highlightClass(
 		normalizeForCompare( rawData.email ),
 		match.primary_email
@@ -306,12 +329,29 @@ function MatchRow( { match, rawData = {} } ) {
 		match.title
 	);
 
+	// Render given/family name as separate spans (each independently
+	// highlightable) when either part is available; fall back to the plain
+	// full_name string when neither part is present (no highlighting possible).
+	const hasNameParts = Boolean( match.given_name ) || Boolean( match.family_name );
+
 	return (
 		<tr className="aorm-matches-table__row">
 
-			<td className={ `aorm-matches-table__cell aorm-matches-table__cell--name ${ nameHighlight }`.trim() }>
+			<td className="aorm-matches-table__cell aorm-matches-table__cell--name">
 				<span className="aorm-matches-table__full-name">
-					{ match.full_name || '—' }
+					{ hasNameParts ? (
+						<>
+							<span className={ `${ NAME_PART_CLASS } ${ firstNameHighlight }`.trim() }>
+								{ match.given_name || '' }
+							</span>
+							{ match.given_name && match.family_name ? ' ' : '' }
+							<span className={ `${ NAME_PART_CLASS } ${ lastNameHighlight }`.trim() }>
+								{ match.family_name || '' }
+							</span>
+						</>
+					) : (
+						match.full_name || '—'
+					) }
 				</span>
 				{ match.uuid && (
 					<span className="aorm-matches-table__uuid">
