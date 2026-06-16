@@ -526,6 +526,11 @@
 	margin-bottom: 16px;
 }
 
+/** Space the "Records being removed" section away from the table above it. */
+.aorm-ready-to-sync-panel__section--removed {
+	margin-top: 24px;
+}
+
 .aorm-matches-table__uuid {
 	display: block;
 	font-size: 9px;
