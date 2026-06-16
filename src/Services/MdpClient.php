@@ -163,6 +163,12 @@ class MdpClient
      * title, phone number, and role names (available directly as
      * `person.attributes.role_names`) are all resolved in a single request.
      *
+     * Scoped to currently-active person_memberships via `filter[active_at]=now`
+     * — the same Ransack predicate used for this endpoint elsewhere in the
+     * Wicket ecosystem (e.g. MembershipRosterReader/MembershipService in
+     * wicket-wp-organization-roster) — so inactive/ended roster rows are
+     * excluded from both paginated listing and getAllRosterMembers().
+     *
      * Returns an empty result structure when `wicket_api_client()` is
      * unavailable or the request throws, so callers never need to handle null.
      *
@@ -199,6 +205,9 @@ class MdpClient
         $queryParams = [
             'include' => 'person,membership,organization_membership',
             'sort'    => 'person_family_name',
+            'filter'  => [
+                'active_at' => 'now',
+            ],
             'page'    => [
                 'size'   => max(1, (int) ($args['per_page'] ?? 10)),
                 'number' => max(1, (int) ($args['page'] ?? 1)),

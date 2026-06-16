@@ -380,7 +380,11 @@ class MatchingJobRunner
                 'match_count'        => 0,
                 'matched_persons'    => null,
                 'match_details'      => null,
-                'sync_status'        => 'pending',
+                // Must match the 'ready_to_sync' value set for regular records
+                // once matching completes (see updateRecord() above) — otherwise
+                // getPendingSyncRecords()/getSyncProgress() never pick these rows
+                // up and the sync job + UI progress poll stall indefinitely.
+                'sync_status'        => 'ready_to_sync',
                 'uploaded_by'        => $uploadedBy,
                 'created_at'         => $now,
                 'updated_at'         => $now,
