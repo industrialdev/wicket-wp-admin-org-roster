@@ -663,7 +663,7 @@ class StagedRecordsTable
         $rows = $wpdb->get_results(
             $wpdb->prepare(
                 // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-                "SELECT id, record_status, sync_status, raw_data, previous_category, matched_persons
+                "SELECT id, record_status, sync_status, raw_data, previous_category, matched_persons, org_uuid
                  FROM {$table}
                  WHERE upload_session_id = %s
                    AND validation_status = 'valid'
@@ -699,6 +699,7 @@ class StagedRecordsTable
                 'raw_data'          => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
                 'previous_category' => $prevCat,
                 'matched_persons'   => $matchedPersons,
+                'org_uuid'          => (string) ($row['org_uuid'] ?? ''),
             ];
         }
 
