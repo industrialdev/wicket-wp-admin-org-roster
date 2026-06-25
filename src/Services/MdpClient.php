@@ -514,7 +514,15 @@ class MdpClient
             ],
         ];
 
-        $client->patch('people/' . $personUuid, ['json' => $payload]);
+        try {
+            $this->callWithRetry(fn () => $client->patch('people/' . $personUuid, ['json' => $payload]));
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP person title update failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
     }
 
     /**
@@ -579,7 +587,15 @@ class MdpClient
             ],
         ];
 
-        $client->patch('people/' . $personUuid, ['json' => $payload]);
+        try {
+            $this->callWithRetry(fn () => $client->patch('people/' . $personUuid, ['json' => $payload]));
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP person update failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
     }
 
     /**
@@ -664,7 +680,15 @@ class MdpClient
             ],
         ];
 
-        $client->post('people/' . $personUuid . '/emails', ['json' => $payload]);
+        try {
+            $this->callWithRetry(fn () => $client->post('people/' . $personUuid . '/emails', ['json' => $payload]));
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP email add failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
 
         // Demote any other email(s) currently flagged primary.
         foreach ($existingEmails as $email) {
@@ -682,7 +706,17 @@ class MdpClient
                 ],
             ];
 
-            $client->patch('emails/' . $email['id'], ['json' => $demotePayload]);
+            $emailId = $email['id'];
+
+            try {
+                $this->callWithRetry(fn () => $client->patch('emails/' . $emailId, ['json' => $demotePayload]));
+            } catch (\Exception $e) {
+                throw new \RuntimeException(
+                    'MDP email demote failed: ' . $e->getMessage(),
+                    0,
+                    $e,
+                );
+            }
         }
     }
 
@@ -707,7 +741,7 @@ class MdpClient
         $query = http_build_query(['include' => 'emails']);
 
         try {
-            $response = $client->get('people/' . $personUuid . '?' . $query);
+            $response = $this->callWithRetry(fn () => $client->get('people/' . $personUuid . '?' . $query));
         } catch (\Exception $e) {
             return [];
         }
@@ -781,7 +815,15 @@ class MdpClient
             return;
         }
 
-        $this->addPersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+        try {
+            $this->addPersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP role assignment failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
     }
 
     /**
@@ -815,7 +857,15 @@ class MdpClient
             return;
         }
 
-        $this->removePersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+        try {
+            $this->removePersonOrgRoles($client, $orgUuid, $personUuid, $roleSlugs);
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP role revocation failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
     }
 
     /**
@@ -858,7 +908,7 @@ class MdpClient
                 ],
             ];
 
-            $client->post('people/' . $personUuid . '/roles', ['json' => $payload]);
+            $this->callWithRetry(fn () => $client->post('people/' . $personUuid . '/roles', ['json' => $payload]));
         }
     }
 
@@ -890,7 +940,7 @@ class MdpClient
      */
     private function removePersonOrgRoles(object $client, string $orgUuid, string $personUuid, array $roleSlugs): void
     {
-        $response = $client->get('people/' . $personUuid . '/roles');
+        $response = $this->callWithRetry(fn () => $client->get('people/' . $personUuid . '/roles'));
 
         if (! is_array($response)) {
             return;
@@ -925,7 +975,7 @@ class MdpClient
             ),
         ];
 
-        $client->delete('people/' . $personUuid . '/relationships/roles', ['json' => $payload]);
+        $this->callWithRetry(fn () => $client->delete('people/' . $personUuid . '/relationships/roles', ['json' => $payload]));
     }
 
     /**
@@ -1330,13 +1380,31 @@ class MdpClient
                 return $apiCall();
             } catch (\Exception $e) {
                 $isLastAttempt = ($attempt + 1) >= self::RETRY_MAX_ATTEMPTS;
+                $isRetryable   = $this->isRetryableException($e);
 
-                if ($isLastAttempt || ! $this->isRetryableException($e)) {
+                if ($isLastAttempt || ! $isRetryable) {
+                    if ($isLastAttempt && $isRetryable) {
+                        error_log(sprintf(
+                            '[wicket-aorm] MDP request failed after all %d attempts: %s',
+                            self::RETRY_MAX_ATTEMPTS,
+                            $e->getMessage(),
+                        ));
+                    }
+
                     throw $e;
                 }
 
                 // Exponential back-off: RETRY_BASE_DELAY_MS × 2^attempt (ms → µs).
                 $delayMicroseconds = self::RETRY_BASE_DELAY_MS * (2 ** $attempt) * 1000;
+                $delayMs           = self::RETRY_BASE_DELAY_MS * (2 ** $attempt);
+
+                error_log(sprintf(
+                    '[wicket-aorm] MDP request failed (attempt %d of %d), retrying in %dms: %s',
+                    $attempt + 1,
+                    self::RETRY_MAX_ATTEMPTS,
+                    $delayMs,
+                    $e->getMessage(),
+                ));
 
                 $this->sleepMicroseconds((int) $delayMicroseconds);
             }
@@ -1367,9 +1435,16 @@ class MdpClient
         }
 
         // Fall back to message inspection for network-level errors.
+        // Covers: cURL timeouts, Guzzle ConnectException (no getResponse()),
+        // and OS-level connection failures.
         $message = strtolower($e->getMessage());
 
-        return str_contains($message, 'timeout') || str_contains($message, 'timed out');
+        return str_contains($message, 'timeout')
+            || str_contains($message, 'timed out')
+            || str_contains($message, 'could not connect')
+            || str_contains($message, 'connection refused')
+            || str_contains($message, 'connection reset')
+            || str_contains($message, 'failed to connect');
     }
 
     /**
