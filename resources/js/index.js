@@ -17,6 +17,7 @@ import { createElement, createRoot } from '@wordpress/element';
 
 import OrgRosterDetail from './pages/OrgRosterDetail';
 import GroupRosters from './pages/GroupRosters';
+import ErrorBoundary from './components/ErrorBoundary';
 
 /**
  * Mount map: DOM element id → React component.
@@ -33,5 +34,11 @@ Object.entries( mounts ).forEach( ( [ id, Component ] ) => {
 	}
 
 	const root = createRoot( el );
-	root.render( createElement( Component ) );
+	root.render(
+		createElement(
+			ErrorBoundary,
+			null,
+			createElement( Component )
+		)
+	);
 } );
