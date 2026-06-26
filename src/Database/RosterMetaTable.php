@@ -76,6 +76,32 @@ class RosterMetaTable
     }
 
     /**
+     * Count roster meta rows whose roster_status matches the given value.
+     *
+     * Issues a single COUNT query so callers can determine — without fetching
+     * full rows — how many rosters are in a particular lifecycle state.
+     * Used by AdminNotices (AORM-13.5) to decide whether to surface a warning.
+     *
+     * @param  string $status  ENUM value to match (e.g. 'has_failures', 'syncing').
+     * @return int             Number of matching rows (0 when the table is empty or
+     *                         no rows match the given status).
+     */
+    public function countByStatus(string $status): int
+    {
+        $table = $this->wpdb->prefix . 'wicket_aorm_roster_meta';
+
+        $count = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table} WHERE roster_status = %s",
+                $status,
+            ),
+        );
+
+        return (int) $count;
+    }
+
+    /**
      * Create or update the roster meta row for a given org + membership.
      *
      * Issues an INSERT … ON DUPLICATE KEY UPDATE so callers do not need to
