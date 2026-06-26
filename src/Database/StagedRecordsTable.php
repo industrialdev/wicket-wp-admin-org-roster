@@ -925,4 +925,51 @@ class StagedRecordsTable
 
         return is_string($status) ? $status : null;
     }
+
+    /**
+     * Delete completed staged records that are older than the given TTL.
+     *
+     * "Completed" means sync_status = 'synced' or sync_status = 'failed' — both
+     * are terminal states produced by the sync workflow.  Records in other states
+     * (pending, ready_to_sync, or any category-only change like discard) are left
+     * untouched; those are either still active or represent abandoned sessions
+     * that should be managed separately.
+     *
+     * The cutoff is measured against updated_at so that a record is only purged
+     * after it has been settled for the full TTL period, not merely since it
+     * was first created.
+     *
+     * Called by CleanupJobRunner::handle() on a daily WP-Cron schedule.
+     * The TTL value is read from wicket_aorm_settings[cleanup_ttl_days]
+     * (default 30, configurable in the plugin settings under Background Jobs).
+     *
+     * @param int $days Number of days after which a completed record is eligible
+     *                  for deletion.  Must be a positive integer; 0 or negative
+     *                  values are treated as a no-op (returns 0).
+     * @return int Number of rows actually deleted.
+     * @see AORM-13.4
+     */
+    public function deleteCompletedOlderThan(int $days): int
+    {
+        if ($days <= 0) {
+            return 0;
+        }
+
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $sql = $wpdb->prepare(
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            "DELETE FROM {$table}
+             WHERE sync_status IN ('synced', 'failed')
+               AND updated_at < DATE_SUB(NOW(), INTERVAL %d DAY)",
+            $days,
+        );
+
+        $result = $wpdb->query($sql);
+
+        return $result === false ? 0 : (int) $result;
+    }
 }

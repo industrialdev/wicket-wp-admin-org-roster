@@ -59,6 +59,36 @@ final class Main
             10,
             2,
         );
+
+        // AORM-13.4: Daily cleanup job — purges completed staged records older
+        // than the configured TTL (wicket_aorm_settings[cleanup_ttl_days]).
+        add_action(
+            Services\CleanupJobRunner::HOOK,
+            [new Services\CleanupJobRunner(), 'handle'],
+        );
+
+        // AORM-13.4: Re-schedule the daily cleanup event on init in case the
+        // scheduled event was cleared (e.g. after a database reset or a
+        // wp_unschedule_hook call by a third party).  The scheduling happens on
+        // every request but is cheap — wp_next_scheduled() returns immediately
+        // when the event is already queued.
+        add_action('init', [$this, 'maybeScheduleCleanup'], 20);
+    }
+
+    /**
+     * Ensure the daily cleanup cron event is scheduled.
+     *
+     * Idempotent: does nothing when the event is already queued.  Called on
+     * every 'init' (priority 20) as a resilience measure so the schedule
+     * survives a cron purge without requiring plugin deactivation/reactivation.
+     *
+     * @see AORM-13.4
+     */
+    public function maybeScheduleCleanup(): void
+    {
+        if (! wp_next_scheduled(Services\CleanupJobRunner::HOOK)) {
+            wp_schedule_event(time(), 'daily', Services\CleanupJobRunner::HOOK);
+        }
     }
 
     /**

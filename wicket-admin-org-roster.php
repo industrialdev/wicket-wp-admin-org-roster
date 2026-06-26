@@ -132,6 +132,14 @@ if (! function_exists('wicket_aorm_activate')) {
         $migrator = new WicketAORM\Database\Migrator();
         $migrator->up();
 
+        // AORM-13.4: Schedule the daily staged-records cleanup job.
+        // maybeScheduleCleanup() in Main also covers the steady-state case,
+        // but scheduling on activation ensures the event exists from the very
+        // first admin page load without waiting for init to fire.
+        if (! wp_next_scheduled(WicketAORM\Services\CleanupJobRunner::HOOK)) {
+            wp_schedule_event(time(), 'daily', WicketAORM\Services\CleanupJobRunner::HOOK);
+        }
+
         flush_rewrite_rules();
     }
 }
