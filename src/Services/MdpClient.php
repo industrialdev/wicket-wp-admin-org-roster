@@ -54,6 +54,7 @@ class MdpClient
      *   per_page?: int,
      *   sort?: string,
      *   search?: string,
+     *   cascadeable_only?: bool,
      * } $args
      *
      * @return array{
@@ -91,6 +92,14 @@ class MdpClient
         // the organisation's English legal name.
         if (! empty($args['search'])) {
             $queryParams['filter']['organization_legal_name_en_cont'] = (string) $args['search'];
+        }
+
+        // Cascadeable-only filter: restricts the list to org memberships whose
+        // organization is flagged is_cascadeable in the MDP. Wired to the
+        // "Cascadeable" dropdown filter on the Organization Rosters admin
+        // list table (RosterListTable::extra_tablenav()).
+        if (! empty($args['cascadeable_only'])) {
+            $queryParams['filter']['is_cascadeable_eq'] = 1;
         }
 
         $query = (string) preg_replace(

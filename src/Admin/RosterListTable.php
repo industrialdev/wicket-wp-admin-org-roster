@@ -39,6 +39,20 @@ class RosterListTable extends WP_List_Table
      */
     public const SCREEN_OPTION_PER_PAGE = 'aorm_rosters_per_page';
 
+    /**
+     * GET query-arg name for the "Cascadeable" dropdown filter rendered in
+     * extra_tablenav(). Submitted via the list table's <form method="get">
+     * (see MenuPage::renderOrgRostersPage()), so it round-trips automatically
+     * alongside sorting, search, and pagination.
+     */
+    public const CASCADEABLE_FILTER_PARAM = 'is_cascadeable';
+
+    /**
+     * Value of CASCADEABLE_FILTER_PARAM that activates the filter. Any other
+     * value (including absence of the param) means "All Rosters".
+     */
+    public const CASCADEABLE_FILTER_VALUE = '1';
+
     private MdpClient $mdpClient;
 
     private RosterMetaTable $rosterMetaTable;
@@ -138,10 +152,11 @@ class RosterListTable extends WP_List_Table
         $search = sanitize_text_field((string) ($_REQUEST['s'] ?? ''));
 
         $response = $this->mdpClient->getOrgMemberships([
-            'page'     => $currentPage,
-            'per_page' => $perPage,
-            'sort'     => $sortField,
-            'search'   => $search,
+            'page'             => $currentPage,
+            'per_page'         => $perPage,
+            'sort'             => $sortField,
+            'search'           => $search,
+            'cascadeable_only' => $this->isCascadeableFilterActive(),
         ]);
 
         $data       = (array) ($response['data'] ?? []);
@@ -359,9 +374,56 @@ class RosterListTable extends WP_List_Table
         );
     }
 
+    /**
+     * Render extra controls in the table navigation row.
+     *
+     * Adds a "Cascadeable" dropdown filter to the top tablenav — a <select>
+     * with "All Rosters" / "Cascadeable Only" options plus a "Filter" submit
+     * button, matching the native WordPress admin pattern used for dropdown
+     * filters elsewhere in core (e.g. the category filter on the Posts list
+     * table). Rendered inside the same <form method="get"> that wraps the
+     * whole list table (MenuPage::renderOrgRostersPage()), so selecting a
+     * value and clicking Filter resubmits the page with
+     * `?is_cascadeable=1` alongside the existing sort/search/pagination args.
+     *
+     * Only rendered for $which === 'top' — WordPress core never repeats
+     * filter dropdowns in the bottom tablenav.
+     *
+     * @param string $which 'top' or 'bottom'.
+     */
+    protected function extra_tablenav($which): void
+    {
+        if ($which !== 'top') {
+            return;
+        }
+
+        $isActive = $this->isCascadeableFilterActive();
+
+        echo '<div class="alignleft actions">';
+        echo '<label for="aorm-cascadeable-filter" class="screen-reader-text">' . esc_html__('Filter by cascadeable', 'wicket-aorm') . '</label>';
+        echo '<select name="' . esc_attr(self::CASCADEABLE_FILTER_PARAM) . '" id="aorm-cascadeable-filter">';
+        echo '<option value="">' . esc_html__('All Rosters', 'wicket-aorm') . '</option>';
+        echo '<option value="' . esc_attr(self::CASCADEABLE_FILTER_VALUE) . '"' . ($isActive ? ' selected="selected"' : '') . '>' . esc_html__('Cascadeable Only', 'wicket-aorm') . '</option>';
+        echo '</select>';
+        echo '<input type="submit" name="filter_action" id="aorm-cascadeable-filter-submit" class="button" value="' . esc_attr__('Filter', 'wicket-aorm') . '" />';
+        echo '</div>';
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Whether the "Cascadeable Only" filter is currently active, based on
+     * the CASCADEABLE_FILTER_PARAM GET query-arg.
+     *
+     * @see CASCADEABLE_FILTER_PARAM
+     */
+    private function isCascadeableFilterActive(): bool
+    {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        return (string) ($_GET[self::CASCADEABLE_FILTER_PARAM] ?? '') === self::CASCADEABLE_FILTER_VALUE;
+    }
 
     /**
      * Parse an ISO 8601 date string and return it formatted as YYYY-MM-DD,
