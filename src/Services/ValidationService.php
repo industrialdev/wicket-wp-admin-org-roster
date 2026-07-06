@@ -50,6 +50,26 @@ class ValidationService
     public const VALIDATION_LABEL_INVALID_EMAIL = 'Invalid – Invalid Email Format';
 
     /**
+     * Name format regex — enforces the rule that first_name/last_name may
+     * only contain letters, spaces, hyphens, and apostrophes.
+     *
+     * Allows common name shapes such as "Mary-Jane", "O'Brien", and
+     * "Van Der Berg". Rejects digits and other symbols (e.g. "@", "#", ".").
+     * Letters are restricted to ASCII a-z/A-Z; accented/unicode letters are
+     * intentionally out of scope for this rule.
+     */
+    public const NAME_REGEX = "/^[a-zA-Z\s'-]+$/";
+
+    /**
+     * Human-readable validation label for rows where first_name or last_name
+     * is present but contains characters outside NAME_REGEX.
+     *
+     * Applied when the field is non-empty (so it does not overlap with
+     * VALIDATION_LABEL_MISSING_REQUIRED) but fails the name format check.
+     */
+    public const VALIDATION_LABEL_INVALID_NAME = 'Invalid – Invalid Name Format';
+
+    /**
      * Minimum number of digits in a valid phone number after stripping all
      * non-numeric characters (AORM-6.14).
      *
@@ -102,8 +122,9 @@ class ValidationService
      *
      * Rules applied (same order as CSV validation):
      *   1. Required fields present and non-empty after trimming.
-     *   2. Email format matches EMAIL_REGEX.
-     *   3. Phone digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
+     *   2. first_name/last_name format matches NAME_REGEX (only when present).
+     *   3. Email format matches EMAIL_REGEX.
+     *   4. Phone digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
      *      stripping non-numeric characters (only when phone is provided).
      *
      * @param array<string, string> $fields Associative array of field values.
@@ -122,7 +143,22 @@ class ValidationService
             }
         }
 
-        // 2. Email format (only when not already flagged as missing).
+        // 2. Name format (first_name, last_name) — only letters, spaces,
+        //    hyphens, and apostrophes are permitted. Only checked when the
+        //    field is present (missing already flagged above).
+        foreach (['first_name', 'last_name'] as $field) {
+            if (isset($errors[$field])) {
+                continue;
+            }
+
+            $value = trim((string) ($fields[$field] ?? ''));
+
+            if ($value !== '' && ! preg_match(self::NAME_REGEX, $value)) {
+                $errors[$field] = $this->invalidNameMessage($field);
+            }
+        }
+
+        // 3. Email format (only when not already flagged as missing).
         //    AORM-6.13: length check runs before regex (cheaper); both enforce the
         //    "no leading/trailing punctuation" and structural rules.
         if (! isset($errors['email'])) {
@@ -140,7 +176,7 @@ class ValidationService
             }
         }
 
-        // 3. Phone format (optional field — only validate when provided).
+        // 4. Phone format (optional field — only validate when provided).
         //    AORM-6.14: strip all non-numeric characters first; the remaining
         //    digit count must fall within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS
         //    (MDP rules).  An absent or blank value is valid (empty is OK).
@@ -160,7 +196,13 @@ class ValidationService
 
     /**
      * Return true when the errors array from validateRow() contains at least
-     * one required-field error (first_name, last_name, or email).
+     * one error keyed to a required field (first_name, last_name, or email).
+     *
+     * Note: since first_name/last_name errors can now come from either the
+     * "missing" check or the name-format check, this also returns true for a
+     * present-but-invalid-format name. Callers that need to distinguish
+     * "missing" from "invalid format" (e.g. UploadController) check the
+     * trimmed raw field value directly rather than relying on this helper.
      *
      * Used by the bulk CSV upload flow (AORM-6.12) to decide whether a staged
      * record should be marked with VALIDATION_LABEL_MISSING_REQUIRED.
@@ -225,5 +267,17 @@ class ValidationService
         $label = ucwords(str_replace('_', ' ', $field));
 
         return $label . ' is required.';
+    }
+
+    /**
+     * Build a human-readable "invalid format" message for a name field.
+     *
+     * @param string $field Snake-cased field name (first_name or last_name).
+     */
+    private function invalidNameMessage(string $field): string
+    {
+        $label = ucwords(str_replace('_', ' ', $field));
+
+        return $label . ' contains invalid characters. Only letters, spaces, hyphens, and apostrophes are allowed.';
     }
 }

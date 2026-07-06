@@ -7,6 +7,7 @@
  *
  * Client-side validation (AORM-5.2) runs on submit:
  *   - first_name, last_name, email are required.
+ *   - first_name, last_name must match NAME_REGEX (letters, spaces, hyphens, apostrophes only).
  *   - email must match EMAIL_REGEX.
  *   - phone, when provided, must match PHONE_REGEX.
  *
@@ -47,6 +48,16 @@ import '../../../css/roster-upload.css';
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * Name format regex — same rule applied to CSV rows (AORM-6).
+ * Allows letters, spaces, hyphens, and apostrophes only (e.g. "Mary-Jane",
+ * "O'Brien"). Rejects digits and other symbols. Letters are restricted to
+ * ASCII a-z/A-Z; accented/unicode letters are intentionally out of scope.
+ *
+ * @type {RegExp}
+ */
+export const NAME_REGEX = /^[a-zA-Z\s'-]+$/;
+
+/**
  * Phone format regex — same rule applied to CSV rows (AORM-6).
  * Accepts an optional leading +, then any combination of digits, spaces,
  * dashes, dots, and parentheses, with a total length of 7–20 characters
@@ -82,10 +93,14 @@ export function validateFields( fields ) {
 
 	if ( ! fields.first_name.trim() ) {
 		errors.first_name = __( 'First name is required.', 'wicket-aorm' );
+	} else if ( ! NAME_REGEX.test( fields.first_name.trim() ) ) {
+		errors.first_name = __( 'First name contains invalid characters. Only letters, spaces, hyphens, and apostrophes are allowed.', 'wicket-aorm' );
 	}
 
 	if ( ! fields.last_name.trim() ) {
 		errors.last_name = __( 'Last name is required.', 'wicket-aorm' );
+	} else if ( ! NAME_REGEX.test( fields.last_name.trim() ) ) {
+		errors.last_name = __( 'Last name contains invalid characters. Only letters, spaces, hyphens, and apostrophes are allowed.', 'wicket-aorm' );
 	}
 
 	if ( ! fields.email.trim() ) {

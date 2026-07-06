@@ -195,10 +195,15 @@ class UploadController extends RestController
         $duplicateIndices = array_flip($validator->detectDuplicates($rows));
 
         foreach ($rows as $rowIndex => $row) {
-            $errors       = $validator->validateRow($row);
-            $nameMissing  = isset($errors['first_name']) || isset($errors['last_name']);
-            $emailValue   = trim((string) ($row['email'] ?? ''));
-            $emailMissing = $emailValue === '';
+            $errors          = $validator->validateRow($row);
+            $firstNameValue  = trim((string) ($row['first_name'] ?? ''));
+            $lastNameValue   = trim((string) ($row['last_name'] ?? ''));
+            $nameMissing     = $firstNameValue === '' || $lastNameValue === '';
+            $emailValue      = trim((string) ($row['email'] ?? ''));
+            $emailMissing    = $emailValue === '';
+            // Name is present but fails the letters/spaces/hyphens/apostrophes format rule
+            // (not a missing-data error).
+            $nameInvalid     = (isset($errors['first_name']) || isset($errors['last_name'])) && ! $nameMissing;
             // AORM-6.13: email is present but fails format/length rules (not a missing-data error).
             $emailInvalid = isset($errors['email']) && ! $emailMissing;
             // AORM-6.14: phone is present but digit count is out of range.
@@ -211,6 +216,12 @@ class UploadController extends RestController
                 // Name-missing takes priority over an email-format error on the same row.
                 $validationStatus  = 'invalid';
                 $validationMessage = ValidationService::VALIDATION_LABEL_MISSING_REQUIRED;
+                $category          = 'discard';
+                ++$invalidCount;
+            } elseif ($nameInvalid) {
+                // first_name/last_name is present but contains characters outside NAME_REGEX.
+                $validationStatus  = 'invalid';
+                $validationMessage = ValidationService::VALIDATION_LABEL_INVALID_NAME;
                 $category          = 'discard';
                 ++$invalidCount;
             } elseif ($emailInvalid) {
