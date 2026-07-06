@@ -116,8 +116,9 @@ class RosterListTable extends WP_List_Table
     /**
      * Fetch org memberships from MDP, enrich with local DB data, and populate $this->items.
      *
-     * Retrieves organization memberships with Active, Delayed, or Grace Period
-     * status from the MDP via MdpClient::getOrgMemberships(). Normalises the
+     * Retrieves all current organization memberships (no status filter — every
+     * MDP status, including Active, Delayed, Grace Period, and Inactive, is
+     * shown) from the MDP via MdpClient::getOrgMemberships(). Normalises the
      * JSON:API response into flat item rows, then enriches each row with
      * roster_status, last_updated, last_updated_by, and last_synced_at from
      * wp_wicket_aorm_roster_meta using a single indexed IN query (AORM-3.3).

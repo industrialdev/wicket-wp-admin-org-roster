@@ -28,23 +28,13 @@ class MdpClient
     public const RETRY_BASE_DELAY_MS = 1000;
 
     /**
-     * The only MDP membership status excluded from the roster list view.
-     *
-     * The MDP exposes three effective states — Active (including Grace Period
-     * memberships, which carry `in_grace: true` on an "Active" status record),
-     * Delayed, and Inactive. We filter by exclusion (`status_not_eq`) rather
-     * than inclusion so that any future statuses MDP adds are shown by default
-     * without requiring a code change here.
-     */
-    public const EXCLUDED_STATUS = 'Inactive';
-
-    /**
      * Fetch organization memberships from the MDP.
      *
-     * Calls the `organization_memberships` JSON:API endpoint filtered to
-     * {@see ALLOWED_STATUSES}. Includes related `organization` and `membership`
-     * resources so the caller can resolve org names and tier names without
-     * additional round-trips.
+     * Calls the `organization_memberships` JSON:API endpoint with no status
+     * filter, so every current membership is returned regardless of its MDP
+     * status (Active, Delayed, Grace Period, or Inactive). Includes related
+     * `organization` and `membership` resources so the caller can resolve
+     * org names and tier names without additional round-trips.
      *
      * Returns an empty result structure when `wicket_api_client()` is
      * unavailable or the request throws, so callers never need to handle null.
@@ -76,9 +66,7 @@ class MdpClient
         }
 
         $queryParams = [
-            'filter' => [
-                'status_not_eq' => self::EXCLUDED_STATUS,
-            ],
+            'filter' => [],
             'page' => [
                 'size'   => max(1, (int) ($args['per_page'] ?? 20)),
                 'number' => max(1, (int) ($args['page'] ?? 1)),
