@@ -55,7 +55,9 @@ class MdpClient
      *   sort?: string,
      *   search?: string,
      *   cascadeable_only?: bool,
-     * } $args
+     * } $args Search term (when present) matches org legal name (partial),
+     *         org UUID (exact), or identifying number / org ID (exact) — see
+     *         the Ransack grouping filter applied below.
      *
      * @return array{
      *   data: list<array<string,mixed>>,
@@ -88,10 +90,24 @@ class MdpClient
             $queryParams['sort'] = (string) $args['sort'];
         }
 
-        // AORM-3.4: When a search term is present, apply a Ransack filter on
-        // the organisation's English legal name.
+        // AORM-3.4: When a search term is present, apply a Ransack grouping
+        // (filter[g][0]) so the term is OR'd across the organisation's
+        // English legal name (partial match), UUID (exact match), and
+        // identifying number / org ID (exact match). A single "_or_" chain
+        // key can't be used here because it forces one predicate across all
+        // attributes, and legal name needs `cont` while UUID/identifying
+        // number need `eq`.
         if (! empty($args['search'])) {
-            $queryParams['filter']['organization_legal_name_en_cont'] = (string) $args['search'];
+            $searchTerm = (string) $args['search'];
+
+            $queryParams['filter']['g'] = [
+                [
+                    'm'                                   => 'or',
+                    'organization_legal_name_en_cont'     => $searchTerm,
+                    'organization_uuid_eq'                => $searchTerm,
+                    'organization_identifying_number_eq'  => $searchTerm,
+                ],
+            ];
         }
 
         // Cascadeable-only filter: restricts the list to org memberships whose
