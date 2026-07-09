@@ -169,7 +169,9 @@ class MenuPage
 
         echo '<div class="wrap">';
         echo '<h1 class="wp-heading-inline">' . esc_html__('Organization Rosters', 'wicket-aorm') . '</h1>';
-        (new AdminNotices())->render(); // AORM-13.5: notices for rosters with sync failures.
+        $notices = new AdminNotices();
+        $notices->render(); // AORM-13.5: notices for rosters with sync failures.
+        $notices->renderCascadeStrategyNotice(); // Informational notice when the ORM's cascade strategy is active.
         echo '<hr class="wp-header-end" />';
         echo '<form method="get">';
         echo '<input type="hidden" name="page" value="' . esc_attr(self::MENU_SLUG) . '" />';
