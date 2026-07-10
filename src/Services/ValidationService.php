@@ -96,12 +96,16 @@ class ValidationService
     public const VALIDATION_LABEL_INVALID_PHONE = 'Invalid – Phone Format';
 
     /**
-     * Human-readable validation label for rows whose first_name + last_name +
-     * email combination appears more than once within the same import file
-     * (AORM-6.15).
+     * Human-readable validation label for rows whose email address appears
+     * more than once within the same import file (AORM-6.15, extended).
      *
-     * Applied to the second and all subsequent occurrences of a duplicate key.
-     * Comparison is case-insensitive and whitespace-trimmed on all three fields.
+     * Originally scoped to the first_name + last_name + email combination;
+     * broadened so every email in the file must be unique regardless of the
+     * name it is paired with — two rows sharing an email are considered
+     * duplicates even when the names differ (e.g. a typo'd name against the
+     * same address is still very likely the same person, or a data-entry
+     * error).  Applied to the second and all subsequent occurrences of a
+     * duplicate email. Comparison is case-insensitive and whitespace-trimmed.
      *
      * Stored in the validation_message column of wp_wicket_aorm_staged_records.
      */
@@ -224,13 +228,23 @@ class ValidationService
     /**
      * Identify rows that are duplicates within the same import batch.
      *
-     * Two rows are considered duplicates when their first_name, last_name, and
-     * email values are identical after trimming whitespace and lowercasing.
-     * The first occurrence of any given key is kept; the second and all
-     * subsequent occurrences are returned as duplicates (AORM-6.15).
+     * Every email address in the file must be unique (AORM-6.15, extended):
+     * two rows are considered duplicates when their email values are
+     * identical after trimming whitespace and lowercasing — regardless of
+     * whether first_name/last_name also match. The first occurrence of any
+     * given email is kept; the second and all subsequent occurrences are
+     * returned as duplicates.
      *
-     * The phone number and title fields are intentionally excluded from the
-     * duplicate key — only name + email uniqueness is checked.
+     * Originally (AORM-6.15) the duplicate key was first_name + last_name +
+     * email combined, so two rows with the same email but different names
+     * were not flagged. That was intentionally broadened to email-only so
+     * "all emails must be unique" holds for the whole import file. Name,
+     * phone number, and title are excluded from the key.
+     *
+     * A blank/empty email never counts as a duplicate of another blank
+     * email — rows with a missing email are already caught separately by
+     * the required-field check in validateRow()/hasMissingRequired(), and
+     * that check takes priority over the duplicate check in UploadController.
      *
      * @param array<int, array<string, string>> $rows  Normalised rows from FileParserService::parseFile().
      * @return int[]  0-based indices of rows that are duplicates.
@@ -241,16 +255,16 @@ class ValidationService
         $duplicates = [];
 
         foreach ($rows as $index => $row) {
-            $key = strtolower(trim((string) ($row['first_name'] ?? '')))
-                . '|'
-                . strtolower(trim((string) ($row['last_name'] ?? '')))
-                . '|'
-                . strtolower(trim((string) ($row['email'] ?? '')));
+            $email = strtolower(trim((string) ($row['email'] ?? '')));
 
-            if (isset($seen[$key])) {
+            if ($email === '') {
+                continue;
+            }
+
+            if (isset($seen[$email])) {
                 $duplicates[] = $index;
             } else {
-                $seen[$key] = true;
+                $seen[$email] = true;
             }
         }
 

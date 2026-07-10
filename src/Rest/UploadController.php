@@ -130,7 +130,8 @@ class UploadController extends RestController
      *   4. AORM-6.12–6.16 — Validate each row and set validation_status per row:
      *                   • 'invalid' + reason  (missing required → AORM-6.12, email format → AORM-6.13,
      *                                          phone format → AORM-6.14; priority in that order)
-     *                   • 'duplicate'          (identical first_name+last_name+email → AORM-6.15/6.16)
+     *                   • 'duplicate'          (email address repeated anywhere in the file,
+     *                                          regardless of name → AORM-6.15/6.16, extended)
      *                   • 'valid'              (passes all checks)
      *                   Insert staged records; return session_id + per-status counts.
      *   5. AORM-7       — Dispatch the background MDP matching job via SchedulerService when
@@ -190,8 +191,10 @@ class UploadController extends RestController
         $invalidCount   = 0;
         $duplicateCount = 0;
 
-        // AORM-6.15/6.16: Detect duplicate rows across the entire import batch
-        // before entering the per-row loop so each row can be checked in O(1).
+        // AORM-6.15/6.16 (extended): Detect rows whose email address appears
+        // more than once across the entire import batch — regardless of
+        // whether the name also matches — before entering the per-row loop
+        // so each row can be checked in O(1).
         $duplicateIndices = array_flip($validator->detectDuplicates($rows));
 
         foreach ($rows as $rowIndex => $row) {
@@ -208,7 +211,7 @@ class UploadController extends RestController
             $emailInvalid = isset($errors['email']) && ! $emailMissing;
             // AORM-6.14: phone is present but digit count is out of range.
             $phoneInvalid = isset($errors['phone']);
-            // AORM-6.15/6.16: second (or later) occurrence of name+email key.
+            // AORM-6.15/6.16 (extended): second (or later) occurrence of this email address.
             $isDuplicate  = isset($duplicateIndices[$rowIndex]);
 
             if ($nameMissing || $emailMissing) {
@@ -237,7 +240,7 @@ class UploadController extends RestController
                 $category          = 'discard';
                 ++$invalidCount;
             } elseif ($isDuplicate) {
-                // AORM-6.15/6.16: second or later occurrence of the same name+email key.
+                // AORM-6.15/6.16 (extended): second or later occurrence of this email address.
                 // Kept separate from 'invalid' so the review UI can surface a distinct badge.
                 $validationStatus  = 'duplicate';
                 $validationMessage = ValidationService::VALIDATION_LABEL_DUPLICATE;
