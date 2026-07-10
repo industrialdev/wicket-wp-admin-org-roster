@@ -908,3 +908,19 @@
 	padding-top: 16px;
 	border-top: 1px solid #dcdcde;
 }
+
+/* -----------------------------------------------------------------------
+   RecordsTable — pagination bar (AORM-8.3)
+   ----------------------------------------------------------------------- */
+
+.aorm-records-table__pagination {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 12px;
+}
+
+.aorm-records-table__pagination-info {
+	color: #646970;
+	font-size: 13px;
+}

@@ -1,5 +1,5 @@
 /**
- * MemberTable — AORM-4.5.
+ * MemberTable — AORM-4.5 / AORM-4.16 (column sorting).
  *
  * Renders the roster assignment member table with:
  *   - Header checkbox (select all / deselect all, with indeterminate state)
@@ -7,6 +7,10 @@
  *   - Columns: Name, Email Address, Title, Phone, Roles
  *   - Two action columns: Edit Permissions (AORM-4.11), Remove (AORM-4.9)
  *   - Membership owner pinned first with an "Owner" badge in the Name cell
+ *   - Client-side sortable Name / Email Address columns (AORM-4.16). Sorting
+ *     is scoped to the members already loaded for the current page (data is
+ *     paginated server-side by RosterAssignment.js); the owner row always
+ *     stays pinned first regardless of the active sort.
  *
  * Uses WP admin list-table CSS classes for consistent styling alongside
  * the rest of the admin UI. Checkboxes are rendered with
@@ -28,14 +32,88 @@
  * }} props
  */
 
-import { __ } from '@wordpress/i18n';
+import { useState } from '@wordpress/element';
+import { __, sprintf } from '@wordpress/i18n';
 import { Button, CheckboxControl } from '@wordpress/components';
 import '../../css/member-table.css';
 
-/** Sorts members so the roster owner (is_owner: true) always appears first. */
-function sortedMembers( members ) {
+/** Sortable column definitions (AORM-4.16). Key matches the member field name. */
+const SORTABLE_COLUMNS = [
+	{ key: 'name', label: __( 'Name', 'wicket-aorm' ) },
+	{ key: 'email', label: __( 'Email Address', 'wicket-aorm' ) },
+];
+
+/**
+ * Screen-reader-accessible sort direction for aria-sort.
+ *
+ * @param {string|null}  sortField Currently sorted field.
+ * @param {'asc'|'desc'} sortDir   Current direction.
+ * @param {string}       colKey    Column being rendered.
+ * @return {string}
+ */
+function ariaSort( sortField, sortDir, colKey ) {
+	if ( sortField !== colKey ) {
+		return 'none';
+	}
+
+	return sortDir === 'asc' ? 'ascending' : 'descending';
+}
+
+/**
+ * Unicode sort indicator shown after the column label.
+ *
+ * @param {string|null}  sortField
+ * @param {'asc'|'desc'} sortDir
+ * @param {string}       colKey
+ * @return {string}
+ */
+function sortIndicator( sortField, sortDir, colKey ) {
+	if ( sortField !== colKey ) {
+		return '';
+	}
+
+	return sortDir === 'asc' ? ' ▲' : ' ▼';
+}
+
+/**
+ * Compares two members on a given field, case-insensitively.
+ *
+ * @param {Object}       a
+ * @param {Object}       b
+ * @param {string}       field
+ * @param {'asc'|'desc'} direction
+ * @return {number}
+ */
+function compareMembers( a, b, field, direction ) {
+	const va = String( a?.[ field ] ?? '' ).trim().toLowerCase();
+	const vb = String( b?.[ field ] ?? '' ).trim().toLowerCase();
+	const cmp = va.localeCompare( vb );
+
+	return direction === 'asc' ? cmp : -cmp;
+}
+
+/**
+ * Sorts members so the roster owner (is_owner: true) always appears first,
+ * then applies the active column sort (if any) to the remaining members.
+ *
+ * @param {Array}        members
+ * @param {string|null}  sortField
+ * @param {'asc'|'desc'} sortDir
+ * @return {Array}
+ */
+function sortedMembers( members, sortField, sortDir ) {
 	return [ ...members ].sort( ( a, b ) => {
-		return ( a.is_owner ? 0 : 1 ) - ( b.is_owner ? 0 : 1 );
+		const ownerCmp = ( a.is_owner ? 0 : 1 ) - ( b.is_owner ? 0 : 1 );
+
+		if ( ownerCmp !== 0 ) {
+			return ownerCmp;
+		}
+
+		if ( ! sortField ) {
+			return 0;
+		}
+
+		return compareMembers( a, b, sortField, sortDir );
 	} );
 }
 
@@ -46,7 +124,19 @@ export default function MemberTable( {
 	onEditPermissions,
 	onRemove,
 } ) {
-	const sorted = sortedMembers( members );
+	const [ sortField, setSortField ] = useState( null );
+	const [ sortDir, setSortDir ] = useState( 'asc' );
+
+	const sorted = sortedMembers( members, sortField, sortDir );
+
+	function handleSort( field ) {
+		if ( sortField === field ) {
+			setSortDir( ( d ) => ( d === 'asc' ? 'desc' : 'asc' ) );
+		} else {
+			setSortField( field );
+			setSortDir( 'asc' );
+		}
+	}
 
 	const allSelected =
 		sorted.length > 0 &&
@@ -90,8 +180,30 @@ export default function MemberTable( {
 							onChange={ toggleAll }
 						/>
 					</td>
-					<td>{ __( 'Name', 'wicket-aorm' ) }</td>
-					<td>{ __( 'Email Address', 'wicket-aorm' ) }</td>
+					{ SORTABLE_COLUMNS.map( ( col ) => (
+						<th
+							key={ col.key }
+							scope="col"
+							aria-sort={ ariaSort( sortField, sortDir, col.key ) }
+							className={ `aorm-member-table__col--${ col.key }` }
+						>
+							<Button
+								variant="link"
+								className="aorm-member-table__sort-btn"
+								onClick={ () => handleSort( col.key ) }
+								aria-label={ sprintf(
+									/* translators: %s: column label */
+									__( 'Sort by %s', 'wicket-aorm' ),
+									col.label
+								) }
+							>
+								{ col.label }
+								<span aria-hidden="true">
+									{ sortIndicator( sortField, sortDir, col.key ) }
+								</span>
+							</Button>
+						</th>
+					) ) }
 					<td>{ __( 'Title', 'wicket-aorm' ) }</td>
 					<td>{ __( 'Phone', 'wicket-aorm' ) }</td>
 					<td>{ __( 'Roles', 'wicket-aorm' ) }</td>
