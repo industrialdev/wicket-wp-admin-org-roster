@@ -355,7 +355,7 @@ class SettingsPage
      * Available role options are read from OrgManConfig::get()['access']['roles']['labels']
      * so the list automatically reflects the active child-theme configuration.
      * Falls back to an informational notice when OrgManConfig is unavailable
-     * (e.g. the wicket-wp-organization-roster plugin is not active).
+     * (e.g. the wicket-wp-account-centre plugin is not active).
      *
      * Each checkbox posts to wicket_aorm_settings[security_roles][],
      * which the sanitize() callback collects and stores as a string[].
@@ -367,7 +367,7 @@ class SettingsPage
         if (!class_exists(OrgManConfig::class)) {
             echo '<p class="description">';
             echo esc_html__(
-                'Security roles are unavailable because the wicket-wp-organization-roster plugin is not active.',
+                'Security roles are unavailable because the wicket-wp-account-centre plugin is not active.',
                 'wicket-aorm',
             );
             echo '</p>';

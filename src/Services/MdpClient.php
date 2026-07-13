@@ -179,7 +179,7 @@ class MdpClient
      * Scoped to currently-active person_memberships via `filter[active_at]=now`
      * — the same Ransack predicate used for this endpoint elsewhere in the
      * Wicket ecosystem (e.g. MembershipRosterReader/MembershipService in
-     * wicket-wp-organization-roster) — so inactive/ended roster rows are
+     * wicket-wp-account-centre) — so inactive/ended roster rows are
      * excluded from both paginated listing and getAllRosterMembers().
      *
      * Returns an empty result structure when `wicket_api_client()` is

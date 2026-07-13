@@ -174,7 +174,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 ## Dependencies & Integrations
 
 - **wicket-wp-base-plugin**: Provides `wicket_api_client()`, `Wicket()` singleton, and MDP connection config. This plugin requires it to be active.
-- **wicket-wp-organization-roster**: **Required active plugin.** Provides the `WicketORM\` namespace (`PersonService`, `ConnectionService`, etc.). AORM will refuse to activate and will show an admin notice if this plugin is not active. Do not attempt to vendor or copy its classes locally — the plugin is the single source of truth. The following services are consumed directly:
+- **wicket-wp-account-centre**: **Required active plugin.** Provides the `WicketORM\` namespace (`PersonService`, `ConnectionService`, etc.) under `src/WicketORM/` — this functionality was migrated from the now-retired `wicket-wp-organization-roster` plugin. AORM will refuse to activate and will show an admin notice if this plugin is not active. Do not attempt to vendor or copy its classes locally — the plugin is the single source of truth. The following services are consumed directly:
   - `WicketORM\Services\PersonService::createOrGetPerson()` — used in `SyncService` to find or create a person in MDP by email before syncing.
   - `WicketORM\Services\ConnectionService::ensurePersonConnection()` — used in `SyncService` to create a person-to-org relationship (AORM-9.6).
   - `WicketORM\Services\ConnectionService::endRelationshipToday()` and `endActivePersonOrganizationConnections()` — used in `SyncService` for Replace mode and relationship removal (AORM-9.9, AORM-9.15).

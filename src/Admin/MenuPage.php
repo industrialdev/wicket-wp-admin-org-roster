@@ -220,7 +220,7 @@ class MenuPage
 
         if (! class_exists(\WicketORM\Config\OrgManConfig::class)) {
             echo '<div class="notice notice-error inline"><p>';
-            echo esc_html__('The wicket-wp-organization-roster plugin is not active. ORM configuration is unavailable.', 'wicket-aorm');
+            echo esc_html__('The wicket-wp-account-centre plugin is not active. ORM configuration is unavailable.', 'wicket-aorm');
             echo '</p></div>';
             echo '</div>';
 
@@ -246,7 +246,7 @@ class MenuPage
         // ── Intro note ────────────────────────────────────────────────────
 
         echo '<p class="description">';
-        echo esc_html__('These values are read from the wicket-wp-organization-roster plugin via the wicket/acc/orgman/config filter and are used during roster sync. To change them, update the filter in your child theme.', 'wicket-aorm');
+        echo esc_html__('These values are read from the wicket-wp-account-centre plugin via the wicket/acc/orgman/config filter and are used during roster sync. To change them, update the filter in your child theme.', 'wicket-aorm');
         echo '</p>';
 
         // ── Membership section ────────────────────────────────────────────

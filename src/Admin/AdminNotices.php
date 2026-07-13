@@ -81,7 +81,7 @@ class AdminNotices
      * Render an informational notice when the ORM's membership strategy is
      * set to "cascade".
      *
-     * Under the cascade strategy, wicket-wp-organization-roster resolves the
+     * Under the cascade strategy, wicket-wp-account-centre resolves the
      * org's current membership itself and only creates a person-to-organization
      * connection in the MDP — the MDP then derives and assigns the resulting
      * membership automatically (see CascadeStrategy::addMember()). AORM's own
