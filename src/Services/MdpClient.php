@@ -173,14 +173,25 @@ class MdpClient
      *
      * Calls the `organization_memberships/{membership_uuid}/person_memberships`
      * JSON:API endpoint. Includes `person` and `person.phones` so name, email,
-     * title, phone number, and role names (available directly as
-     * `person.attributes.role_names`) are all resolved in a single request.
+     * title, and phone number are all resolved in a single request.
      *
      * Scoped to currently-active person_memberships via `filter[active_at]=now`
      * — the same Ransack predicate used for this endpoint elsewhere in the
      * Wicket ecosystem (e.g. MembershipRosterReader/MembershipService in
      * wicket-wp-account-centre) — so inactive/ended roster rows are
      * excluded from both paginated listing and getAllRosterMembers().
+     *
+     * Roles are intentionally NOT read from `person.attributes.role_names` —
+     * that attribute reflects the person's roles globally, not roles scoped
+     * to $org_uuid, and so was misleading for a roster tied to one org. When
+     * $includeRoles is true (the default), a second batched request is made
+     * via fetchOrgScopedRoles() to `/people?include=roles` for the person
+     * UUIDs on this page, filtered down to roles scoped to $org_uuid (see
+     * fetchOrgScopedRoles() for why that filtering has to happen client-side),
+     * and the result is merged into each member's `roles` key. Callers that
+     * don't need roles (e.g. getAllRosterMembers(), used only for the
+     * replace-mode removal diff) can pass $includeRoles=false to skip this
+     * extra MDP round-trip per page.
      *
      * Returns an empty result structure when `wicket_api_client()` is
      * unavailable or the request throws, so callers never need to handle null.
@@ -189,6 +200,8 @@ class MdpClient
      *   page?: int,
      *   per_page?: int,
      * } $args
+     * @param bool $includeRoles Whether to fetch org-scoped roles for each
+     *                           member (an extra MDP request per page).
      *
      * @return array{
      *   members: list<array{
@@ -205,8 +218,12 @@ class MdpClient
      *   total_pages: int,
      * }
      */
-    public function getRosterMembers(string $org_uuid, string $membership_uuid, array $args = []): array
-    {
+    public function getRosterMembers(
+        string $org_uuid,
+        string $membership_uuid,
+        array $args = [],
+        bool $includeRoles = true,
+    ): array {
         $empty = ['members' => [], 'total' => 0, 'total_pages' => 0];
 
         $client = wicket_api_client();
@@ -242,10 +259,152 @@ class MdpClient
                 return $empty;
             }
 
-            return $this->normalizeRosterMembers($response, $org_uuid, $membership_uuid);
+            $result = $this->normalizeRosterMembers($response, $org_uuid, $membership_uuid);
         } catch (\Exception $e) {
             return $empty;
         }
+
+        if ($includeRoles && ! empty($result['members'])) {
+            $personUuids = array_values(array_unique(array_map(
+                static fn (array $member): string => (string) $member['person_uuid'],
+                $result['members'],
+            )));
+
+            $rolesByPerson = $this->fetchOrgScopedRoles($client, $org_uuid, $personUuids);
+
+            foreach ($result['members'] as &$member) {
+                $member['roles'] = $rolesByPerson[$member['person_uuid']] ?? [];
+            }
+
+            unset($member);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fetch roles scoped to a single organization for a batch of people.
+     *
+     * Calls `/people?include=roles&filter[uuid_in]=...` once for the whole
+     * batch (rather than one `people/{uuid}/roles` request per person) so a
+     * roster page of N members costs one extra MDP request, not N. `uuid_in`
+     * filters the `people` resource by its own `uuid` — unlike
+     * `person_uuid_in`, which is the right filter when the base resource is
+     * something else (e.g. `person_memberships`) and you're filtering by the
+     * *related* person's uuid, that predicate doesn't apply here since
+     * `people` is the base resource itself. Each returned `people` resource's
+     * `relationships.roles.data` links to `roles` resources in `included`.
+     *
+     * There is no server-side org filter on this request — every role for
+     * each requested person comes back in `included`, regardless of org.
+     * `include=roles` sideloads a person's ENTIRE roles relationship: global
+     * roles (`relationships.resource.data === null`, e.g. a platform-wide
+     * "user" role) and roles scoped to other orgs the person belongs to come
+     * back alongside roles scoped to $orgUuid. So the roles index built here
+     * filters each included `roles` resource to
+     * `relationships.resource.data.id === $orgUuid` before reading
+     * `attributes.name` — the same check used by removePersonOrgRoles() above.
+     * Without it, e.g. a global "user" role would incorrectly show up as an
+     * "org role" for every member on every roster.
+     *
+     * Never throws — a failed or malformed response yields an empty map so a
+     * roles lookup failure degrades to "no roles shown" rather than breaking
+     * the whole roster page.
+     *
+     * @param object   $client      MDP API client (must be non-null).
+     * @param string   $orgUuid     Organization UUID roles are scoped to.
+     * @param string[] $personUuids Person UUIDs to fetch roles for.
+     *
+     * @return array<string, list<string>> Map of person_uuid => role names.
+     */
+    private function fetchOrgScopedRoles(object $client, string $orgUuid, array $personUuids): array
+    {
+        if (empty($personUuids)) {
+            return [];
+        }
+
+        $queryParams = [
+            'include' => 'roles',
+            'filter'  => [
+                'uuid_in' => $personUuids,
+            ],
+            'page'    => [
+                'size' => count($personUuids),
+            ],
+        ];
+
+        $query = (string) preg_replace(
+            '/\%5B\d+\%5D/',
+            '%5B%5D',
+            http_build_query($queryParams),
+        );
+
+        $endpoint = '/people?' . $query;
+
+        try {
+            $response = $client->get($endpoint);
+        } catch (\Exception $e) {
+            return [];
+        }
+
+        if (! is_array($response)) {
+            return [];
+        }
+
+        // Index included `roles` resources by id => role name, but only the
+        // ones actually scoped to $orgUuid. A role's `relationships.resource.data`
+        // is null for global roles (e.g. "user") and points at whichever org the
+        // role is scoped to otherwise — the same shape checked by
+        // removePersonOrgRoles() above. Without this filter, a person's global
+        // roles (and roles scoped to *other* orgs they belong to) would leak
+        // into every roster's "org roles", since /people?include=roles sideloads
+        // ALL of that person's roles, not just the ones for this org.
+        $roleNamesById = [];
+
+        foreach ($response['included'] ?? [] as $item) {
+            if (($item['type'] ?? '') !== 'roles') {
+                continue;
+            }
+
+            $resourceId = (string) ($item['relationships']['resource']['data']['id'] ?? '');
+
+            if ($resourceId !== $orgUuid) {
+                continue;
+            }
+
+            $roleId = (string) ($item['id'] ?? '');
+
+            if ($roleId !== '') {
+                $roleNamesById[$roleId] = (string) ($item['attributes']['name'] ?? '');
+            }
+        }
+
+        // Resolve each person's roles.data references against the map above.
+        $rolesByPerson = [];
+
+        foreach ($response['data'] ?? [] as $personResource) {
+            $personUuid = (string) ($personResource['id'] ?? '');
+
+            if ($personUuid === '') {
+                continue;
+            }
+
+            $roleRefs = $personResource['relationships']['roles']['data'] ?? [];
+            $names    = [];
+
+            foreach ((array) $roleRefs as $ref) {
+                $roleId   = (string) ($ref['id'] ?? '');
+                $roleName = $roleNamesById[$roleId] ?? '';
+
+                if ($roleName !== '') {
+                    $names[] = $roleName;
+                }
+            }
+
+            $rolesByPerson[$personUuid] = $names;
+        }
+
+        return $rolesByPerson;
     }
 
     /**
@@ -1003,6 +1162,11 @@ class MdpClient
      * set for the replace-mode diff without callers needing to handle pagination
      * themselves.
      *
+     * Passes $includeRoles=false to getRosterMembers() — the replace-mode diff
+     * only reads email/given_name/family_name, so the extra org-scoped-roles
+     * request per page would be pure overhead here. `roles` is always `[]` in
+     * the returned members.
+     *
      * @param string $orgUuid        Organisation UUID.
      * @param string $membershipUuid Org-membership UUID.
      * @return list<array{person_uuid: string, email: string, name: string, given_name: string, family_name: string, title: string, phone: string, roles: list<string>, is_owner: bool}>
@@ -1017,7 +1181,7 @@ class MdpClient
             $result     = $this->getRosterMembers($orgUuid, $membershipUuid, [
                 'page'     => $page,
                 'per_page' => $perPage,
-            ]);
+            ], false);
             $all        = array_merge($all, $result['members']);
             $totalPages = max(1, (int) $result['total_pages']);
             $page++;
@@ -1772,13 +1936,6 @@ class MdpClient
             $personItem  = $included['people:' . $personRelId] ?? [];
             $personAttrs = $personItem['attributes'] ?? [];
 
-            // Role names are a direct attribute on the person resource —
-            // no need to traverse a nested roles relationship.
-            $roles = array_values(array_filter(
-                (array) ($personAttrs['role_names'] ?? []),
-                fn ($r): bool => is_string($r) && $r !== '',
-            ));
-
             $members[] = [
                 'person_uuid'                => $personRelId,
                 'name'                       => (string) ($personAttrs['full_name'] ?? ''),
@@ -1787,7 +1944,10 @@ class MdpClient
                 'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
                 'title'                      => (string) ($personAttrs['job_title'] ?? ''),
                 'phone'                      => '', // TODO: clarify MDP phone endpoint — left empty for now
-                'roles'                      => $roles,
+                // Populated by getRosterMembers() via fetchOrgScopedRoles() — not
+                // read from person.attributes.role_names, which is global (not
+                // scoped to $org_uuid) and was misleading for a per-org roster.
+                'roles'                      => [],
                 'is_owner'                   => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
                 'membership_details_page_url' => admin_url(
                     'admin.php?page=wicket_org_member_edit&id=' . $org_uuid . '&membership_uuid=' . $membership_uuid
