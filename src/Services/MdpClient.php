@@ -172,8 +172,8 @@ class MdpClient
      * Fetch the list of people assigned to an org roster.
      *
      * Calls the `organization_memberships/{membership_uuid}/person_memberships`
-     * JSON:API endpoint. Includes `person` and `person.phones` so name, email,
-     * title, and phone number are all resolved in a single request.
+     * JSON:API endpoint. Includes `person` so name, email, and title are
+     * resolved in this request; phone number is resolved separately (see below).
      *
      * Scoped to currently-active person_memberships via `filter[active_at]=now`
      * — the same Ransack predicate used for this endpoint elsewhere in the
@@ -183,13 +183,15 @@ class MdpClient
      *
      * Roles are intentionally NOT read from `person.attributes.role_names` —
      * that attribute reflects the person's roles globally, not roles scoped
-     * to $org_uuid, and so was misleading for a roster tied to one org. When
+     * to $org_uuid, and so was misleading for a roster tied to one org. Phone
+     * number isn't available on this endpoint's `person` include at all. When
      * $includeRoles is true (the default), a second batched request is made
-     * via fetchOrgScopedRoles() to `/people?include=roles` for the person
-     * UUIDs on this page, filtered down to roles scoped to $org_uuid (see
-     * fetchOrgScopedRoles() for why that filtering has to happen client-side),
-     * and the result is merged into each member's `roles` key. Callers that
-     * don't need roles (e.g. getAllRosterMembers(), used only for the
+     * via fetchOrgScopedRolesAndPhones() to `/people?include=roles,phones` for
+     * the person UUIDs on this page — roles are filtered down to $org_uuid
+     * client-side (see fetchOrgScopedRolesAndPhones() for why), while phone
+     * picks each person's primary number regardless of org — and the result
+     * is merged into each member's `roles` and `phone` keys. Callers that
+     * don't need either (e.g. getAllRosterMembers(), used only for the
      * replace-mode removal diff) can pass $includeRoles=false to skip this
      * extra MDP round-trip per page.
      *
@@ -200,8 +202,8 @@ class MdpClient
      *   page?: int,
      *   per_page?: int,
      * } $args
-     * @param bool $includeRoles Whether to fetch org-scoped roles for each
-     *                           member (an extra MDP request per page).
+     * @param bool $includeRoles Whether to fetch org-scoped roles and phone for
+     *                           each member (an extra MDP request per page).
      *
      * @return array{
      *   members: list<array{
@@ -270,10 +272,12 @@ class MdpClient
                 $result['members'],
             )));
 
-            $rolesByPerson = $this->fetchOrgScopedRoles($client, $org_uuid, $personUuids);
+            $extraByPerson = $this->fetchOrgScopedRolesAndPhones($client, $org_uuid, $personUuids);
 
             foreach ($result['members'] as &$member) {
-                $member['roles'] = $rolesByPerson[$member['person_uuid']] ?? [];
+                $extra           = $extraByPerson[$member['person_uuid']] ?? ['roles' => [], 'phone' => ''];
+                $member['roles'] = $extra['roles'];
+                $member['phone'] = $extra['phone'];
             }
 
             unset($member);
@@ -283,48 +287,59 @@ class MdpClient
     }
 
     /**
-     * Fetch roles scoped to a single organization for a batch of people.
+     * Fetch roles and a primary phone number, scoped to a single organization
+     * where applicable, for a batch of people.
      *
-     * Calls `/people?include=roles&filter[uuid_in]=...` once for the whole
-     * batch (rather than one `people/{uuid}/roles` request per person) so a
-     * roster page of N members costs one extra MDP request, not N. `uuid_in`
-     * filters the `people` resource by its own `uuid` — unlike
+     * Calls `/people?include=roles,phones&filter[uuid_in]=...` once for the
+     * whole batch (rather than one `people/{uuid}/roles` request per person)
+     * so a roster page of N members costs one extra MDP request, not N.
+     * `uuid_in` filters the `people` resource by its own `uuid` — unlike
      * `person_uuid_in`, which is the right filter when the base resource is
      * something else (e.g. `person_memberships`) and you're filtering by the
      * *related* person's uuid, that predicate doesn't apply here since
-     * `people` is the base resource itself. Each returned `people` resource's
-     * `relationships.roles.data` links to `roles` resources in `included`.
+     * `people` is the base resource itself.
      *
-     * There is no server-side org filter on this request — every role for
-     * each requested person comes back in `included`, regardless of org.
+     * Roles: there is no server-side org filter on this request — every role
+     * for each requested person comes back in `included`, regardless of org.
      * `include=roles` sideloads a person's ENTIRE roles relationship: global
      * roles (`relationships.resource.data === null`, e.g. a platform-wide
      * "user" role) and roles scoped to other orgs the person belongs to come
-     * back alongside roles scoped to $orgUuid. So the roles index built here
+     * back alongside roles scoped to $orgUuid, resolved via each `people`
+     * resource's `relationships.roles.data`. So the roles index built here
      * filters each included `roles` resource to
      * `relationships.resource.data.id === $orgUuid` before reading
      * `attributes.name` — the same check used by removePersonOrgRoles() above.
      * Without it, e.g. a global "user" role would incorrectly show up as an
      * "org role" for every member on every roster.
      *
+     * Phone: unlike roles, phones are NOT scoped to $orgUuid here — a phone's
+     * `relationships.organization.data` is commonly null even for a "work"
+     * type phone, so filtering by org would zero out phone numbers entirely.
+     * Instead, each included `phones` resource is resolved back to its owner
+     * via `relationships.phoneable.data.id` (rather than depending on a
+     * forward `people.relationships.phones` link, which may not be present)
+     * and the phone flagged `attributes.primary === true` wins; if none is
+     * flagged primary, the first phone encountered for that person is used.
+     * `attributes.number_national_format` is used for display.
+     *
      * Never throws — a failed or malformed response yields an empty map so a
-     * roles lookup failure degrades to "no roles shown" rather than breaking
+     * lookup failure degrades to "no roles/phone shown" rather than breaking
      * the whole roster page.
      *
      * @param object   $client      MDP API client (must be non-null).
      * @param string   $orgUuid     Organization UUID roles are scoped to.
-     * @param string[] $personUuids Person UUIDs to fetch roles for.
+     * @param string[] $personUuids Person UUIDs to fetch roles/phone for.
      *
-     * @return array<string, list<string>> Map of person_uuid => role names.
+     * @return array<string, array{roles: list<string>, phone: string}> Map of person_uuid => {roles, phone}.
      */
-    private function fetchOrgScopedRoles(object $client, string $orgUuid, array $personUuids): array
+    private function fetchOrgScopedRolesAndPhones(object $client, string $orgUuid, array $personUuids): array
     {
         if (empty($personUuids)) {
             return [];
         }
 
         $queryParams = [
-            'include' => 'roles',
+            'include' => 'roles,phones',
             'filter'  => [
                 'uuid_in' => $personUuids,
             ],
@@ -361,21 +376,38 @@ class MdpClient
         // ALL of that person's roles, not just the ones for this org.
         $roleNamesById = [];
 
+        // Index included `phones` resources by owning person_uuid => display
+        // number, preferring whichever phone is flagged primary.
+        $phoneByPerson = [];
+
         foreach ($response['included'] ?? [] as $item) {
-            if (($item['type'] ?? '') !== 'roles') {
-                continue;
-            }
+            $itemType = (string) ($item['type'] ?? '');
 
-            $resourceId = (string) ($item['relationships']['resource']['data']['id'] ?? '');
+            if ($itemType === 'roles') {
+                $resourceId = (string) ($item['relationships']['resource']['data']['id'] ?? '');
 
-            if ($resourceId !== $orgUuid) {
-                continue;
-            }
+                if ($resourceId !== $orgUuid) {
+                    continue;
+                }
 
-            $roleId = (string) ($item['id'] ?? '');
+                $roleId = (string) ($item['id'] ?? '');
 
-            if ($roleId !== '') {
-                $roleNamesById[$roleId] = (string) ($item['attributes']['name'] ?? '');
+                if ($roleId !== '') {
+                    $roleNamesById[$roleId] = (string) ($item['attributes']['name'] ?? '');
+                }
+            } elseif ($itemType === 'phones') {
+                $ownerUuid = (string) ($item['relationships']['phoneable']['data']['id'] ?? '');
+                $number    = (string) ($item['attributes']['number_national_format'] ?? '');
+
+                if ($ownerUuid === '' || $number === '') {
+                    continue;
+                }
+
+                $isPrimary = (bool) ($item['attributes']['primary'] ?? false);
+
+                if ($isPrimary || ! isset($phoneByPerson[$ownerUuid])) {
+                    $phoneByPerson[$ownerUuid] = $number;
+                }
             }
         }
 
@@ -404,7 +436,19 @@ class MdpClient
             $rolesByPerson[$personUuid] = $names;
         }
 
-        return $rolesByPerson;
+        // Merge by the union of person UUIDs seen in either map — a person
+        // could in principle have a phone resolved via `included` without
+        // appearing in the roles-by-person map (or vice versa).
+        $combined = [];
+
+        foreach (array_unique(array_merge(array_keys($rolesByPerson), array_keys($phoneByPerson))) as $personUuid) {
+            $combined[$personUuid] = [
+                'roles' => $rolesByPerson[$personUuid] ?? [],
+                'phone' => $phoneByPerson[$personUuid] ?? '',
+            ];
+        }
+
+        return $combined;
     }
 
     /**
@@ -1943,9 +1987,11 @@ class MdpClient
                 'family_name'                => (string) ($personAttrs['family_name'] ?? ''),
                 'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
                 'title'                      => (string) ($personAttrs['job_title'] ?? ''),
-                'phone'                      => '', // TODO: clarify MDP phone endpoint — left empty for now
-                // Populated by getRosterMembers() via fetchOrgScopedRoles() — not
-                // read from person.attributes.role_names, which is global (not
+                // Populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
+                // this endpoint's `person` include has no phone attribute.
+                'phone'                      => '',
+                // Also populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
+                // not read from person.attributes.role_names, which is global (not
                 // scoped to $org_uuid) and was misleading for a per-org roster.
                 'roles'                      => [],
                 'is_owner'                   => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
