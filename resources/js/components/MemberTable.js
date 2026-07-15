@@ -4,13 +4,13 @@
  * Renders the roster assignment member table with:
  *   - Header checkbox (select all / deselect all, with indeterminate state)
  *   - Per-row checkboxes for bulk-action selection
- *   - Columns: Name, Email Address, Title, Phone, Roles
+ *   - Columns: First Name, Last Name, Email Address, Title, Phone, Roles
  *   - Two action columns: Edit Permissions (AORM-4.11), Remove (AORM-4.9)
- *   - Membership owner pinned first with an "Owner" badge in the Name cell
- *   - Client-side sortable Name / Email Address columns (AORM-4.16). Sorting
- *     is scoped to the members already loaded for the current page (data is
- *     paginated server-side by RosterAssignment.js); the owner row always
- *     stays pinned first regardless of the active sort.
+ *   - Membership owner pinned first with an "Owner" badge in the Last Name cell
+ *   - Client-side sortable First Name / Last Name / Email Address columns
+ *     (AORM-4.16). Sorting is scoped to the members already loaded for the
+ *     current page (data is paginated server-side by RosterAssignment.js);
+ *     the owner row always stays pinned first regardless of the active sort.
  *
  * Uses WP admin list-table CSS classes for consistent styling alongside
  * the rest of the admin UI. Checkboxes are rendered with
@@ -20,6 +20,8 @@
  *   members: Array<{
  *     person_uuid: string,
  *     name: string,
+ *     given_name: string,
+ *     family_name: string,
  *     email: string,
  *     title: string,
  *     phone: string,
@@ -39,9 +41,26 @@ import '../../css/member-table.css';
 
 /** Sortable column definitions (AORM-4.16). Key matches the member field name. */
 const SORTABLE_COLUMNS = [
-	{ key: 'name', label: __( 'Name', 'wicket-aorm' ) },
+	{ key: 'given_name', label: __( 'First Name', 'wicket-aorm' ) },
+	{ key: 'family_name', label: __( 'Last Name', 'wicket-aorm' ) },
 	{ key: 'email', label: __( 'Email Address', 'wicket-aorm' ) },
 ];
+
+/**
+ * Resolves a display-friendly full name for aria-labels, falling back to
+ * the combined `name` field when given_name/family_name are unavailable.
+ *
+ * @param {Object} member
+ * @return {string}
+ */
+function memberFullName( member ) {
+	const combined = [ member?.given_name, member?.family_name ]
+		.filter( Boolean )
+		.join( ' ' )
+		.trim();
+
+	return combined || member?.name || '';
+}
 
 /**
  * Screen-reader-accessible sort direction for aria-sort.
@@ -165,8 +184,8 @@ export default function MemberTable( {
 		onSelectionChange( next );
 	}
 
-	// Total column count: checkbox + 5 data cols + 2 action cols = 8
-	const TOTAL_COLS = 8;
+	// Total column count: checkbox + 6 data cols + 2 action cols = 9
+	const TOTAL_COLS = 9;
 
 	return (
 		<table className="wp-list-table widefat fixed striped aorm-member-table">
@@ -240,14 +259,19 @@ export default function MemberTable( {
 									aria-label={ `${ __(
 										'Select',
 										'wicket-aorm'
-									) } ${ member.name }` }
+									) } ${ memberFullName( member ) }` }
 									checked={ selectedIds.has( member.person_uuid ) }
 									onChange={ () => toggleRow( member.person_uuid ) }
 								/>
 							</th>
 							<td>
-								<span className="aorm-member-table__name">
-									{ member.name || '—' }
+								<span className="aorm-member-table__first-name">
+									{ member.given_name || '—' }
+								</span>
+							</td>
+							<td>
+								<span className="aorm-member-table__last-name">
+									{ member.family_name || '—' }
 								</span>
 								{ isOwner && (
 									<span className="aorm-member-table__owner-badge">
