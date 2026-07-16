@@ -15,12 +15,12 @@ class Migrator
      * Bump this string whenever the schema changes so that version-gated
      * migration runs on the next activation or admin_init check.
      */
-    public const string DB_VERSION = '1.0';
+    public const DB_VERSION = '1.0';
 
     /**
      * wp_options key that stores the installed schema version.
      */
-    public const string DB_VERSION_OPTION = 'wicket_aorm_db_version';
+    public const DB_VERSION_OPTION = 'wicket_aorm_db_version';
 
     /**
      * Create or update all plugin database tables.
