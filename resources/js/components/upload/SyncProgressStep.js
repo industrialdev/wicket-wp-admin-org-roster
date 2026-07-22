@@ -13,7 +13,9 @@
  *    - A **Retry Failed Records** button that re-fires
  *      POST /wicket-aorm/v1/uploads/{sessionId}/commit with only the
  *      failed record IDs, then resets to the Syncing phase.
- *    - A **Done** button that calls `resetWizard()`.
+ *    - A **Done** button that clears the session (DELETE /uploads/{sessionId},
+ *      errors ignored — idempotent, same pattern as CsvValidationStep's
+ *      abandonSession()) and then calls `resetWizard()`.
  *
  * Polling stops immediately on:
  *   - `is_complete === true`   → transitions to Results phase after COMPLETION_DELAY_MS.
@@ -90,6 +92,10 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 	const [ retryKey,    setRetryKey    ] = useState( 0 );
 	const [ isRetrying,  setIsRetrying  ] = useState( false );
 	const [ retryError,  setRetryError  ] = useState( null );
+
+	// ── Done state ────────────────────────────────────────────────────────────
+
+	const [ isClearingSession, setIsClearingSession ] = useState( false );
 
 	// ── Refs ──────────────────────────────────────────────────────────────────
 
@@ -226,6 +232,37 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 			}
 		}
 	}, [ sessionId, failedRecords ] );
+
+	// ── Done handler ──────────────────────────────────────────────────────────
+
+	/**
+	 * Clears the staged-records session on the server before returning the
+	 * wizard to its initial state, so a fully-synced session doesn't linger
+	 * until the cleanup TTL job purges it. Mirrors CsvValidationStep's
+	 * abandonSession(): DELETE errors are ignored — deleting an
+	 * already-cleared or unknown session is a no-op on the server, and Done
+	 * should always be able to return the admin to the landing step.
+	 */
+	const handleDone = useCallback( async () => {
+		if ( sessionId ) {
+			setIsClearingSession( true );
+
+			try {
+				await apiFetch( {
+					path:   `/wicket-aorm/v1/uploads/${ encodeURIComponent( sessionId ) }`,
+					method: 'DELETE',
+				} );
+			} catch {
+				// Ignore — idempotent; the session may already be gone.
+			} finally {
+				if ( isMountedRef.current ) {
+					setIsClearingSession( false );
+				}
+			}
+		}
+
+		resetWizard();
+	}, [ sessionId, resetWizard ] );
 
 	// ── Derived display value ─────────────────────────────────────────────────
 
@@ -415,7 +452,9 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 				<div className="aorm-sync-progress__footer">
 					<Button
 						variant="primary"
-						onClick={ resetWizard }
+						onClick={ handleDone }
+						isBusy={ isClearingSession }
+						disabled={ isClearingSession }
 						className={ DONE_BTN_CLASS }
 					>
 						{ __( 'Done', 'wicket-aorm' ) }

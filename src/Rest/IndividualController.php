@@ -22,7 +22,10 @@ use WicketAORM\Services\ValidationService;
  *   4. Log the individual add to wp_wicket_aorm_logs and update wp_wicket_aorm_roster_meta
  *      (roster_status = 'in_progress', last_updated_at, last_updated_by) via ActivityLogger (AORM-5.10).
  *   5. Run synchronous MDP matching for the single row (AORM-5.6) — updates the staged record
- *      with match_count, matched_persons, match_details, record_status, and category.
+ *      with match_count, matched_persons, match_details, record_status, category, and advances
+ *      sync_status to 'ready_to_sync' (mirrors MatchingJobRunner's per-record bulk-upload
+ *      behavior so StagedRecordsTable::getMatchingProgress() correctly counts this row as
+ *      processed instead of leaving it stuck at its inserted 'pending' value forever).
  *      Returns 200 with session_id, record_id, and match_category.
  */
 class IndividualController extends RestController
@@ -208,12 +211,24 @@ class IndividualController extends RestController
         );
 
         // Persist match results back to the staged record.
+        //
+        // sync_status must advance to 'ready_to_sync' here, mirroring what
+        // MatchingJobRunner does for bulk-uploaded rows once it finishes
+        // matching each one. Without this, the row is left at its inserted
+        // 'pending' value forever even though matching has already completed
+        // synchronously above — and StagedRecordsTable::getMatchingProgress()
+        // treats sync_status = 'pending' as "not yet processed", so the
+        // matching-progress poll (and Assets::resolveActiveSession() on a
+        // page reload) would never see is_complete/matchingComplete become
+        // true, leaving the admin stuck on "Comparing records against MDP…"
+        // indefinitely after adding a single person.
         $table->updateRecord($recordId, [
             'match_count'     => $matchResult['match_count'],
             'matched_persons' => $matchResult['matched_persons'],
             'match_details'   => $matchResult['match_details'],
             'record_status'   => $matchResult['record_status'],
             'category'        => $matchResult['category'],
+            'sync_status'     => 'ready_to_sync',
             'updated_at'      => $matchResult['updated_at'],
         ]);
 
