@@ -809,6 +809,31 @@
 }
 
 /* -----------------------------------------------------------------------
+   Validation review — heading row + Abandon Session — AORM-9.31
+   ----------------------------------------------------------------------- */
+
+.aorm-validation-review__heading-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+
+.aorm-validation-review__heading-row .aorm-validation-review__heading {
+	margin: 0;
+}
+
+.aorm-abandon-session-modal__message {
+	margin-top: 0;
+}
+
+.aorm-abandon-session-modal__actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+/* -----------------------------------------------------------------------
    Sync progress step — AORM-9.29
    ----------------------------------------------------------------------- */
 

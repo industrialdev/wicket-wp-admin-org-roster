@@ -43,8 +43,15 @@
  * with the selected IDs, then navigates to the sync-progress step on success.
  * A commit error is surfaced as a dismissible Notice inside the confirm modal.
  *
+ * AORM-9.31: An "Abandon Session" button opens AbandonSessionModal. Confirming
+ * fires DELETE /wicket-aorm/v1/uploads/{sessionId} (the same endpoint used by
+ * CsvValidationStep's "Start Fresh" flow) and then calls resetWizard() to
+ * return to the landing step — this is the escape hatch for a session stuck
+ * with unresolved Possible Match / Probable Match / Manual Update rows.
+ *
  * @param {{
  *   goToStep:       (step: string) => void,
+ *   resetWizard:    () => void,
  *   orgUuid:        string,
  *   membershipUuid: string,
  *   sessionId:      string|null,
@@ -59,6 +66,7 @@ import { Button, Notice, Panel, PanelBody, Spinner } from '@wordpress/components
 
 import { apiFetch } from '../../utils/apiFetch';
 import { ACTION_TYPE_LABELS } from './ReadyToSyncPanel';
+import AbandonSessionModal from './AbandonSessionModal';
 import DiscardPanel from './DiscardPanel';
 import ManualUpdatePanel from './ManualUpdatePanel';
 import PossibleMatchPanel from './PossibleMatchPanel';
@@ -107,7 +115,7 @@ export const CATEGORY_LABELS = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ValidationReviewStep( { sessionId, selectedFile, goToStep } ) {
+export default function ValidationReviewStep( { sessionId, selectedFile, goToStep, resetWizard } ) {
 	const [ categories, setCategories ] = useState( null );
 	const [ actionType, setActionType ] = useState( null );
 	const [ isLoading,  setIsLoading  ] = useState( false );
@@ -240,6 +248,52 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 		}
 	}, [ sessionId, syncConfirmIds, isCommitting, goToStep ] );
 
+	// ── AORM-9.31: Abandon Session modal state ────────────────────────────────
+
+	/** Whether the AbandonSessionModal confirmation dialog is open. */
+	const [ isAbandonModalOpen, setIsAbandonModalOpen ] = useState( false );
+
+	/** Whether the abandon DELETE request is in-flight. */
+	const [ isAbandoning, setIsAbandoning ] = useState( false );
+
+	/** Open the Abandon Session confirmation modal. */
+	const openAbandonModal = useCallback( () => {
+		setIsAbandonModalOpen( true );
+	}, [] );
+
+	/** Dismiss the modal without abandoning anything. */
+	const closeAbandonModal = useCallback( () => {
+		setIsAbandonModalOpen( false );
+	}, [] );
+
+	/**
+	 * Admin confirmed the abandon action (AORM-9.31).
+	 * Fires DELETE /wicket-aorm/v1/uploads/{sessionId} — errors are ignored,
+	 * mirroring CsvValidationStep's abandonSession(): the endpoint is
+	 * idempotent (deleting an already-cleared or unknown session is a no-op),
+	 * and the admin should always be able to back out to a clean landing step.
+	 */
+	const handleAbandonConfirmed = useCallback( async () => {
+		if ( ! sessionId || isAbandoning ) {
+			return;
+		}
+
+		setIsAbandoning( true );
+
+		try {
+			await apiFetch( {
+				path:   `/wicket-aorm/v1/uploads/${ encodeURIComponent( sessionId ) }`,
+				method: 'DELETE',
+			} );
+		} catch {
+			// Ignore — the session is being abandoned either way.
+		}
+
+		setIsAbandoning( false );
+		setIsAbandonModalOpen( false );
+		resetWizard?.();
+	}, [ sessionId, isAbandoning, resetWizard ] );
+
 	// ── Fetch staged records ──────────────────────────────────────────────────
 
 	useEffect( () => {
@@ -299,9 +353,31 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 				/>
 			) }
 
-			<h2 className="aorm-validation-review__heading">
-				{ __( 'Review Upload', 'wicket-aorm' ) }
-			</h2>
+			{ /* AORM-9.31: Abandon Session confirmation modal */ }
+			<AbandonSessionModal
+				isOpen={ isAbandonModalOpen }
+				onConfirm={ handleAbandonConfirmed }
+				onClose={ closeAbandonModal }
+				isAbandoning={ isAbandoning }
+			/>
+
+			<div className="aorm-validation-review__heading-row">
+				<h2 className="aorm-validation-review__heading">
+					{ __( 'Review Upload', 'wicket-aorm' ) }
+				</h2>
+
+				{ /* AORM-9.31: escape hatch for a session stuck with unresolved rows */ }
+				{ sessionId && (
+					<Button
+						variant="secondary"
+						isDestructive
+						onClick={ openAbandonModal }
+						className="aorm-validation-review__abandon-session"
+					>
+						{ __( 'Abandon Session', 'wicket-aorm' ) }
+					</Button>
+				) }
+			</div>
 
 			{ /* Loading state */ }
 			{ isLoading && (
