@@ -447,14 +447,21 @@ class SyncService
      * syncNewRecordViaRelationship() (AORM-9.5) rather than introducing a second
      * convention.
      *
-     * Membership assignment creation (AORM-9.18) and role application
-     * (AORM-9.19) are added to this method in follow-up tickets — not yet
+     * Also creates the Direct Assignment membership record linking the
+     * person to the roster org — a `person_memberships` resource, not a
+     * `connections` resource like the Relationship path — via
+     * MdpClient::createPersonMembershipAssignment(), using the roster
+     * membership_uuid already present on the staged record row (AORM-9.18).
+     * The assignment's start date is the current sync action time, not the
+     * underlying membership tier's own cycle start date. Role application
+     * (AORM-9.19) is added to this method in a follow-up ticket — not yet
      * wired to a Direct Assignment dispatcher or to syncRecord()'s routing.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
      *
      * @see AORM-9.17 — create person
+     * @see AORM-9.18 — create membership assignment (roster org, start = today)
      */
     protected function syncNewRecordViaDirectAssignment(array $record): string
     {
@@ -485,7 +492,16 @@ class SyncService
             throw new \Exception($personResult->get_error_message());
         }
 
-        return (string) $personResult;
+        $personUuid = (string) $personResult;
+
+        // ── AORM-9.18: create membership assignment to the roster org ─────
+
+        $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+        $mdpClient->createPersonMembershipAssignment($personUuid, $membershipUuid);
+
+        return $personUuid;
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────

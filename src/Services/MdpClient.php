@@ -1580,6 +1580,182 @@ class MdpClient
     }
 
     /**
+     * Create a Direct Assignment membership record linking a person to an
+     * organization membership (roster).
+     *
+     * Unlike the Relationship path (a `connections` resource), the Direct
+     * Assignment path links the person to the roster org via a
+     * `person_memberships` resource — the same resource type the roster
+     * listing itself is built from (see getRosterMembers()).
+     *
+     * Steps:
+     *   1. Resolve the org membership's `memberships` (tier) resource ID via
+     *      `GET organization_memberships/{membership_uuid}?include=membership`
+     *      — required because `person_memberships` POSTs need a `membership`
+     *      relationship pointing at the tier, not just the org membership.
+     *   2. POST a `person_memberships` resource with `starts_at` set to the
+     *      current sync action time (NOT the org membership's own cycle start
+     *      date — deliberately different from the legacy
+     *      wicket_assign_person_to_org_membership() helper in
+     *      wicket-wp-base-plugin, which copies the org membership's cycle
+     *      dates). `ends_at` is intentionally omitted so the assignment is
+     *      open-ended; end-dating on removal is handled separately by the
+     *      Direct Assignment Remove path (AORM-9.24).
+     *
+     * Does nothing when `$personUuid` or `$membershipUuid` is empty, or when
+     * `wicket_api_client()` is unavailable.
+     *
+     * Throws on failure (including when the membership tier ID cannot be
+     * resolved) so the caller (SyncService / SyncJobRunner) can record the
+     * staged record as failed rather than silently losing the assignment.
+     *
+     * MDP payload shape:
+     * ```json
+     * {"data":{"type":"person_memberships","attributes":{"starts_at":"<iso8601>","status":"Active"},
+     *   "relationships":{
+     *     "person":{"data":{"type":"people","id":"<person_uuid>"}},
+     *     "membership":{"data":{"type":"memberships","id":"<tier_id>"}},
+     *     "organization_membership":{"data":{"type":"organization_memberships","id":"<membership_uuid>"}}
+     *   }}}
+     * ```
+     *
+     * @param string $personUuid     Person UUID.
+     * @param string $membershipUuid Organization membership (roster) UUID.
+     *
+     * @throws \Exception When the tier ID cannot be resolved or the MDP POST call fails.
+     *
+     * @see AORM-9.18 — new_record: create membership assignment (roster org, start = today)
+     */
+    public function createPersonMembershipAssignment(string $personUuid, string $membershipUuid): void
+    {
+        if ($personUuid === '' || $membershipUuid === '') {
+            return;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return;
+        }
+
+        try {
+            $membershipTypeId = $this->resolveMembershipTypeId($client, $membershipUuid);
+
+            if ($membershipTypeId === '') {
+                throw new \RuntimeException('Could not resolve membership tier ID for organization_membership ' . $membershipUuid . '.');
+            }
+
+            $payload = [
+                'data' => [
+                    'type'          => 'person_memberships',
+                    'attributes'    => [
+                        'starts_at' => $this->currentActionTimestamp(),
+                        'status'    => 'Active',
+                    ],
+                    'relationships' => [
+                        'person'                   => [
+                            'data' => [
+                                'type' => 'people',
+                                'id'   => $personUuid,
+                            ],
+                        ],
+                        'membership'                => [
+                            'data' => [
+                                'type' => 'memberships',
+                                'id'   => $membershipTypeId,
+                            ],
+                        ],
+                        'organization_membership'   => [
+                            'data' => [
+                                'type' => 'organization_memberships',
+                                'id'   => $membershipUuid,
+                            ],
+                        ],
+                    ],
+                ],
+            ];
+
+            $this->callWithRetry(fn () => $client->post('person_memberships', ['json' => $payload]));
+        } catch (\Exception $e) {
+            throw new \RuntimeException(
+                'MDP membership assignment creation failed: ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
+    }
+
+    /**
+     * Resolve the `memberships` (tier) resource ID for an organization membership.
+     *
+     * Reads `relationships.membership.data.id` from a single-record
+     * `organization_memberships` response. Falls back to scanning `included`
+     * for a sideloaded `memberships` / `membership` / `membership_types`
+     * resource when the direct relationship pointer is absent — mirrors the
+     * fallback used by wicket-wp-account-centre's
+     * DirectAssignmentStrategy::assignPersonToMembershipSeat() for the same
+     * resolution problem in the front-end self-service add-member flow.
+     *
+     * @param object $client         MDP API client (must be non-null).
+     * @param string $membershipUuid Organization membership UUID.
+     *
+     * @return string  Membership tier resource ID, or '' when it cannot be resolved.
+     */
+    private function resolveMembershipTypeId(object $client, string $membershipUuid): string
+    {
+        $query    = http_build_query(['include' => 'membership']);
+        $endpoint = 'organization_memberships/' . $membershipUuid . '?' . $query;
+
+        $response = $this->callWithRetry(fn () => $client->get($endpoint));
+
+        if (! is_array($response) || empty($response['data'])) {
+            return '';
+        }
+
+        $membershipTypeId = (string) ($response['data']['relationships']['membership']['data']['id'] ?? '');
+
+        if ($membershipTypeId !== '') {
+            return $membershipTypeId;
+        }
+
+        foreach ($response['included'] ?? [] as $included) {
+            $includedType = (string) ($included['type'] ?? '');
+
+            if (in_array($includedType, ['memberships', 'membership', 'membership_types'], true)) {
+                $includedId = (string) ($included['id'] ?? '');
+
+                if ($includedId !== '') {
+                    return $includedId;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Current point-in-time timestamp in UTC, ISO-8601 formatted.
+     *
+     * Prefers wicket_time_get_current_iso8601_utc() (defined in
+     * wicket-wp-base-plugin) so the timestamp format matches every other MDP
+     * date attribute written by the Wicket ecosystem. Falls back to a plain
+     * DateTimeImmutable formatting when the helper is unavailable (e.g. in
+     * unit tests) — mirrors the identical fallback used by
+     * ConnectionService::currentStartDate() / MembershipService::currentTimestamp()
+     * in wicket-wp-account-centre.
+     *
+     * @see AORM-9.18
+     */
+    private function currentActionTimestamp(): string
+    {
+        if (function_exists('wicket_time_get_current_iso8601_utc')) {
+            return wicket_time_get_current_iso8601_utc();
+        }
+
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
      * Call an MDP API callable with exponential-backoff retry.
      *
      * Retries up to {@see RETRY_MAX_ATTEMPTS} total attempts (including the first).
