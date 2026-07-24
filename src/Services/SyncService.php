@@ -429,6 +429,65 @@ class SyncService
         $this->revokeConfigSecurityRoles($personUuid, $orgUuid);
     }
 
+    // ── Direct Assignment path (Phase 2) ─────────────────────────────────
+
+    /**
+     * Handle new_record sync via the Direct Assignment path.
+     *
+     * Finds or creates the person in MDP via PersonService::createOrGetPerson(),
+     * using the same email/phone type settings as the Relationship path
+     * (wicket_aorm_settings[email_address_type]/[phone_number_type], defaulting
+     * to self::DEFAULT_EMAIL_TYPE/DEFAULT_PHONE_TYPE).
+     *
+     * Person creation is identical between sync paths: WicketORM's
+     * PersonService::createOrGetPerson() / createOrUpdatePerson() are both thin
+     * wrappers around the same wicket_create_or_get_person() call regardless of
+     * how the person is subsequently linked to the roster org (relationship vs.
+     * membership assignment), so this reuses the exact call shape used by
+     * syncNewRecordViaRelationship() (AORM-9.5) rather than introducing a second
+     * convention.
+     *
+     * Membership assignment creation (AORM-9.18) and role application
+     * (AORM-9.19) are added to this method in follow-up tickets — not yet
+     * wired to a Direct Assignment dispatcher or to syncRecord()'s routing.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     * @return string  MDP person UUID.
+     *
+     * @see AORM-9.17 — create person
+     */
+    protected function syncNewRecordViaDirectAssignment(array $record): string
+    {
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        // ── AORM-9.17: find or create the person ──────────────────────────
+
+        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
+        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
+        $phoneType = (string) ($settings[self::SETTINGS_KEY_PHONE_TYPE] ?? self::DEFAULT_PHONE_TYPE);
+
+        $personService = $this->personService ?? new \WicketORM\Services\PersonService();
+
+        $personResult = $personService->createOrGetPerson(
+            (string) ($rawData['first_name'] ?? ''),
+            (string) ($rawData['last_name'] ?? ''),
+            (string) ($rawData['email'] ?? ''),
+            [
+                'phone'      => (string) ($rawData['phone'] ?? ''),
+                'email_type' => $emailType,
+                'phone_type' => $phoneType,
+            ]
+        );
+
+        if (is_wp_error($personResult)) {
+            throw new \Exception($personResult->get_error_message());
+        }
+
+        return (string) $personResult;
+    }
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
