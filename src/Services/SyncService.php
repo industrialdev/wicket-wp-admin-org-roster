@@ -520,6 +520,99 @@ class SyncService
         return $personUuid;
     }
 
+    /**
+     * Handle exact_match sync via the Direct Assignment path.
+     *
+     * 1. Updates the person's job title in MDP from the imported raw_data.title
+     *    field, when a non-empty title is present — reuses the same
+     *    updatePersonTitleIfPresent() helper as the Relationship path (AORM-9.8).
+     * 2. Ensures an ACTIVE Direct Assignment membership exists linking the
+     *    person to the roster's org membership. A prior assignment may exist
+     *    but have already ended (e.g. the person was previously removed), so
+     *    this checks specifically for an active row via
+     *    MdpClient::hasActivePersonMembershipAssignment() and only creates a
+     *    new assignment via MdpClient::createPersonMembershipAssignment() when
+     *    none is currently active.
+     *
+     * The person UUID is resolved from the first entry in `matched_persons`,
+     * same as syncExactMatchViaRelationship(). Role application (AORM-9.21) is
+     * not yet implemented here.
+     *
+     * This method is not yet wired to a Direct Assignment dispatcher or to
+     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.20 — update title, create assignment if not active
+     */
+    protected function syncExactMatchViaDirectAssignment(array $record): void
+    {
+        $personUuid = $this->extractPersonUuidFromMatchedPersons($record);
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+
+        // ── AORM-9.20: update title ───────────────────────────────────────
+
+        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+
+        // ── AORM-9.20: create assignment if not active ────────────────────
+
+        $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+    }
+
+    /**
+     * Handle already_on_roster sync via the Direct Assignment path.
+     *
+     * Identical behaviour to syncExactMatchViaDirectAssignment() — updates
+     * the person's title, then ensures an ACTIVE Direct Assignment membership
+     * exists, creating one only when none is currently active. Direct
+     * Assignment has no relationship records to end-date between the two
+     * statuses (unlike the Relationship path, where exact_match additionally
+     * ends other-org relationships), so both statuses share the same steps
+     * for this ticket.
+     *
+     * The person UUID is resolved from the first entry in `matched_persons`,
+     * same as syncAlreadyOnRosterViaRelationship(). Role application
+     * (AORM-9.21) is not yet implemented here.
+     *
+     * This method is not yet wired to a Direct Assignment dispatcher or to
+     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.20 — update title, create assignment if not active
+     */
+    protected function syncAlreadyOnRosterViaDirectAssignment(array $record): void
+    {
+        $personUuid = $this->extractPersonUuidFromMatchedPersons($record);
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+
+        // ── AORM-9.20: update title ───────────────────────────────────────
+
+        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+
+        // ── AORM-9.20: create assignment if not active ────────────────────
+
+        $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+    }
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
@@ -608,6 +701,41 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->addImportedEmailAsPrimary($personUuid, $email, $emailType);
+    }
+
+    /**
+     * Ensure a person has an ACTIVE Direct Assignment membership on the given
+     * org membership (roster), creating one only when none is currently active.
+     *
+     * Delegates the active check to MdpClient::hasActivePersonMembershipAssignment()
+     * and, when it returns false, creates a new assignment via
+     * MdpClient::createPersonMembershipAssignment() — the same call used by
+     * syncNewRecordViaDirectAssignment() (AORM-9.18). No-ops when either UUID
+     * is empty.
+     *
+     * Shared by syncExactMatchViaDirectAssignment() and
+     * syncAlreadyOnRosterViaDirectAssignment() (AORM-9.20).
+     *
+     * @param string $personUuid     Person UUID.
+     * @param string $membershipUuid Org-membership (roster) UUID.
+     *
+     * @throws \Exception When the MDP API call fails.
+     *
+     * @see AORM-9.20
+     */
+    private function ensureActiveMembershipAssignment(string $personUuid, string $membershipUuid): void
+    {
+        if ($personUuid === '' || $membershipUuid === '') {
+            return;
+        }
+
+        $mdpClient = $this->mdpClient ?? new MdpClient();
+
+        if ($mdpClient->hasActivePersonMembershipAssignment($personUuid, $membershipUuid)) {
+            return;
+        }
+
+        $mdpClient->createPersonMembershipAssignment($personUuid, $membershipUuid);
     }
 
     /**

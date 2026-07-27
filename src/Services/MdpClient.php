@@ -1580,6 +1580,60 @@ class MdpClient
     }
 
     /**
+     * Check whether a person currently has an ACTIVE Direct Assignment
+     * membership on a given org membership (roster).
+     *
+     * Unlike isPersonOnRoster() — which matches ANY person_memberships row
+     * regardless of status, and is used during the matching phase to decide
+     * already_on_roster vs. exact_match — this checks specifically for a
+     * currently-active row via `filter[active_at]=now`, the same Ransack
+     * predicate used by getRosterMembers() to scope the roster listing to
+     * active members. A person can be flagged already_on_roster at matching
+     * time (some assignment exists) yet have no ACTIVE assignment by the time
+     * the sync job runs (e.g. their prior assignment already ended) — this
+     * method is what the Direct Assignment sync path (AORM-9.20) uses to
+     * decide whether a new assignment needs to be created.
+     *
+     * Queries `organization_memberships/{membership_uuid}/person_memberships`
+     * filtered by `person_uuid_eq` AND `active_at=now`. Returns true when at
+     * least one row exists, false otherwise (including on API error, missing
+     * arguments, or unavailable client).
+     *
+     * @param string $personUuid     Person UUID to look up.
+     * @param string $membershipUuid Org-membership UUID to scope the search.
+     *
+     * @see AORM-9.20
+     */
+    public function hasActivePersonMembershipAssignment(string $personUuid, string $membershipUuid): bool
+    {
+        if ($personUuid === '' || $membershipUuid === '') {
+            return false;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return false;
+        }
+
+        $query    = http_build_query([
+            'filter' => [
+                'person_uuid_eq' => $personUuid,
+                'active_at'      => 'now',
+            ],
+        ]);
+        $endpoint = 'organization_memberships/' . $membershipUuid . '/person_memberships?' . $query;
+
+        try {
+            $response = $this->callWithRetry(fn () => $client->get($endpoint));
+
+            return is_array($response) && ! empty($response['data']);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
      * Create a Direct Assignment membership record linking a person to an
      * organization membership (roster).
      *
