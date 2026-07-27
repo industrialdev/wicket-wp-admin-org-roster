@@ -453,15 +453,25 @@ class SyncService
      * MdpClient::createPersonMembershipAssignment(), using the roster
      * membership_uuid already present on the staged record row (AORM-9.18).
      * The assignment's start date is the current sync action time, not the
-     * underlying membership tier's own cycle start date. Role application
-     * (AORM-9.19) is added to this method in a follow-up ticket — not yet
-     * wired to a Direct Assignment dispatcher or to syncRecord()'s routing.
+     * underlying membership tier's own cycle start date.
+     *
+     * Finally applies the user role (from OrgManConfig::get()['member_management']
+     * ['addition']['base_member_role']) and any configured security roles (from
+     * wicket_aorm_settings[security_roles]) to the person, scoped to the roster
+     * org, via the same shared ensureUserAndSecurityRoles() helper used by the
+     * Relationship path (AORM-9.7 / AORM-9.10 / AORM-9.14) — role application is
+     * identical between paths regardless of how the person is linked to the
+     * roster org (relationship vs. membership assignment) (AORM-9.19).
+     *
+     * This method is not yet wired to a Direct Assignment dispatcher or to
+     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
      *
      * @see AORM-9.17 — create person
      * @see AORM-9.18 — create membership assignment (roster org, start = today)
+     * @see AORM-9.19 — apply user role + config security roles
      */
     protected function syncNewRecordViaDirectAssignment(array $record): string
     {
@@ -500,6 +510,12 @@ class SyncService
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->createPersonMembershipAssignment($personUuid, $membershipUuid);
+
+        // ── AORM-9.19: apply user role + config security roles ────────────
+
+        $orgUuid = (string) ($record['org_uuid'] ?? '');
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
 
         return $personUuid;
     }
@@ -610,9 +626,10 @@ class SyncService
      * sent to MDP via MdpClient::applyPersonOrgRoles(). The MDP call is skipped
      * entirely when the resulting role list is empty.
      *
-     * Shared by syncNewRecordViaRelationship() (AORM-9.7), and
+     * Shared by syncNewRecordViaRelationship() (AORM-9.7),
      * syncExactMatchViaRelationship() / syncAlreadyOnRosterViaRelationship()
-     * (AORM-9.10).
+     * (AORM-9.10), syncMergingToRecordViaRelationship() (AORM-9.14), and
+     * syncNewRecordViaDirectAssignment() (AORM-9.19).
      *
      * @param string $personUuid Person UUID.
      * @param string $orgUuid    Roster org UUID to scope the roles to.
@@ -621,6 +638,8 @@ class SyncService
      *
      * @see AORM-9.7
      * @see AORM-9.10
+     * @see AORM-9.14
+     * @see AORM-9.19
      */
     private function ensureUserAndSecurityRoles(string $personUuid, string $orgUuid): void
     {
