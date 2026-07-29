@@ -546,6 +546,37 @@
 	display: block;
 	font-size: 9px;
 }
+
+/**
+ * Email list in the MatchesTable Email column — shows every known address
+ * for a candidate, not just the primary one.
+ */
+.aorm-matches-table__email-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.aorm-matches-table__email-item {
+	display: block;
+}
+
+.aorm-matches-table__email-item + .aorm-matches-table__email-item {
+	margin-top: 4px;
+}
+
+.aorm-matches-table__email-primary-badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 5px;
+	font-size: 9px;
+	line-height: 16px;
+	text-transform: uppercase;
+	color: #1e1e1e;
+	background: #f0f0f1;
+	border-radius: 2px;
+}
+
 /* -----------------------------------------------------------------------
    Imported Record Summary — AORM-8B.11
    ----------------------------------------------------------------------- */

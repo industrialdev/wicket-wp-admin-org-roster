@@ -11,13 +11,24 @@
  * Compared fields:
  *   - First name — imported first_name vs match given_name  (highlighted independently)
  *   - Last name  — imported last_name vs match family_name  (highlighted independently)
- *   - Email      — imported email vs match primary_email
+ *   - Email      — imported email vs each entry in match.emails (see below)
  *   - Phone      — imported phone vs match primary_phone
  *   - Title      — imported title vs match title
  * Comparison is case-insensitive and whitespace-normalised. First and last
  * name are compared and highlighted separately so a partial match (e.g. only
  * the last name lines up) is still visible — the Name cell no longer requires
  * both parts to match before showing any highlight.
+ *
+ * Email column (updated): previously only the candidate's primary_email was
+ * shown. The Email cell now lists every known email address for the
+ * candidate (from match.emails — {address, type, primary}[]), not just the
+ * primary one, so an admin can spot a match on a secondary address (e.g. a
+ * personal email used at import time vs a work email on file). The primary
+ * address is always sorted first and carries a "Primary" badge; each entry
+ * is independently highlighted when it matches the imported email. Falls
+ * back to a single entry built from primary_email when match.emails is
+ * empty (e.g. the slim fallback shape used for unresolved candidates in
+ * StagedMatchesController).
  *
  * Endpoint: GET /wicket-aorm/v1/staged/{id}/matches
  *
@@ -27,7 +38,7 @@
  *
  * Columns (in order):
  *   - Name / ID  — full_name on the first line, UUID below in muted text.
- *   - Email      — primary_email.
+ *   - Email      — every known email address (see above), primary first.
  *   - Location   — city + country from location object, comma-joined.
  *   - Phone      — primary_phone.
  *   - Title      — job title.
@@ -124,7 +135,69 @@ export const HIGHLIGHT_CLASS = 'aorm-matches-table__cell--match';
  */
 export const NAME_PART_CLASS = 'aorm-matches-table__name-part';
 
+/**
+ * CSS class applied to the <ul> listing a candidate's email addresses in
+ * the Email column.
+ *
+ * @type {string}
+ */
+export const EMAIL_LIST_CLASS = 'aorm-matches-table__email-list';
+
+/**
+ * CSS class applied to each <li> email entry inside EMAIL_LIST_CLASS.
+ *
+ * @type {string}
+ */
+export const EMAIL_ITEM_CLASS = 'aorm-matches-table__email-item';
+
+/**
+ * CSS class applied to the "Primary" badge shown next to a candidate's
+ * primary email address.
+ *
+ * @type {string}
+ */
+export const PRIMARY_EMAIL_BADGE_CLASS = 'aorm-matches-table__email-primary-badge';
+
+/**
+ * Label text for the "Primary" badge shown next to a candidate's primary
+ * email address.
+ *
+ * @type {string}
+ */
+export const PRIMARY_EMAIL_LABEL = __( 'Primary', 'wicket-aorm' );
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Build the ordered list of email entries to render for a match candidate.
+ *
+ * Prefers the full match.emails array ({address, type, primary}[]) so every
+ * known email address is shown, not just the primary one. Falls back to a
+ * single synthetic entry built from match.primary_email when emails is
+ * empty — this covers the slim fallback shape StagedMatchesController
+ * returns for a candidate UUID that could not be resolved via the MDP.
+ *
+ * The primary entry (if any) is always sorted first; remaining entries keep
+ * the order returned by the API.
+ *
+ * @param {{emails?: Object[], primary_email?: string}} match
+ * @return {Object[]}  List of {address, type, primary} entries.
+ */
+export function buildEmailEntries( match ) {
+	const emails = Array.isArray( match?.emails ) ? match.emails : [];
+
+	if ( emails.length > 0 ) {
+		return [ ...emails ].sort(
+			( a, b ) => ( b.primary ? 1 : 0 ) - ( a.primary ? 1 : 0 )
+		);
+	}
+
+	if ( match?.primary_email ) {
+		return [ { address: match.primary_email, type: '', primary: true } ];
+	}
+
+	return [];
+}
 
 /**
  * Normalise a value for field comparison: convert to string, trim, lowercase.
@@ -316,10 +389,8 @@ function MatchRow( { match, rawData = {} } ) {
 		normalizeForCompare( rawData.last_name ),
 		match.family_name
 	);
-	const emailHighlight = highlightClass(
-		normalizeForCompare( rawData.email ),
-		match.primary_email
-	);
+	const normalizedImportedEmail = normalizeForCompare( rawData.email );
+	const emailEntries            = buildEmailEntries( match );
 	const phoneHighlight = highlightClass(
 		normalizeForCompare( rawData.phone ),
 		match.primary_phone
@@ -360,8 +431,26 @@ function MatchRow( { match, rawData = {} } ) {
 				) }
 			</td>
 
-			<td className={ `aorm-matches-table__cell aorm-matches-table__cell--email ${ emailHighlight }`.trim() }>
-				{ match.primary_email || '—' }
+			<td className="aorm-matches-table__cell aorm-matches-table__cell--email">
+				{ emailEntries.length === 0 ? (
+					'—'
+				) : (
+					<ul className={ EMAIL_LIST_CLASS }>
+						{ emailEntries.map( ( email, index ) => (
+							<li
+								key={ `${ email.address }-${ index }` }
+								className={ `${ EMAIL_ITEM_CLASS } ${ highlightClass( normalizedImportedEmail, email.address ) }`.trim() }
+							>
+								{ email.address }
+								{ email.primary && (
+									<span className={ PRIMARY_EMAIL_BADGE_CLASS }>
+										{ PRIMARY_EMAIL_LABEL }
+									</span>
+								) }
+							</li>
+						) ) }
+					</ul>
+				) }
 			</td>
 
 			<td className="aorm-matches-table__cell aorm-matches-table__cell--location">
