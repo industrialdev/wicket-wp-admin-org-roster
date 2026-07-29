@@ -144,6 +144,9 @@ class MdpClient
      *   max_assignments: int|null,
      *   unlimited_assignments: bool,
      * }|array{}
+     *
+     * `org_type` is resolved to a human-friendly label (via
+     * resolveOrgTypeLabel()) rather than the raw MDP slug — see AORM-4.2.
      */
     public function getOrgMembershipDetail(string $membership_uuid): array
     {
@@ -2267,6 +2270,9 @@ class MdpClient
      *   max_assignments: int|null,
      *   unlimited_assignments: bool,
      * }|array{}
+     *
+     * `org_type` is passed through resolveOrgTypeLabel() to convert the raw
+     * MDP slug (e.g. `company`) into its display label (e.g. `Company`).
      */
     private function normalizeOrgMembershipDetail(array $response): array
     {
@@ -2314,7 +2320,7 @@ class MdpClient
         return [
             'org_uuid'              => $orgRelId,
             'org_name'              => (string) ($orgAttrs['legal_name_en'] ?? ''),
-            'org_type'              => (string) ($orgAttrs['type'] ?? ''),
+            'org_type'              => $this->resolveOrgTypeLabel((string) ($orgAttrs['type'] ?? '')),
             'membership_uuid'       => (string) ($record['id'] ?? ''),
             'membership_tier'       => (string) ($membershipAttrs['name'] ?? ''),
             'membership_status'     => (string) ($attrs['status'] ?? ''),
@@ -2323,5 +2329,52 @@ class MdpClient
             'max_assignments'       => $maxAssignments,
             'unlimited_assignments' => $unlimitedAssignments,
         ];
+    }
+
+    /**
+     * Resolve an organization type slug to its human-friendly label.
+     *
+     * The `organizations` resource's `type` attribute is a slug (e.g.
+     * `company`, `veterinary-clinic`) rather than a display-ready string.
+     * This looks the slug up in `wicket_get_org_types_list()` (provided by
+     * wicket-wp-base-plugin) and returns the matching resource type's `name`
+     * attribute.
+     *
+     * Falls back to the raw slug — never blank — when the helper function
+     * is unavailable, the call throws, the response is malformed, or no
+     * matching slug is found, so the roster heading always shows something
+     * even if the MDP resource_types list can't be fetched.
+     *
+     * @see AORM-4.2
+     */
+    private function resolveOrgTypeLabel(string $slug): string
+    {
+        if ($slug === '' || ! function_exists('wicket_get_org_types_list')) {
+            return $slug;
+        }
+
+        try {
+            $orgTypes = wicket_get_org_types_list();
+        } catch (\Exception $e) {
+            return $slug;
+        }
+
+        if (! is_array($orgTypes)) {
+            return $slug;
+        }
+
+        foreach ($orgTypes as $orgType) {
+            $orgTypeSlug = (string) ($orgType['attributes']['slug'] ?? '');
+
+            if ($orgTypeSlug !== $slug) {
+                continue;
+            }
+
+            $label = (string) ($orgType['attributes']['name'] ?? '');
+
+            return $label !== '' ? $label : $slug;
+        }
+
+        return $slug;
     }
 }
