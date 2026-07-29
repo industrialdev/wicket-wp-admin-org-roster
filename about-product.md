@@ -82,15 +82,16 @@ The list includes any current organization membership in the MDP (Active, Delaye
 - Number of assigned people (assigned / max seats based on max assignment)
 - Membership Status
 - Created (date)
+- Updated At (date the org membership record was last modified in the MDP — sortable, see note below)
 - Roster Status (derived from staged records: In Progress, Syncing, Failed, etc.)
-- Last Updated (date of most recent save in roster tool + user email)
+- Roster Last Saved (date of most recent save in roster tool + user email — local-only data, display-only, not sortable)
 - Link to MDP (links to membership assignment view in MDP)
 
 **Search by:** Organization Name, Organization ID, Organization UUID.
 
 **Filter by:** Roster Status, Membership Tier, Membership Status.
 
-**Sorting:** All columns sortable. Default order is Last Updated date (newest first).
+**Sorting:** Organization Name, Membership Tier, Created, Updated At, and Roster Status are sortable. Default order is Updated At (newest first). "Roster Last Saved" is not sortable — it's sourced from this plugin's local database (`wp_wicket_aorm_roster_meta`), which the MDP API (the source of pagination/sorting for this list) has no knowledge of and cannot sort or paginate by server-side.
 
 **Pagination:** Built-in WP_List_Table pagination.
 

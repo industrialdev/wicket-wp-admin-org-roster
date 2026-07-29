@@ -20,9 +20,14 @@ use WP_List_Table;
  *   membership_tier   — Membership Tier with end date
  *   assigned_count    — # Assigned (assigned / max seats)
  *   membership_status — Membership Status
- *   created           — Created date
+ *   created           — Created date (MDP organization_membership.created_at)
+ *   mdp_updated_at    — Updated At (MDP organization_membership.updated_at) — the only
+ *                        column the MDP API can genuinely sort/paginate by, so it carries
+ *                        the sortable + default-sort behavior
  *   roster_status     — Roster Status (from wp_wicket_aorm_roster_meta)
- *   last_updated      — Last Updated date + user email (from wp_wicket_aorm_roster_meta)
+ *   last_updated      — Roster Last Saved date + user email (from wp_wicket_aorm_roster_meta);
+ *                        local-only data, display-only (not sortable) since the MDP API has
+ *                        no knowledge of it and can't sort/paginate by it server-side
  *   mdp_link          — Link to MDP record
  *
  * @see AORM-3
@@ -88,8 +93,9 @@ class RosterListTable extends WP_List_Table
             'assigned_count'    => __('# Assigned', 'wicket-aorm'),
             'membership_status' => __('Membership Status', 'wicket-aorm'),
             'created'           => __('Created', 'wicket-aorm'),
+            'mdp_updated_at'    => __('Updated At', 'wicket-aorm'),
             'roster_status'     => __('Roster Status', 'wicket-aorm'),
-            'last_updated'      => __('Last Updated', 'wicket-aorm'),
+            'last_updated'      => __('Roster Last Saved', 'wicket-aorm'),
             'mdp_link'          => __('MDP', 'wicket-aorm'),
         ];
     }
@@ -97,8 +103,12 @@ class RosterListTable extends WP_List_Table
     /**
      * Declare which columns are sortable and which direction is the default.
      *
-     * All 8 columns are sortable. The default sort is Last Updated descending
-     * (newest first), indicated by passing true as the second element.
+     * 5 of the 9 columns are sortable. The default sort is Updated At
+     * descending (newest first), indicated by passing true as the second
+     * element. "Roster Last Saved" (last_updated) is intentionally NOT
+     * sortable here — it is sourced from the local wp_wicket_aorm_roster_meta
+     * table, which the MDP API (the source of pagination/sorting for this
+     * table) has no knowledge of and cannot sort or paginate by server-side.
      *
      * @return array<string, array{string, bool}>
      */
@@ -108,8 +118,8 @@ class RosterListTable extends WP_List_Table
             'org_name'          => ['org_name', false],
             'membership_tier'   => ['membership_tier', false],
             'created'           => ['created', false],
+            'mdp_updated_at'    => ['mdp_updated_at', true], // default sort, newest first
             'roster_status'     => ['roster_status', false],
-            'last_updated'      => ['last_updated', true], // default sort, newest first
         ];
     }
 
@@ -142,7 +152,7 @@ class RosterListTable extends WP_List_Table
         $currentPage = $this->get_pagenum();
 
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-        $orderby   = sanitize_key((string) ($_GET['orderby'] ?? 'last_updated'));
+        $orderby   = sanitize_key((string) ($_GET['orderby'] ?? 'mdp_updated_at'));
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $order     = strtolower(sanitize_key((string) ($_GET['order'] ?? 'desc'))) === 'asc' ? 'asc' : 'desc';
         $sortField = $this->mapColumnToSortField($orderby, $order);
@@ -299,6 +309,23 @@ class RosterListTable extends WP_List_Table
     }
 
     /**
+     * Render the Updated At column.
+     *
+     * Parses the ISO 8601 timestamp returned by the MDP for the org
+     * membership resource's own `updated_at` attribute and formats it as
+     * YYYY-MM-DD. Distinct from "Roster Last Saved" (last_updated), which is
+     * a local wp_wicket_aorm_roster_meta value tracking AORM's own roster
+     * actions — this column reflects MDP-side mutations only. Returns an
+     * empty string when no value is set or the value cannot be parsed.
+     *
+     * @param array<string, mixed> $item
+     */
+    protected function column_mdp_updated_at($item): string
+    {
+        return esc_html($this->formatDate((string) ($item['mdp_updated_at'] ?? '')));
+    }
+
+    /**
      * Render the Roster Status column.
      *
      * Value sourced from wp_wicket_aorm_roster_meta.roster_status (AORM-3.3).
@@ -317,9 +344,10 @@ class RosterListTable extends WP_List_Table
     }
 
     /**
-     * Render the Last Updated column.
+     * Render the Roster Last Saved column (array/column key remains `last_updated`).
      *
      * Shows the date and the user email from wp_wicket_aorm_roster_meta (AORM-3.3).
+     * Not sortable — see get_sortable_columns() docblock.
      *
      * TODO (AORM-3.x): format date via formatDate() and append last_updated_by email.
      *
@@ -460,6 +488,10 @@ class RosterListTable extends WP_List_Table
      *
      * JSON:API convention: prefix '-' for descending (e.g. '-updated_at').
      * Columns that have no direct MDP equivalent fall back to 'updated_at'.
+     * `last_updated` (Roster Last Saved) is intentionally absent from this map
+     * and from get_sortable_columns() — it is a local-only value the MDP API
+     * cannot sort or paginate by; any orderby value not present here (including
+     * a manually-crafted `?orderby=last_updated`) falls back to 'updated_at'.
      *
      * @param string $orderby WP column key (from $_GET['orderby']).
      * @param string $order   'asc' or 'desc'.
@@ -470,8 +502,8 @@ class RosterListTable extends WP_List_Table
             'org_name'        => 'organization_legal_name_en',
             'membership_tier' => 'membership_name_en',
             'created'         => 'created_at',
-            'roster_status'     => 'updated_at', // local-only; fall back to MDP updated_at
-            'last_updated'      => 'updated_at',
+            'mdp_updated_at'  => 'updated_at',
+            'roster_status'   => 'updated_at', // local-only; fall back to MDP updated_at
         ];
 
         $field = $columnMap[$orderby] ?? 'updated_at';
@@ -534,6 +566,7 @@ class RosterListTable extends WP_List_Table
                 'membership_status'   => (string) ($attrs['status'] ?? ''),
                 'in_grace'            => (bool) ($attrs['in_grace'] ?? false),
                 'created'             => (string) ($attrs['created_at'] ?? ''),
+                'mdp_updated_at'      => (string) ($attrs['updated_at'] ?? ''),
                 'roster_status'       => '',
                 'last_updated'        => '',
                 'last_updated_by'     => '',
