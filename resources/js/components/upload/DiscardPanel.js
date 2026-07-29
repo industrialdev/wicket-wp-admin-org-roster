@@ -26,9 +26,27 @@
  * Both per-row and bulk actions call onRecordCategorized?() on full success
  * to let ValidationReviewStep re-fetch the accordion data and update counts.
  *
+ * AORM-8B.22: Adds per-row and bulk permanent Remove actions.
+ *
+ *   Per-row action (Actions extra column):
+ *     Remove — opens ConfirmDeleteRecordsModal; on confirm, calls
+ *              DELETE /wicket-aorm/v1/staged-records/{id} (AORM-8B.9),
+ *              permanently removing the record from the database. Unlike
+ *              Reinstate, this cannot be undone.
+ *
+ *   Bulk action (shown when one or more rows are selected):
+ *     Remove — opens the same confirm modal for all selected IDs; on
+ *              confirm, DELETEs each ID in parallel via Promise.allSettled.
+ *              Partial failures keep the modal open and show an inline
+ *              error; full success clears the selection and closes it.
+ *
+ * Both the per-row and bulk Remove actions call onRecordCategorized?() on
+ * full success, same as Reinstate, so ValidationReviewStep re-fetches the
+ * accordion data and the Discard count drops accordingly.
+ *
  * @param {{
  *   records:                Array<Object>,  — all discard staged records
- *   onRecordCategorized?:   () => void,     — called after a successful reinstate action
+ *   onRecordCategorized?:   () => void,     — called after a successful reinstate or delete action
  * }} props
  */
 
@@ -37,6 +55,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Button, Notice } from '@wordpress/components';
 import { apiFetch } from '../../utils/apiFetch';
 import RecordsTable from './RecordsTable';
+import ConfirmDeleteRecordsModal from './ConfirmDeleteRecordsModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +109,12 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 	const [ selectedIds,       setSelectedIds       ] = useState( new Set() );
 	const [ isBulkReinstating, setIsBulkReinstating ] = useState( false );
 	const [ bulkActionError,   setBulkActionError   ] = useState( null );
+
+	// ── Delete (permanent remove) action state — AORM-8B.22 ──────────────────
+	// pendingDelete: null | { type: 'single', record: Object } | { type: 'bulk', ids: number[] }
+	const [ pendingDelete, setPendingDelete ] = useState( null );
+	const [ isDeleting,    setIsDeleting    ] = useState( false );
+	const [ deleteError,   setDeleteError   ] = useState( null );
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -180,6 +205,91 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 		} );
 	}
 
+	/**
+	 * Open the confirm-delete modal for a single record.
+	 *
+	 * @param {Object} record
+	 */
+	function requestDelete( record ) {
+		setDeleteError( null );
+		setPendingDelete( { type: 'single', record } );
+	}
+
+	/**
+	 * Open the confirm-delete modal for all currently-selected records.
+	 */
+	function requestBulkDelete() {
+		setDeleteError( null );
+		setPendingDelete( { type: 'bulk', ids: Array.from( selectedIds ) } );
+	}
+
+	/**
+	 * Dismiss the confirm-delete modal. No-op while a delete is in flight.
+	 */
+	function closeDeleteConfirm() {
+		if ( isDeleting ) {
+			return;
+		}
+
+		setPendingDelete( null );
+		setDeleteError( null );
+	}
+
+	/**
+	 * DELETE every ID targeted by the pending confirmation, in parallel.
+	 *
+	 * Uses Promise.allSettled so a partial failure does not abort the rest.
+	 * On partial failure: the modal stays open with an inline error so the
+	 * admin can retry. On full success: the modal closes, the selection
+	 * (for bulk deletes) is cleared, and onRecordCategorized is called to
+	 * refresh accordion counts.
+	 */
+	function handleConfirmDelete() {
+		if ( ! pendingDelete ) {
+			return;
+		}
+
+		const ids = pendingDelete.type === 'single'
+			? [ pendingDelete.record.id ]
+			: pendingDelete.ids;
+
+		setIsDeleting( true );
+		setDeleteError( null );
+
+		Promise.allSettled(
+			ids.map( ( id ) =>
+				apiFetch( {
+					path:   `/wicket-aorm/v1/staged-records/${ id }`,
+					method: 'DELETE',
+				} )
+			)
+		).then( ( results ) => {
+			setIsDeleting( false );
+
+			const failedCount = results.filter( ( r ) => r.status === 'rejected' ).length;
+
+			if ( failedCount > 0 ) {
+				setDeleteError(
+					sprintf(
+						/* translators: %d: number of records that could not be deleted */
+						__( '%d record(s) could not be deleted. Please try again.', 'wicket-aorm' ),
+						failedCount
+					)
+				);
+
+				return;
+			}
+
+			setPendingDelete( null );
+
+			if ( pendingDelete.type === 'bulk' ) {
+				setSelectedIds( new Set() );
+			}
+
+			onRecordCategorized?.();
+		} );
+	}
+
 	// ── Extra columns ─────────────────────────────────────────────────────────
 
 	/**
@@ -219,12 +329,39 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 					>
 						{ __( 'Reinstate', 'wicket-aorm' ) }
 					</Button>
+
+					{ /* Remove — permanently delete the record (AORM-8B.22) */ }
+					<Button
+						variant="tertiary"
+						isDestructive
+						disabled={ isReinstating }
+						onClick={ () => requestDelete( record ) }
+						className="aorm-discard-row-actions__remove"
+						aria-label={ sprintf(
+							/* translators: %s: person first name or record id */
+							__( 'Permanently delete record for %s', 'wicket-aorm' ),
+							record.raw_data?.first_name ?? record.id
+						) }
+					>
+						{ __( 'Remove', 'wicket-aorm' ) }
+					</Button>
 				</div>
 			);
 		},
 	};
 
 	const extraColumns = [ previousCategoryColumn, actionsColumn ];
+
+	/**
+	 * Number of records targeted by the pending delete confirmation.
+	 * 0 when no delete is pending.
+	 */
+	let pendingDeleteCount = 0;
+	if ( pendingDelete?.type === 'single' ) {
+		pendingDeleteCount = 1;
+	} else if ( pendingDelete?.type === 'bulk' ) {
+		pendingDeleteCount = pendingDelete.ids.length;
+	}
 
 	return (
 		<div className="aorm-discard-panel">
@@ -278,6 +415,17 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 					>
 						{ __( 'Reinstate', 'wicket-aorm' ) }
 					</Button>
+
+					{ /* Bulk Remove — permanently delete (AORM-8B.22) */ }
+					<Button
+						variant="tertiary"
+						isDestructive
+						disabled={ isBulkReinstating }
+						onClick={ requestBulkDelete }
+						className="aorm-discard-bulk-toolbar__remove"
+					>
+						{ __( 'Remove', 'wicket-aorm' ) }
+					</Button>
 				</div>
 			) }
 
@@ -288,6 +436,16 @@ export default function DiscardPanel( { records, onRecordCategorized } ) {
 				selectable
 				selectedIds={ selectedIds }
 				onSelectionChange={ setSelectedIds }
+			/>
+
+			{ /* AORM-8B.22: Confirm before permanently deleting record(s) */ }
+			<ConfirmDeleteRecordsModal
+				isOpen={ pendingDelete !== null }
+				recordCount={ pendingDeleteCount }
+				onConfirm={ handleConfirmDelete }
+				onClose={ closeDeleteConfirm }
+				isDeleting={ isDeleting }
+				deleteError={ deleteError }
 			/>
 		</div>
 	);

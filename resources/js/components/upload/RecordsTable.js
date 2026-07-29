@@ -31,7 +31,7 @@
  * }} props
  */
 
-import { useState, useMemo, useRef, useEffect } from '@wordpress/element';
+import { useState, useMemo } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { Button, CheckboxControl, SearchControl } from '@wordpress/components';
 
@@ -223,22 +223,6 @@ export default function RecordsTable( {
 
 	const isHeaderIndeterminate = someFilteredSelected && ! allFilteredSelected;
 
-	/**
-	 * Ref wrapper on the header checkbox cell so we can find the inner
-	 * <input> and set its `indeterminate` property (not supported as a React
-	 * prop on CheckboxControl).
-	 */
-	const headerCheckboxRef = useRef( null );
-
-	useEffect( () => {
-		if ( headerCheckboxRef.current ) {
-			const input = headerCheckboxRef.current.querySelector( 'input[type="checkbox"]' );
-			if ( input ) {
-				input.indeterminate = isHeaderIndeterminate;
-			}
-		}
-	}, [ isHeaderIndeterminate ] );
-
 	function handleSelectAll( checked ) {
 		if ( ! onSelectionChange ) {
 			return;
@@ -306,15 +290,14 @@ export default function RecordsTable( {
 								className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY } check-column` }
 								aria-label={ __( 'Select rows', 'wicket-aorm' ) }
 							>
-								<div ref={ headerCheckboxRef }>
-									<CheckboxControl
-										// label={ __( 'Select all', 'wicket-aorm' ) }
-										hideLabelFromVision
-										checked={ allFilteredSelected }
-										onChange={ handleSelectAll }
-										disabled={ filteredIds.length === 0 }
-									/>
-								</div>
+								<CheckboxControl
+									// label={ __( 'Select all', 'wicket-aorm' ) }
+									hideLabelFromVision
+									checked={ allFilteredSelected }
+									indeterminate={ isHeaderIndeterminate }
+									onChange={ handleSelectAll }
+									disabled={ filteredIds.length === 0 }
+								/>
 							</td>
 						) }
 
@@ -370,8 +353,8 @@ export default function RecordsTable( {
 						>
 							{ /* AORM-8B.2: Per-row checkbox cell */ }
 							{ selectable && (
-								<td
-									className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY }` }
+								<th
+									className={ `aorm-records-table__col--${ SELECTABLE_COL_KEY } check-column` }
 								>
 									<CheckboxControl
 										hideLabelFromVision
@@ -380,7 +363,7 @@ export default function RecordsTable( {
 											handleRowSelect( record.id, checked )
 										}
 									/>
-								</td>
+								</th>
 							) }
 
 							{ BASE_COLUMNS.map( ( col ) => (

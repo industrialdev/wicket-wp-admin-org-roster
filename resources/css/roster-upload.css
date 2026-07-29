@@ -691,10 +691,13 @@
 }
 
 /* -----------------------------------------------------------------------
-   Ready-to-Sync bulk action toolbar — AORM-8B.2
+   Bulk action toolbars — Ready-to-Sync (AORM-8B.2) & Discard (AORM-8B.7)
+   share the same look; selectors are combined so the style lives in one
+   place.
    ----------------------------------------------------------------------- */
 
-.aorm-rts-bulk-toolbar {
+.aorm-rts-bulk-toolbar,
+.aorm-discard-bulk-toolbar {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -706,7 +709,8 @@
 	border-radius: 4px;
 }
 
-.aorm-rts-bulk-toolbar__count {
+.aorm-rts-bulk-toolbar__count,
+.aorm-discard-bulk-toolbar__count {
 	font-size: 13px;
 	font-weight: 600;
 	color: #1d2327;
@@ -865,6 +869,16 @@
 }
 
 /* -----------------------------------------------------------------------
+   Confirm delete records modal — AORM-8B.22
+   ----------------------------------------------------------------------- */
+
+.aorm-confirm-delete-records-modal__actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+/* -----------------------------------------------------------------------
    Sync progress step — AORM-9.29
    ----------------------------------------------------------------------- */
 
@@ -968,6 +982,14 @@
 /* -----------------------------------------------------------------------
    RecordsTable — pagination bar (AORM-8.3)
    ----------------------------------------------------------------------- */
+
+.aorm-records-table .components-checkbox-control__input-container svg {
+	z-index: 1;
+}
+
+.aorm-records-table .components-base-control {
+  margin-left: 8px;
+}
 
 .aorm-records-table__pagination {
 	display: flex;
