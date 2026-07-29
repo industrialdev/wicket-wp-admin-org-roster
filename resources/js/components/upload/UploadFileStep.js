@@ -74,6 +74,35 @@ export function isFileSizeValid( file ) {
 }
 
 /**
+ * Formats a byte count as a human-readable string (B / KB / MB), matching
+ * the units used in the file-size validation error message above.
+ *
+ * @param {number} bytes
+ * @returns {string} e.g. "845 B", "12.3 KB", "1.0 MB".
+ */
+export function formatFileSize( bytes ) {
+	if ( bytes < 1024 ) {
+		return sprintf(
+			// translators: %d is a number of bytes.
+			__( '%d B', 'wicket-aorm' ),
+			bytes
+		);
+	}
+	if ( bytes < 1024 * 1024 ) {
+		return sprintf(
+			// translators: %s is a size in kilobytes, e.g. "12.3".
+			__( '%s KB', 'wicket-aorm' ),
+			( bytes / 1024 ).toFixed( 1 )
+		);
+	}
+	return sprintf(
+		// translators: %s is a size in megabytes, e.g. "1.2".
+		__( '%s MB', 'wicket-aorm' ),
+		( bytes / ( 1024 * 1024 ) ).toFixed( 1 )
+	);
+}
+
+/**
  * Validates a File for upload eligibility (AORM-6.4).
  * Checks file type first, then file size.
  *
@@ -250,6 +279,9 @@ export default function UploadFileStep( {
 						/>
 						<span className="aorm-upload-file__file-name">
 							{ selectedFile.name }
+						</span>
+						<span className="aorm-upload-file__file-size">
+							{ formatFileSize( selectedFile.size ) }
 						</span>
 						<Button
 							variant="tertiary"
