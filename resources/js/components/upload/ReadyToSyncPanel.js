@@ -45,6 +45,8 @@
  *   onRecordDiscarded?:   () => void,    — called after a successful Discard to refresh data
  *   onSyncSelected?:      (ids: number[]) => void,  — bulk Sync to MDP (AORM-9 stub)
  *   sessionId?:           string|null,             — session UUID; enables AORM-8B.4 replacements fetch
+ *   resetWizard?:         () => void,    — returns the wizard to landing; enables a "Start Over"
+ *                                          button on the replacements fetch error Notice
  * }} props
  *
  * AORM-8B.4: When sessionId is provided and actionType === 'replace', the
@@ -52,7 +54,12 @@
  * GET /wicket-aorm/v1/uploads/{sessionId}/replacements rather than filtering
  * the records prop. The component maintains its own removalRecords /
  * isLoadingRemovals / removalFetchError state and re-fetches (via
- * removalRefetchKey) after each successful Discard Removal action.
+ * removalRefetchKey) after each successful Discard Removal action. When that
+ * fetch fails (most commonly "Upload session not found." if the session was
+ * abandoned/cleaned up elsewhere), a "Start Over" button is shown alongside
+ * the error — calling the optional resetWizard prop threaded down from
+ * ValidationReviewStep — so the admin isn't left on a dead-end Notice with
+ * no way to leave the panel.
  *
  * AORM-8B.21: When records with `exact_match` or `merging_to_record` status
  * are present in the "Records being added" list, a warning Notice is displayed
@@ -166,6 +173,17 @@ export const CROSS_ORG_WARNING_MESSAGE = __(
 	'wicket-aorm'
 );
 
+/**
+ * CSS class for the "Start Over" button shown alongside the replacements
+ * fetch error Notice (AORM-8B.4's error state — e.g. "Upload session not
+ * found." when the session was abandoned/cleaned up elsewhere). Only
+ * rendered when a `resetWizard` prop is supplied by the parent.
+ * Exported so tests can assert presence without duplicating the class name.
+ *
+ * @type {string}
+ */
+export const REMOVALS_START_OVER_BTN_CLASS = 'aorm-ready-to-sync-panel__removals-start-over';
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReadyToSyncPanel( {
@@ -175,6 +193,7 @@ export default function ReadyToSyncPanel( {
 	onOpenReviewModal,
 	onRecordDiscarded,
 	onSyncSelected,
+	resetWizard,
 } ) {
 	const [ discardingIds,       setDiscardingIds       ] = useState( new Set() );
 	const [ discardError,        setDiscardError        ] = useState( null );
@@ -659,7 +678,16 @@ export default function ReadyToSyncPanel( {
 							onRemove={ () => setRemovalFetchError( null ) }
 							className="aorm-ready-to-sync-panel__removals-error"
 						>
-							{ removalFetchError }
+							<p>{ removalFetchError }</p>
+							{ resetWizard && (
+								<Button
+									variant="secondary"
+									className={ REMOVALS_START_OVER_BTN_CLASS }
+									onClick={ resetWizard }
+								>
+									{ __( 'Start Over', 'wicket-aorm' ) }
+								</Button>
+							) }
 						</Notice>
 					) }
 

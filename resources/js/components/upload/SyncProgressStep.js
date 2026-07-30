@@ -19,8 +19,15 @@
  *
  * Polling stops immediately on:
  *   - `is_complete === true`   → transitions to Results phase after COMPLETION_DELAY_MS.
- *   - A fetch error            → shows an error Notice with a Retry button.
+ *   - A fetch error            → shows an error Notice with Retry and Start Over buttons.
  *   - Component unmount        → clears the interval for clean teardown.
+ *
+ * A poll error most commonly means the session is no longer reachable (e.g.
+ * "Upload session not found." — abandoned or cleaned up from another tab).
+ * Retry alone would just re-poll the same dead session forever, so a
+ * "Start Over" button is shown alongside it, calling resetWizard() directly
+ * — unlike the Done button, this skips the DELETE call since the session is
+ * already confirmed gone server-side.
  *
  * @param {{
  *   sessionId:   string|null,
@@ -59,6 +66,14 @@ export const SUCCESS_NOTICE_CLASS = 'aorm-sync-progress__notice--success';
 
 /** CSS class applied to the failure Notice. */
 export const FAILURE_NOTICE_CLASS = 'aorm-sync-progress__notice--failure';
+
+/**
+ * CSS class for the "Start Over" button shown alongside a poll error.
+ * Exported so tests can assert presence without duplicating the class name.
+ *
+ * @type {string}
+ */
+export const START_OVER_BTN_CLASS = 'aorm-sync-progress__start-over-btn';
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -292,6 +307,15 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 						<Button variant="secondary" onClick={ startPolling }>
 							{ __( 'Retry', 'wicket-aorm' ) }
 						</Button>
+						{ resetWizard && (
+							<Button
+								variant="tertiary"
+								className={ START_OVER_BTN_CLASS }
+								onClick={ resetWizard }
+							>
+								{ __( 'Start Over', 'wicket-aorm' ) }
+							</Button>
+						) }
 					</Notice>
 				) }
 

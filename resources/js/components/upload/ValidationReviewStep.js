@@ -49,6 +49,15 @@
  * return to the landing step — this is the escape hatch for a session stuck
  * with unresolved Possible Match / Probable Match / Manual Update rows.
  *
+ * A "Start Over" button is also rendered alongside the staged-records fetch
+ * error Notice (most commonly "Upload session not found." — e.g. the session
+ * was abandoned/completed-and-cleaned-up in another tab). Unlike Abandon
+ * Session, this skips the DELETE call — the session is already unreachable
+ * server-side — and calls resetWizard() directly so the admin always has a
+ * way back to landing instead of being stuck on a dead error Notice.
+ * resetWizard() is also threaded down to ReadyToSyncPanel so its own
+ * replacements-fetch error (AORM-8B.4) can offer the same recovery path.
+ *
  * @param {{
  *   goToStep:       (step: string) => void,
  *   resetWizard:    () => void,
@@ -84,6 +93,15 @@ import SyncConfirmModal from './SyncConfirmModal';
  * @type {string}
  */
 export const SYNC_ALL_BTN_CLASS = 'aorm-validation-review__sync-all';
+
+/**
+ * CSS class for the "Start Over" button shown alongside the staged-records
+ * fetch error Notice (e.g. "Upload session not found.").
+ * Exported so tests can assert presence without duplicating the class name.
+ *
+ * @type {string}
+ */
+export const START_OVER_BTN_CLASS = 'aorm-validation-review__start-over';
 
 /**
  * Fixed display order for the accordion panels.
@@ -394,7 +412,16 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 			{ /* Error state */ }
 			{ error && ! isLoading && (
 				<Notice status="error" isDismissible={ false }>
-					{ error }
+					<p>{ error }</p>
+					{ resetWizard && (
+						<Button
+							variant="secondary"
+							className={ START_OVER_BTN_CLASS }
+							onClick={ resetWizard }
+						>
+							{ __( 'Start Over', 'wicket-aorm' ) }
+						</Button>
+					) }
 				</Notice>
 			) }
 
@@ -482,6 +509,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 										onRecordDiscarded={ refetchStaged }
 										onOpenReviewModal={ openReviewModal }
 										onSyncSelected={ handleSyncSelected }
+										resetWizard={ resetWizard }
 									/>
 								) : key === 'possible_match' ? (
 									/* AORM-8.7: Possible Match panel — table with # Matches column.

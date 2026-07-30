@@ -9,11 +9,18 @@
  *
  * Polling stops immediately on:
  *   - is_complete === true  → advances to validation-review after 800 ms.
- *   - A fetch error         → shows a Notice with a Retry button.
+ *   - A fetch error         → shows a Notice with Retry and Start Over buttons.
  *   - Component unmount     → clears the interval for clean teardown.
+ *
+ * A poll error (most commonly "Upload session not found." — e.g. another tab
+ * abandoned/deleted the session, or the cleanup job purged it) leaves the
+ * admin with no forward path if Retry keeps hitting the same dead session.
+ * The "Start Over" button calls resetWizard() to return to the landing step
+ * so a new upload can be started, without requiring a page reload.
  *
  * @param {{
  *   goToStep:       (step: string) => void,
+ *   resetWizard:    () => void,
  *   sessionId:      string|null,
  * }} props
  */
@@ -32,9 +39,17 @@ export const POLL_INTERVAL_MS = 3000;
 /** Delay (ms) after is_complete before advancing to the next step. */
 export const COMPLETION_DELAY_MS = 800;
 
+/**
+ * CSS class for the "Start Over" button shown alongside a poll error.
+ * Exported so tests can assert presence without duplicating the class name.
+ *
+ * @type {string}
+ */
+export const START_OVER_BTN_CLASS = 'aorm-matching-progress__start-over-btn';
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function MatchingProgressStep( { goToStep, sessionId } ) {
+export default function MatchingProgressStep( { goToStep, resetWizard, sessionId } ) {
 	const [ percentage, setPercentage ] = useState( 0 );
 	const [ total,      setTotal      ] = useState( null );
 	const [ processed,  setProcessed  ] = useState( 0 );
@@ -179,6 +194,15 @@ export default function MatchingProgressStep( { goToStep, sessionId } ) {
 					>
 						{ __( 'Retry', 'wicket-aorm' ) }
 					</Button>
+					{ resetWizard && (
+						<Button
+							variant="tertiary"
+							className={ START_OVER_BTN_CLASS }
+							onClick={ resetWizard }
+						>
+							{ __( 'Start Over', 'wicket-aorm' ) }
+						</Button>
+					) }
 				</Notice>
 			) }
 
