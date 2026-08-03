@@ -346,10 +346,18 @@ class RosterListTable extends WP_List_Table
     /**
      * Render the Roster Last Saved column (array/column key remains `last_updated`).
      *
-     * Shows the date and the user email from wp_wicket_aorm_roster_meta (AORM-3.3).
-     * Not sortable — see get_sortable_columns() docblock.
+     * Shows the date from wp_wicket_aorm_roster_meta.last_updated_at, plus a
+     * second line with the acting user's email from
+     * wp_wicket_aorm_roster_meta.last_updated_by (e.g. "By: alex@wicket.io") —
+     * same `<br /><small>...</small>` pattern used by column_membership_tier()
+     * for its "End Date:" sub-line. last_updated_by may also be "system"
+     * (background job, no logged-in user) or "user:{id}" (user has no email)
+     * per ActivityLogger::resolveActorName() — both are rendered as-is. The
+     * "By:" line is omitted entirely when last_updated_by is empty (e.g. rows
+     * written before this field existed). Not sortable — see
+     * get_sortable_columns() docblock.
      *
-     * TODO (AORM-3.x): format date via formatDate() and append last_updated_by email.
+     * TODO (AORM-3.x): format date via formatDate().
      *
      * @param array<string, mixed> $item
      */
@@ -361,7 +369,15 @@ class RosterListTable extends WP_List_Table
             return '<span class="description" aria-label="' . esc_attr__('Never updated', 'wicket-aorm') . '">—</span>';
         }
 
-        return esc_html($lastUpdated);
+        $output = esc_html($lastUpdated);
+
+        $lastUpdatedBy = (string) ($item['last_updated_by'] ?? '');
+
+        if ($lastUpdatedBy !== '') {
+            $output .= '<br /><small>' . esc_html__('By:', 'wicket-aorm') . ' ' . esc_html($lastUpdatedBy) . '</small>';
+        }
+
+        return $output;
     }
 
     /**
