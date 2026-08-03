@@ -118,6 +118,9 @@ class SyncService
      * @see AORM-9.14 — merging_to_record: apply config security roles, keep existing
      * @see AORM-9.15 — remove_existing: end-date relationship
      * @see AORM-9.16 — remove_existing: revoke config security roles
+     * @see AORM-9.20 — Direct Assignment exact_match/already_on_roster: update title, create assignment if not active
+     * @see AORM-9.21 — Direct Assignment exact_match/already_on_roster: ensure roles
+     * @see AORM-9.22 — Direct Assignment merging_to_record: update fields, add email as primary, create assignment if missing
      */
     public function syncRecord(array $record): void
     {
@@ -632,6 +635,68 @@ class SyncService
         $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
+    /**
+     * Handle merging_to_record sync via the Direct Assignment path.
+     *
+     * 1. Updates the merge target's first name, last name, and job title in
+     *    MDP from the imported raw_data fields, when at least one of them is
+     *    present — reuses the same updatePersonNameAndTitleIfPresent() helper
+     *    as the Relationship path (AORM-9.11).
+     * 2. Adds the imported email as the merge target's new primary email and
+     *    demotes whichever address(es) currently hold the primary flag, when
+     *    a non-empty email is present — reuses the same
+     *    addImportedEmailAsPrimaryIfPresent() helper as the Relationship path
+     *    (AORM-9.12).
+     * 3. Ensures an ACTIVE Direct Assignment membership exists linking the
+     *    merge target to the roster's org membership, creating one only when
+     *    none is currently active — reuses the shared
+     *    ensureActiveMembershipAssignment() helper introduced for
+     *    syncExactMatchViaDirectAssignment() / syncAlreadyOnRosterViaDirectAssignment()
+     *    (AORM-9.20). Direct Assignment has no relationship records to end-date
+     *    or roster-relationship to ensure (unlike the Relationship path's
+     *    AORM-9.13 step), so this step replaces it.
+     *
+     * The person to update is the admin-selected merge target — NOT the first
+     * `matched_persons` candidate. It is resolved from the staged record's
+     * `merge_target_uuid` column, same as syncMergingToRecordViaRelationship().
+     * The handler is a no-op when that column is empty.
+     *
+     * Config security roles are applied in a later ticket (AORM-9.23), not here.
+     *
+     * This method is not yet wired to a Direct Assignment dispatcher or to
+     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.22 — update fields, add email as primary, create assignment if missing
+     */
+    protected function syncMergingToRecordViaDirectAssignment(array $record): void
+    {
+        $personUuid = (string) ($record['merge_target_uuid'] ?? '');
+
+        if ($personUuid === '') {
+            return;
+        }
+
+        $rawData = is_string($record['raw_data'] ?? null)
+            ? (array) (json_decode((string) $record['raw_data'], true) ?? [])
+            : (array) ($record['raw_data'] ?? []);
+
+        $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+
+        // ── AORM-9.22: update first/last name + title from import ─────────
+
+        $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
+
+        // ── AORM-9.22: add imported email as primary, demote existing ─────
+
+        $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
+
+        // ── AORM-9.22: create assignment if not already active ────────────
+
+        $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+    }
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
@@ -671,9 +736,13 @@ class SyncService
      * @param string               $personUuid  Merge target person UUID.
      * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
      *
+     * Shared by syncMergingToRecordViaRelationship() (AORM-9.11) and
+     * syncMergingToRecordViaDirectAssignment() (AORM-9.22).
+     *
      * @throws \Exception When the MDP PATCH call fails.
      *
      * @see AORM-9.11
+     * @see AORM-9.22
      */
     private function updatePersonNameAndTitleIfPresent(string $personUuid, array $rawData): void
     {
@@ -703,9 +772,13 @@ class SyncService
      * @param string               $personUuid  Merge target person UUID.
      * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
      *
+     * Shared by syncMergingToRecordViaRelationship() (AORM-9.12) and
+     * syncMergingToRecordViaDirectAssignment() (AORM-9.22).
+     *
      * @throws \Exception When any MDP POST/PATCH call fails.
      *
      * @see AORM-9.12
+     * @see AORM-9.22
      */
     private function addImportedEmailAsPrimaryIfPresent(string $personUuid, array $rawData): void
     {
@@ -733,7 +806,8 @@ class SyncService
      * is empty.
      *
      * Shared by syncExactMatchViaDirectAssignment() and
-     * syncAlreadyOnRosterViaDirectAssignment() (AORM-9.20).
+     * syncAlreadyOnRosterViaDirectAssignment() (AORM-9.20), and by
+     * syncMergingToRecordViaDirectAssignment() (AORM-9.22).
      *
      * @param string $personUuid     Person UUID.
      * @param string $membershipUuid Org-membership (roster) UUID.
@@ -741,6 +815,7 @@ class SyncService
      * @throws \Exception When the MDP API call fails.
      *
      * @see AORM-9.20
+     * @see AORM-9.22
      */
     private function ensureActiveMembershipAssignment(string $personUuid, string $membershipUuid): void
     {
