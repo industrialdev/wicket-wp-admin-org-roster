@@ -1,5 +1,6 @@
 {
     "name": "industrialdev/wicket-wp-admin-org-roster",
+    "version": "0.1.1",
     "description": "WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP API.",
     "type": "wordpress-plugin",
     "license": "proprietary",
