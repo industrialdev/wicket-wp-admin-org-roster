@@ -1,13 +1,13 @@
 # Project Overview
 
-`wicket-admin-org-roster` is a WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP (Member Data Platform) API. It provides bulk upload, validation, duplicate resolution, and sync workflows for administrators.
+`wicket-wp-admin-org-roster` is a WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP (Member Data Platform) API. It provides bulk upload, validation, duplicate resolution, and sync workflows for administrators.
 
 Ticket prefix: **AORM**. Plugin slug: **aorm**.
 
 ## Project Structure & Module Organization
 
 ```
-wicket-admin-org-roster/
+wicket-wp-admin-org-roster/
 ├── wicket-admin-org-roster.php   # Plugin bootstrap (constants, autoloader, singleton)
 ├── composer.json                  # PSR-4 autoload under WicketAORM\
 ├── package.json                   # @wordpress/scripts, @wordpress/element, @wordpress/components
@@ -176,6 +176,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
   - `WicketORM\Services\PersonService::createOrGetPerson()` — used in `SyncService` to find or create a person in MDP by email before syncing.
   - `WicketORM\Services\ConnectionService::ensurePersonConnection()` — used in `SyncService` to create a person-to-org relationship (AORM-9.6).
   - `WicketORM\Services\ConnectionService::endRelationshipToday()` and `endActivePersonOrganizationConnections()` — used in `SyncService` for Replace mode and relationship removal (AORM-9.9, AORM-9.15).
+  - `WicketORM\Services\Strategies\CascadeStrategy::removeMember()` — used in `MdpClient::removeRosterMembers()` (Roster Assignment tab's Remove Member action) when `OrgManConfig::get()['membership']['strategy']` is `'cascade'`. Delegated to entirely rather than reimplemented: under cascade, adding a member only creates a person-to-org connection (the MDP derives the resulting membership from it — see `AdminNotices::renderCascadeStrategyNotice()`), so AORM's own delete-person_membership-only removal would leave that connection active and let the MDP re-derive the membership, undoing the removal. `CascadeStrategy::removeMember()` ends every active person_membership for the org membership, ends every active person-to-org connection, strips every org role the person holds, and enforces the site's owner-removal guard (`prevent_owner_removal` in `OrgManConfig`) — a broader contract than AORM's non-cascade path (which only deletes the `person_membership` row and strips *configured* security roles). `MdpClient::isCascadeStrategyActive()` mirrors `AdminNotices::CASCADE_STRATEGY`'s detection (including its default-to-cascade fallback when the strategy key is unset, using the literal `'cascade'` directly rather than a shared constant); `removeRosterMembersViaCascadeStrategy()` instantiates `CascadeStrategy` directly and calls it once per person UUID (continue-on-error, same `{removed, failed}` partial-success contract as the non-cascade path) — kept as a separate method rather than threading a `CascadeStrategy` dependency through `MdpClient`'s constructor, since `MdpClient` is instantiated bare (`new MdpClient()`) in ~15 places elsewhere and had no constructor before this.
   - CSV header-matching pattern (`getBulkColumnDefinitions()` + `resolveHeaderIndex()`) from `BulkMemberUploadService` — ported into `FileParserService` for flexible column aliasing (AORM-6.10).
   - The lib's configuration is injected via the `wicket/acc/orgman/config` WordPress filter (registered in the active child theme). Services that call `OrgManConfig::get()` internally will pick up that config automatically.
 - **MDP API**: All person/org/relationship mutations go through the Wicket API via `wicket_api_client()`.

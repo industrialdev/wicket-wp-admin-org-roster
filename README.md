@@ -1,8 +1,8 @@
-# AGENTS.md — wicket-admin-org-roster
+# AGENTS.md — wicket-wp-admin-org-roster
 
 ## Project Overview
 
-`wicket-admin-org-roster` is a WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP (Member Data Platform) API. It provides bulk upload, validation, duplicate resolution, and sync workflows for administrators.
+`wicket-wp-admin-org-roster` is a WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP (Member Data Platform) API. It provides bulk upload, validation, duplicate resolution, and sync workflows for administrators.
 
 ## Development
 

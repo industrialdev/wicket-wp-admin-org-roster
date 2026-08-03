@@ -360,7 +360,7 @@ No cross-org side effects in direct assignment mode.
 
 ### Plugin structure
 
-- **Plugin directory:** `wicket-admin-org-roster`
+- **Plugin directory:** `wicket-wp-admin-org-roster`
 - **Project slug:** `aorm`
 - **Namespace:** `WicketAORM\`
 - **PSR-4 autoloading** via Composer under `src/`

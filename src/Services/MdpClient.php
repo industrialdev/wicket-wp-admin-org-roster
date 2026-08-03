@@ -467,6 +467,19 @@ class MdpClient
      * Returns an `{removed, failed}` summary rather than throwing, so the
      * caller can return a partial-success response to the React client.
      *
+     * Under the site's Cascade roster-management strategy (see
+     * isCascadeStrategyActive()), removal is instead delegated entirely to
+     * removeRosterMembersViaCascadeStrategy() — adding a member under cascade
+     * only ever creates a person-to-org connection (the MDP derives the
+     * resulting membership from it; see
+     * AdminNotices::renderCascadeStrategyNotice()), so deleting only the
+     * person_membership row here without ending that connection would leave
+     * it active and let the MDP re-derive the membership, undoing the
+     * removal. CascadeStrategy::removeMember() already owns the correct
+     * full removal contract (end relationship, end memberships, strip
+     * roles, enforce the owner-removal guard), so it is reused rather than
+     * reimplemented.
+     *
      * @param string   $orgUuid        Organization UUID.
      * @param string   $membershipUuid Organization membership UUID.
      * @param string[] $personUuids    Person UUIDs to remove.
@@ -483,6 +496,10 @@ class MdpClient
 
         if (empty($personUuids)) {
             return ['removed' => $removed, 'failed' => $failed];
+        }
+
+        if ($this->isCascadeStrategyActive()) {
+            return $this->removeRosterMembersViaCascadeStrategy($orgUuid, $membershipUuid, $personUuids);
         }
 
         $client = wicket_api_client();
@@ -522,6 +539,68 @@ class MdpClient
         }
 
         return ['removed' => $removed, 'failed' => $failed];
+    }
+
+    /**
+     * Remove roster members by delegating to the site's Cascade
+     * roster-management strategy.
+     *
+     * Calls CascadeStrategy::removeMember() once per person UUID (the
+     * strategy's contract is single-person), continuing on a per-person
+     * WP_Error so one failure does not abort the rest of the batch — same
+     * partial-success contract as the non-cascade path above.
+     *
+     * @param string   $orgUuid        Organization UUID.
+     * @param string   $membershipUuid Organization membership UUID.
+     * @param string[] $personUuids    Person UUIDs to remove.
+     *
+     * @return array{
+     *   removed: list<string>,
+     *   failed:  list<string>,
+     * }
+     */
+    private function removeRosterMembersViaCascadeStrategy(string $orgUuid, string $membershipUuid, array $personUuids): array
+    {
+        $removed         = [];
+        $failed          = [];
+        $cascadeStrategy = new \WicketORM\Services\Strategies\CascadeStrategy();
+
+        foreach ($personUuids as $personUuid) {
+            $result = $cascadeStrategy->removeMember($orgUuid, $personUuid, [
+                'membership_uuid' => $membershipUuid,
+            ]);
+
+            if (is_wp_error($result)) {
+                $failed[] = $personUuid;
+
+                continue;
+            }
+
+            $removed[] = $personUuid;
+        }
+
+        return ['removed' => $removed, 'failed' => $failed];
+    }
+
+    /**
+     * Whether the site's configured roster-management strategy (from
+     * WicketORM\Config\OrgManConfig) is 'cascade'.
+     *
+     * Mirrors AdminNotices::renderCascadeStrategyNotice()'s detection,
+     * including its default-to-cascade fallback when the strategy key is
+     * unset, and its false-when-unavailable fallback when the ORM plugin
+     * (and therefore OrgManConfig) isn't active.
+     */
+    private function isCascadeStrategyActive(): bool
+    {
+        if (! class_exists(\WicketORM\Config\OrgManConfig::class)) {
+            return false;
+        }
+
+        $config   = \WicketORM\Config\OrgManConfig::get();
+        $strategy = (string) ($config['membership']['strategy'] ?? 'cascade');
+
+        return $strategy === 'cascade';
     }
 
     /**
