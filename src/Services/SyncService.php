@@ -534,9 +534,13 @@ class SyncService
      *    new assignment via MdpClient::createPersonMembershipAssignment() when
      *    none is currently active.
      *
+     * 3. Ensures the user role + configured security roles scoped to the
+     *    roster org via the shared ensureUserAndSecurityRoles() helper — same
+     *    helper used by the Relationship path (AORM-9.10) and the Direct
+     *    Assignment new_record path (AORM-9.19) (AORM-9.21).
+     *
      * The person UUID is resolved from the first entry in `matched_persons`,
-     * same as syncExactMatchViaRelationship(). Role application (AORM-9.21) is
-     * not yet implemented here.
+     * same as syncExactMatchViaRelationship().
      *
      * This method is not yet wired to a Direct Assignment dispatcher or to
      * syncRecord()'s routing — that lands with a later Phase 2 ticket.
@@ -544,6 +548,7 @@ class SyncService
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
      * @see AORM-9.20 — update title, create assignment if not active
+     * @see AORM-9.21 — ensure roles
      */
     protected function syncExactMatchViaDirectAssignment(array $record): void
     {
@@ -558,6 +563,7 @@ class SyncService
             : (array) ($record['raw_data'] ?? []);
 
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+        $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
         // ── AORM-9.20: update title ───────────────────────────────────────
 
@@ -566,6 +572,10 @@ class SyncService
         // ── AORM-9.20: create assignment if not active ────────────────────
 
         $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+
+        // ── AORM-9.21: ensure user role + config security roles ───────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     /**
@@ -579,9 +589,12 @@ class SyncService
      * ends other-org relationships), so both statuses share the same steps
      * for this ticket.
      *
+     * 3. Ensures the user role + configured security roles scoped to the
+     *    roster org via the shared ensureUserAndSecurityRoles() helper (same
+     *    helper used by syncExactMatchViaDirectAssignment()) (AORM-9.21).
+     *
      * The person UUID is resolved from the first entry in `matched_persons`,
-     * same as syncAlreadyOnRosterViaRelationship(). Role application
-     * (AORM-9.21) is not yet implemented here.
+     * same as syncAlreadyOnRosterViaRelationship().
      *
      * This method is not yet wired to a Direct Assignment dispatcher or to
      * syncRecord()'s routing — that lands with a later Phase 2 ticket.
@@ -589,6 +602,7 @@ class SyncService
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
      * @see AORM-9.20 — update title, create assignment if not active
+     * @see AORM-9.21 — ensure roles
      */
     protected function syncAlreadyOnRosterViaDirectAssignment(array $record): void
     {
@@ -603,6 +617,7 @@ class SyncService
             : (array) ($record['raw_data'] ?? []);
 
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+        $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
         // ── AORM-9.20: update title ───────────────────────────────────────
 
@@ -611,6 +626,10 @@ class SyncService
         // ── AORM-9.20: create assignment if not active ────────────────────
 
         $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+
+        // ── AORM-9.21: ensure user role + config security roles ───────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -756,8 +775,10 @@ class SyncService
      *
      * Shared by syncNewRecordViaRelationship() (AORM-9.7),
      * syncExactMatchViaRelationship() / syncAlreadyOnRosterViaRelationship()
-     * (AORM-9.10), syncMergingToRecordViaRelationship() (AORM-9.14), and
-     * syncNewRecordViaDirectAssignment() (AORM-9.19).
+     * (AORM-9.10), syncMergingToRecordViaRelationship() (AORM-9.14),
+     * syncNewRecordViaDirectAssignment() (AORM-9.19), and
+     * syncExactMatchViaDirectAssignment() / syncAlreadyOnRosterViaDirectAssignment()
+     * (AORM-9.21).
      *
      * @param string $personUuid Person UUID.
      * @param string $orgUuid    Roster org UUID to scope the roles to.
@@ -768,6 +789,7 @@ class SyncService
      * @see AORM-9.10
      * @see AORM-9.14
      * @see AORM-9.19
+     * @see AORM-9.21
      */
     private function ensureUserAndSecurityRoles(string $personUuid, string $orgUuid): void
     {
