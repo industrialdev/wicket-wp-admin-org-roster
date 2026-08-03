@@ -655,13 +655,16 @@ class SyncService
      *    (AORM-9.20). Direct Assignment has no relationship records to end-date
      *    or roster-relationship to ensure (unlike the Relationship path's
      *    AORM-9.13 step), so this step replaces it.
+     * 4. Applies the configured security roles (and user role) scoped to the
+     *    roster org via the shared ensureUserAndSecurityRoles() helper
+     *    (AORM-9.23). Roles are applied additively via POST — existing roles
+     *    on the merge target are preserved ("keep existing"), same as the
+     *    Relationship path's merge handler (AORM-9.14).
      *
      * The person to update is the admin-selected merge target — NOT the first
      * `matched_persons` candidate. It is resolved from the staged record's
      * `merge_target_uuid` column, same as syncMergingToRecordViaRelationship().
      * The handler is a no-op when that column is empty.
-     *
-     * Config security roles are applied in a later ticket (AORM-9.23), not here.
      *
      * This method is not yet wired to a Direct Assignment dispatcher or to
      * syncRecord()'s routing — that lands with a later Phase 2 ticket.
@@ -669,6 +672,7 @@ class SyncService
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
      * @see AORM-9.22 — update fields, add email as primary, create assignment if missing
+     * @see AORM-9.23 — apply config security roles, keep existing
      */
     protected function syncMergingToRecordViaDirectAssignment(array $record): void
     {
@@ -683,6 +687,7 @@ class SyncService
             : (array) ($record['raw_data'] ?? []);
 
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+        $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
         // ── AORM-9.22: update first/last name + title from import ─────────
 
@@ -695,6 +700,10 @@ class SyncService
         // ── AORM-9.22: create assignment if not already active ────────────
 
         $this->ensureActiveMembershipAssignment($personUuid, $membershipUuid);
+
+        // ── AORM-9.23: apply config security roles, keep existing ─────────
+
+        $this->ensureUserAndSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -851,9 +860,9 @@ class SyncService
      * Shared by syncNewRecordViaRelationship() (AORM-9.7),
      * syncExactMatchViaRelationship() / syncAlreadyOnRosterViaRelationship()
      * (AORM-9.10), syncMergingToRecordViaRelationship() (AORM-9.14),
-     * syncNewRecordViaDirectAssignment() (AORM-9.19), and
+     * syncNewRecordViaDirectAssignment() (AORM-9.19),
      * syncExactMatchViaDirectAssignment() / syncAlreadyOnRosterViaDirectAssignment()
-     * (AORM-9.21).
+     * (AORM-9.21), and syncMergingToRecordViaDirectAssignment() (AORM-9.23).
      *
      * @param string $personUuid Person UUID.
      * @param string $orgUuid    Roster org UUID to scope the roles to.
@@ -865,6 +874,7 @@ class SyncService
      * @see AORM-9.14
      * @see AORM-9.19
      * @see AORM-9.21
+     * @see AORM-9.23
      */
     private function ensureUserAndSecurityRoles(string $personUuid, string $orgUuid): void
     {
