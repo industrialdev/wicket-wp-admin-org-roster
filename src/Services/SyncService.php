@@ -129,6 +129,7 @@ class SyncService
      * @see AORM-9.22 — Direct Assignment merging_to_record: update fields, add email as primary, create assignment if missing
      * @see AORM-9.23 — Direct Assignment merging_to_record: apply config security roles, keep existing
      * @see AORM-9.24 — Direct Assignment remove_existing: end date assignment (today + timestamp)
+     * @see AORM-9.25 — Direct Assignment remove_existing: revoke config security roles
      */
     public function syncRecord(array $record): void
     {
@@ -755,14 +756,23 @@ class SyncService
      * to identify the assignment. The handler is a no-op when either UUID is
      * absent or empty.
      *
+     * After end-dating the assignment, also revokes the configured security
+     * roles (wicket_aorm_settings[security_roles]) scoped to the roster org
+     * by delegating to the shared revokeConfigSecurityRoles() helper — the
+     * same helper syncRemoveExistingViaRelationship() calls for the
+     * Relationship path (AORM-9.16). As with that path, only the security
+     * roles from settings are revoked; the base member role is intentionally
+     * left alone (its lifecycle is tied to the assignment end-dating above,
+     * not to role deletion). The org UUID is read from the staged record's
+     * org_uuid column, same as syncRemoveExistingViaRelationship() (AORM-9.25).
+     *
      * This method is not yet wired to a Direct Assignment dispatcher or to
      * syncRecord()'s routing — that lands with a later Phase 2 ticket.
-     * AORM-9.25 (revoke config security roles) is a separate ticket and is
-     * not yet implemented here.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
      * @see AORM-9.24 — end date assignment (today + timestamp)
+     * @see AORM-9.25 — revoke config security roles scoped to roster org
      */
     protected function syncRemoveExistingViaDirectAssignment(array $record): void
     {
@@ -772,6 +782,7 @@ class SyncService
 
         $personUuid     = (string) ($rawData['person_uuid'] ?? '');
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
+        $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
         if ($personUuid === '' || $membershipUuid === '') {
             return;
@@ -782,6 +793,10 @@ class SyncService
         // ── AORM-9.24: end-date all active Direct Assignment membership(s) ────
 
         $membershipService->endAllActivePersonMembershipsForOrg($personUuid, $membershipUuid);
+
+        // ── AORM-9.25: revoke config security roles scoped to roster org ─────
+
+        $this->revokeConfigSecurityRoles($personUuid, $orgUuid);
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -992,12 +1007,18 @@ class SyncService
      * is removed.
      *
      * Only the security roles from settings are revoked here — the user role
-     * from OrgManConfig is intentionally excluded (it is lifecycle-managed by
-     * the relationship end-dating in AORM-9.15, not by role deletion).
+     * from OrgManConfig is intentionally excluded. For the Relationship path
+     * (AORM-9.16) its lifecycle is tied to the relationship end-dating in
+     * AORM-9.15; for the Direct Assignment path (AORM-9.25) it is tied to the
+     * assignment end-dating in AORM-9.24 — neither revokes the base role via
+     * role deletion.
      *
      * Roles are filtered for emptiness before being sent to MDP via
      * MdpClient::revokePersonOrgRoles(). The MDP call is skipped entirely when
      * the role list is empty or either UUID is absent.
+     *
+     * Shared by syncRemoveExistingViaRelationship() (AORM-9.16) and
+     * syncRemoveExistingViaDirectAssignment() (AORM-9.25).
      *
      * @param string $personUuid Person UUID.
      * @param string $orgUuid    Roster org UUID to scope the revocation to.
@@ -1005,6 +1026,7 @@ class SyncService
      * @throws \Exception When the MDP API call fails.
      *
      * @see AORM-9.16
+     * @see AORM-9.25
      */
     private function revokeConfigSecurityRoles(string $personUuid, string $orgUuid): void
     {
