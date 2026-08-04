@@ -11,7 +11,6 @@ namespace WicketAORM\Admin;
  *   - Org memberships list  (wicket-aorm)                → WP_List_Table, NO React
  *   - Org roster detail     (wicket-aorm-roster-detail)  → React island, hidden from menu
  *   - Group Rosters         (wicket-aorm-group-rosters)  → React island
- *   - Configurations        (wicket-aorm-configurations) → classic PHP admin page, NO React
  *   - Settings              (wicket-aorm-settings)       → classic PHP admin page, NO React
  */
 class MenuPage
@@ -86,16 +85,6 @@ class MenuPage
             self::CAPABILITY,
             'wicket-aorm-group-rosters',
             [$this, 'renderGroupRostersPage'],
-        );
-
-        // Roster Management Configurations.
-        add_submenu_page(
-            self::MENU_SLUG,
-            __('Roster Configurations', 'wicket-aorm'),
-            __('Configurations', 'wicket-aorm'),
-            self::CAPABILITY,
-            'wicket-aorm-configurations',
-            [$this, 'renderConfigurationsPage'],
         );
 
         // Settings (debug toggle, etc.).
@@ -198,140 +187,6 @@ class MenuPage
     public function renderGroupRostersPage(): void
     {
         echo '<div class="wrap"><div id="aorm-group-rosters"></div></div>';
-    }
-
-    /**
-     * Render the Configurations page — read-only display of the ORM config
-     * values that drive AORM sync behaviour.
-     *
-     * Values are sourced from WicketORM\Config\OrgManConfig::get(), which
-     * is filterable via the 'wicket/acc/orgman/config' WordPress filter
-     * (registered in the active child theme). The page is intentionally
-     * read-only: AORM does not own these settings, it only consumes them.
-     *
-     * Sections:
-     *   - Membership: strategy, default relationship type.
-     *   - Roles: base member role, auto-assign roles, access role slugs.
-     */
-    public function renderConfigurationsPage(): void
-    {
-        echo '<div class="wrap">';
-        echo '<h1>' . esc_html__('Roster Configurations', 'wicket-aorm') . '</h1>';
-
-        if (! class_exists(\WicketORM\Config\OrgManConfig::class)) {
-            echo '<div class="notice notice-error inline"><p>';
-            echo esc_html__('The wicket-wp-account-centre plugin is not active. ORM configuration is unavailable.', 'wicket-aorm');
-            echo '</p></div>';
-            echo '</div>';
-
-            return;
-        }
-
-        $config = \WicketORM\Config\OrgManConfig::get();
-
-        // ── Extract values ────────────────────────────────────────────────
-
-        $strategy         = (string) ($config['membership']['strategy'] ?? '');
-        $relationshipType = (string) ($config['relationships']['defaults']['type'] ?? '');
-
-        $baseMemberRole  = (string) ($config['member_management']['addition']['base_member_role'] ?? '');
-        $autoAssignRoles = array_values(array_filter(
-            array_map('strval', (array) ($config['member_management']['addition']['auto_assign_roles'] ?? [])),
-        ));
-
-        $ownerRole   = (string) ($config['access']['roles']['owner'] ?? '');
-        $managerRole = (string) ($config['access']['roles']['manager'] ?? '');
-        $editorRole  = (string) ($config['access']['roles']['editor'] ?? '');
-
-        // ── Intro note ────────────────────────────────────────────────────
-
-        echo '<p class="description">';
-        echo esc_html__('These values are read from the wicket-wp-account-centre plugin via the wicket/acc/orgman/config filter and are used during roster sync. To change them, update the filter in your child theme.', 'wicket-aorm');
-        echo '</p>';
-
-        // ── Membership section ────────────────────────────────────────────
-
-        echo '<h2 class="title">' . esc_html__('Membership', 'wicket-aorm') . '</h2>';
-        echo '<table class="widefat striped" style="max-width:640px;">';
-        echo '<thead><tr>';
-        echo '<th scope="col" style="width:260px;">' . esc_html__('Setting', 'wicket-aorm') . '</th>';
-        echo '<th scope="col">' . esc_html__('Value', 'wicket-aorm') . '</th>';
-        echo '</tr></thead><tbody>';
-
-        $this->renderConfigRow(
-            __('Strategy', 'wicket-aorm'),
-            $strategy,
-        );
-        $this->renderConfigRow(
-            __('Default relationship type', 'wicket-aorm'),
-            $relationshipType,
-        );
-
-        echo '</tbody></table>';
-
-        // ── Roles section ─────────────────────────────────────────────────
-
-        echo '<h2 class="title">' . esc_html__('Roles', 'wicket-aorm') . '</h2>';
-        echo '<table class="widefat striped" style="max-width:640px;">';
-        echo '<thead><tr>';
-        echo '<th scope="col" style="width:260px;">' . esc_html__('Setting', 'wicket-aorm') . '</th>';
-        echo '<th scope="col">' . esc_html__('Value', 'wicket-aorm') . '</th>';
-        echo '</tr></thead><tbody>';
-
-        $this->renderConfigRow(
-            __('Base member role', 'wicket-aorm'),
-            $baseMemberRole,
-        );
-        $this->renderConfigRow(
-            __('Auto-assign roles', 'wicket-aorm'),
-            $autoAssignRoles,
-        );
-        $this->renderConfigRow(
-            __('Owner role slug', 'wicket-aorm'),
-            $ownerRole,
-        );
-        $this->renderConfigRow(
-            __('Manager role slug', 'wicket-aorm'),
-            $managerRole,
-        );
-        $this->renderConfigRow(
-            __('Editor role slug', 'wicket-aorm'),
-            $editorRole,
-        );
-
-        echo '</tbody></table>';
-        echo '</div>';
-    }
-
-    /**
-     * Render a single configuration table row.
-     *
-     * Accepts a string value (rendered as <code>) or an array of strings
-     * (each rendered as its own <code> tag, or "—" when the array is empty).
-     *
-     * @param string          $label  Human-readable row label.
-     * @param string|string[] $value  Config value(s) to display.
-     */
-    private function renderConfigRow(string $label, string|array $value): void
-    {
-        echo '<tr>';
-        echo '<td>' . esc_html($label) . '</td>';
-        echo '<td>';
-
-        if (is_array($value)) {
-            if (empty($value)) {
-                echo '&mdash;';
-            } else {
-                foreach ($value as $slug) {
-                    echo '<code>' . esc_html($slug) . '</code> ';
-                }
-            }
-        } else {
-            echo $value !== '' ? '<code>' . esc_html($value) . '</code>' : '&mdash;';
-        }
-
-        echo '</td>';
-        echo '</tr>';
     }
 
     /**

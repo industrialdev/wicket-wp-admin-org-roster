@@ -17,8 +17,10 @@ class SyncService
      * WordPress option key for plugin settings.
      *
      * The 'roster_type' key within this option controls whether the Relationship
-     * or Direct Assignment sync path is used. Phase 1 always routes to the
-     * Relationship path regardless of this setting.
+     * or Direct Assignment sync path is used, via syncRecord()'s routing
+     * (AORM-9.4, Phase 2). Any value other than ROSTER_TYPE_DIRECT_ASSIGNMENT —
+     * absent, unrecognised, or explicitly ROSTER_TYPE_RELATIONSHIP — routes to
+     * the Relationship path.
      */
     public const SETTINGS_OPTION = 'wicket_aorm_settings';
 
@@ -26,16 +28,17 @@ class SyncService
      * Roster type value for the Relationship sync path.
      *
      * Persons are linked to the org via a person-to-org relationship record.
-     * This is the only path active in Phase 1.
+     * This is the default path — used whenever roster_type is absent,
+     * unrecognised, or explicitly set to this value.
      */
     public const ROSTER_TYPE_RELATIONSHIP = 'relationship';
 
     /**
      * Roster type value for the Direct Assignment sync path (Phase 2).
      *
-     * Persons are linked via a membership assignment. Routing to this path
-     * is unlocked in Phase 2; AORM-9.4 always falls through to the Relationship
-     * path in the interim.
+     * Persons are linked via a membership assignment. syncRecord() routes to
+     * this path (via syncViaDirectAssignmentPath()) when wicket_aorm_settings
+     * [roster_type] is set to this value (AORM-9.4).
      */
     public const ROSTER_TYPE_DIRECT_ASSIGNMENT = 'direct_assignment';
 
@@ -82,6 +85,33 @@ class SyncService
     public const DEFAULT_PHONE_TYPE = 'work';
 
     /**
+     * Settings key for the base member role applied to every person synced to a roster.
+     *
+     * Stored under wicket_aorm_settings[base_member_role] as a single MDP role slug
+     * string (e.g. 'member'). Applied alongside any configured security roles via the
+     * shared ensureUserAndSecurityRoles() helper. May be an empty string when
+     * unconfigured, in which case no base role is applied.
+     *
+     * @see AORM-9.7
+     */
+    public const SETTINGS_KEY_BASE_MEMBER_ROLE = 'base_member_role';
+
+    /**
+     * Settings key for relationship types protected from being ended when a person's
+     * relationship to another org is ended in favour of the roster org (e.g. an
+     * admin-type relationship that should never be automatically removed).
+     *
+     * Stored under wicket_aorm_settings[protected_relationship_types] as an array of
+     * relationship type slug strings. Passed as $skipTypes to
+     * ConnectionService::endActivePersonOrganizationConnections() so relationships of
+     * these types are left untouched. May be empty.
+     *
+     * @see AORM-9.9
+     * @see AORM-9.15
+     */
+    public const SETTINGS_KEY_PROTECTED_RELATIONSHIP_TYPES = 'protected_relationship_types';
+
+    /**
      * @param \WicketORM\Services\PersonService|null    $personService
      *   Optional PersonService instance for DI / testing. When null, a fresh
      *   instance is created on first use.
@@ -109,12 +139,15 @@ class SyncService
      * Sync a single staged record to MDP.
      *
      * Reads the roster type from wicket_aorm_settings and branches to the
-     * appropriate sync path. Phase 1 always routes to the Relationship path;
-     * the Direct Assignment branch is unlocked in Phase 2 (AORM-9.16+).
+     * appropriate sync path (AORM-9.4, Phase 2): wicket_aorm_settings
+     * [roster_type] === ROSTER_TYPE_DIRECT_ASSIGNMENT routes to
+     * syncViaDirectAssignmentPath(); any other value (absent, unrecognised,
+     * or explicitly ROSTER_TYPE_RELATIONSHIP) routes to
+     * syncViaRelationshipPath().
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
-     * @see AORM-9.4  — roster type routing (Phase 1: always relationship path)
+     * @see AORM-9.4  — roster type routing
      * @see AORM-9.5  — new_record: create person
      * @see AORM-9.6  — new_record: create relationship
      * @see AORM-9.8  — exact_match / already_on_roster: update title
@@ -124,6 +157,9 @@ class SyncService
      * @see AORM-9.14 — merging_to_record: apply config security roles, keep existing
      * @see AORM-9.15 — remove_existing: end-date relationship
      * @see AORM-9.16 — remove_existing: revoke config security roles
+     * @see AORM-9.17 — Direct Assignment new_record: create person
+     * @see AORM-9.18 — Direct Assignment new_record: create membership assignment (roster org, start = today)
+     * @see AORM-9.19 — Direct Assignment new_record: apply user role + config security roles
      * @see AORM-9.20 — Direct Assignment exact_match/already_on_roster: update title, create assignment if not active
      * @see AORM-9.21 — Direct Assignment exact_match/already_on_roster: ensure roles
      * @see AORM-9.22 — Direct Assignment merging_to_record: update fields, add email as primary, create assignment if missing
@@ -136,8 +172,15 @@ class SyncService
         $settings   = (array) get_option(self::SETTINGS_OPTION, []);
         $rosterType = (string) ($settings['roster_type'] ?? self::ROSTER_TYPE_RELATIONSHIP);
 
-        // Phase 1: always route to the Relationship path.
-        // Direct Assignment routing is unlocked in Phase 2.
+        // Phase 2 (AORM-9.4): route based on the configured roster type. Any
+        // value other than ROSTER_TYPE_DIRECT_ASSIGNMENT (absent, unrecognised,
+        // or explicitly 'relationship') falls through to the Relationship path.
+        if ($rosterType === self::ROSTER_TYPE_DIRECT_ASSIGNMENT) {
+            $this->syncViaDirectAssignmentPath($record);
+
+            return;
+        }
+
         $this->syncViaRelationshipPath($record);
     }
 
@@ -172,6 +215,36 @@ class SyncService
         };
     }
 
+    /**
+     * Sync a single record via the Direct Assignment path.
+     *
+     * Dispatches to per-status handlers based on the record's record_status,
+     * mirroring syncViaRelationshipPath()'s dispatch table:
+     *   new_record            → AORM-9.17 / AORM-9.18 / AORM-9.19
+     *   exact_match           → AORM-9.20 / AORM-9.21
+     *   already_on_roster     → AORM-9.20 / AORM-9.21
+     *   merging_to_record     → AORM-9.22 / AORM-9.23
+     *   remove_existing       → AORM-9.24 / AORM-9.25
+     *
+     * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
+     *
+     * @see AORM-9.4  — roster type routing (Phase 2: routes here when configured)
+     * @see AORM-9.17 through AORM-9.25 — per-status handlers
+     */
+    protected function syncViaDirectAssignmentPath(array $record): void
+    {
+        $status = (string) ($record['record_status'] ?? '');
+
+        match ($status) {
+            'new_record'        => $this->syncNewRecordViaDirectAssignment($record),
+            'exact_match'       => $this->syncExactMatchViaDirectAssignment($record),
+            'already_on_roster' => $this->syncAlreadyOnRosterViaDirectAssignment($record),
+            'merging_to_record' => $this->syncMergingToRecordViaDirectAssignment($record),
+            'remove_existing'   => $this->syncRemoveExistingViaDirectAssignment($record),
+            default             => null,
+        };
+    }
+
     // ── Per-status handlers ───────────────────────────────────────────────
 
     /**
@@ -184,11 +257,12 @@ class SyncService
      *    type defaults are resolved internally by ConnectionService via
      *    RelationshipHelper::get_default_relationship_type(); start date and
      *    idempotency are handled by the service — do not reimplement.
-     * 3. Applies the user role (from OrgManConfig::get()['roles']['user']) and any
-     *    configured security roles (from wicket_aorm_settings[security_roles]) to the
-     *    person, scoped to the roster org, via the shared ensureUserAndSecurityRoles()
-     *    helper, which wraps MdpClient::applyPersonOrgRoles() (AORM-9.7 / AORM-9.10).
-     *    Duplicate slugs are deduplicated; empty slugs are filtered out.
+     * 3. Applies the base member role (from wicket_aorm_settings[base_member_role])
+     *    and any configured security roles (from wicket_aorm_settings[security_roles])
+     *    to the person, scoped to the roster org, via the shared
+     *    ensureUserAndSecurityRoles() helper, which wraps
+     *    MdpClient::applyPersonOrgRoles() (AORM-9.7 / AORM-9.10). Duplicate slugs are
+     *    deduplicated; empty slugs are filtered out.
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
@@ -398,8 +472,8 @@ class SyncService
      * org by delegating to
      * ConnectionService::endActivePersonOrganizationConnections(). Protected
      * relationship types (e.g. admin roles) configured in
-     * OrgManConfig['member_management']['addition']['protected_relationship_types']
-     * are passed as $skipTypes so they are left untouched.
+     * wicket_aorm_settings[protected_relationship_types] are passed as
+     * $skipTypes so they are left untouched.
      *
      * The person UUID is read from raw_data.person_uuid (not matched_persons —
      * that field is always null for synthetic remove_existing rows generated by
@@ -425,10 +499,10 @@ class SyncService
         }
 
         $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
-        $orgManConfig      = \WicketORM\Config\OrgManConfig::get();
+        $settings          = (array) get_option(self::SETTINGS_OPTION, []);
 
         $skipTypes = array_values(array_filter(
-            array_map('strval', (array) ($orgManConfig['member_management']['addition']['protected_relationship_types'] ?? [])),
+            array_map('strval', (array) ($settings[self::SETTINGS_KEY_PROTECTED_RELATIONSHIP_TYPES] ?? [])),
             fn (string $type): bool => $type !== '',
         ));
 
@@ -467,16 +541,18 @@ class SyncService
      * The assignment's start date is the current sync action time, not the
      * underlying membership tier's own cycle start date.
      *
-     * Finally applies the user role (from OrgManConfig::get()['member_management']
-     * ['addition']['base_member_role']) and any configured security roles (from
-     * wicket_aorm_settings[security_roles]) to the person, scoped to the roster
-     * org, via the same shared ensureUserAndSecurityRoles() helper used by the
-     * Relationship path (AORM-9.7 / AORM-9.10 / AORM-9.14) — role application is
-     * identical between paths regardless of how the person is linked to the
-     * roster org (relationship vs. membership assignment) (AORM-9.19).
+     * Finally applies the base member role (from
+     * wicket_aorm_settings[base_member_role]) and any configured security roles
+     * (from wicket_aorm_settings[security_roles]) to the person, scoped to the
+     * roster org, via the same shared ensureUserAndSecurityRoles() helper used
+     * by the Relationship path (AORM-9.7 / AORM-9.10 / AORM-9.14) — role
+     * application is identical between paths regardless of how the person is
+     * linked to the roster org (relationship vs. membership assignment)
+     * (AORM-9.19).
      *
-     * This method is not yet wired to a Direct Assignment dispatcher or to
-     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     * Dispatched from syncRecord() via syncViaDirectAssignmentPath() when
+     * wicket_aorm_settings[roster_type] is ROSTER_TYPE_DIRECT_ASSIGNMENT
+     * (AORM-9.4, Phase 2).
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
@@ -554,8 +630,9 @@ class SyncService
      * The person UUID is resolved from the first entry in `matched_persons`,
      * same as syncExactMatchViaRelationship().
      *
-     * This method is not yet wired to a Direct Assignment dispatcher or to
-     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     * Dispatched from syncRecord() via syncViaDirectAssignmentPath() when
+     * wicket_aorm_settings[roster_type] is ROSTER_TYPE_DIRECT_ASSIGNMENT
+     * (AORM-9.4, Phase 2).
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
@@ -608,8 +685,9 @@ class SyncService
      * The person UUID is resolved from the first entry in `matched_persons`,
      * same as syncAlreadyOnRosterViaRelationship().
      *
-     * This method is not yet wired to a Direct Assignment dispatcher or to
-     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     * Dispatched from syncRecord() via syncViaDirectAssignmentPath() when
+     * wicket_aorm_settings[roster_type] is ROSTER_TYPE_DIRECT_ASSIGNMENT
+     * (AORM-9.4, Phase 2).
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
@@ -675,8 +753,9 @@ class SyncService
      * `merge_target_uuid` column, same as syncMergingToRecordViaRelationship().
      * The handler is a no-op when that column is empty.
      *
-     * This method is not yet wired to a Direct Assignment dispatcher or to
-     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     * Dispatched from syncRecord() via syncViaDirectAssignmentPath() when
+     * wicket_aorm_settings[roster_type] is ROSTER_TYPE_DIRECT_ASSIGNMENT
+     * (AORM-9.4, Phase 2).
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
@@ -730,8 +809,8 @@ class SyncService
      *
      * MembershipService::endAllActivePersonMembershipsForOrg() is existing,
      * already-used logic from wicket-wp-account-centre's OrgMan library (the
-     * same package AORM already depends on for PersonService/ConnectionService
-     * /OrgManConfig) — it queries `/person_memberships/query` for every
+     * same package AORM already depends on for PersonService/ConnectionService)
+     * — it queries `/person_memberships/query` for every
      * person_membership on the given org membership, filters to active rows,
      * and end-dates each one via the shared endPersonMembershipToday() helper
      * (which honours the configured removal anchor —
@@ -766,8 +845,9 @@ class SyncService
      * not to role deletion). The org UUID is read from the staged record's
      * org_uuid column, same as syncRemoveExistingViaRelationship() (AORM-9.25).
      *
-     * This method is not yet wired to a Direct Assignment dispatcher or to
-     * syncRecord()'s routing — that lands with a later Phase 2 ticket.
+     * Dispatched from syncRecord() via syncViaDirectAssignmentPath() when
+     * wicket_aorm_settings[roster_type] is ROSTER_TYPE_DIRECT_ASSIGNMENT
+     * (AORM-9.4, Phase 2).
      *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      *
@@ -938,9 +1018,9 @@ class SyncService
      * Ensure the user role + configured security roles are applied to a person,
      * scoped to the roster org.
      *
-     * Base member role: OrgManConfig::get()['member_management']['addition']['base_member_role']
-     * — the default role assigned to a person when they are added to the roster
-     * org (e.g. 'member'). May be an empty string when unconfigured.
+     * Base member role: wicket_aorm_settings[base_member_role] — the default role
+     * assigned to a person when they are added to the roster org (e.g. 'member').
+     * May be an empty string when unconfigured.
      *
      * Config security roles: wicket_aorm_settings[security_roles] — an array
      * of additional role slugs configured in the AORM Settings page (e.g.
@@ -975,10 +1055,9 @@ class SyncService
             return;
         }
 
-        $settings     = (array) get_option(self::SETTINGS_OPTION, []);
-        $orgManConfig = \WicketORM\Config\OrgManConfig::get();
+        $settings = (array) get_option(self::SETTINGS_OPTION, []);
 
-        $userRole      = (string) ($orgManConfig['member_management']['addition']['base_member_role'] ?? '');
+        $userRole      = (string) ($settings[self::SETTINGS_KEY_BASE_MEMBER_ROLE] ?? '');
         $securityRoles = array_values(array_filter(
             array_map('strval', (array) ($settings[self::SETTINGS_KEY_SECURITY_ROLES] ?? [])),
             fn (string $r): bool => $r !== '',
@@ -1006,8 +1085,8 @@ class SyncService
      * when the person was added; they must be explicitly revoked when the person
      * is removed.
      *
-     * Only the security roles from settings are revoked here — the user role
-     * from OrgManConfig is intentionally excluded. For the Relationship path
+     * Only the security roles from settings are revoked here — the base member
+     * role from settings is intentionally excluded. For the Relationship path
      * (AORM-9.16) its lifecycle is tied to the relationship end-dating in
      * AORM-9.15; for the Direct Assignment path (AORM-9.25) it is tied to the
      * assignment end-dating in AORM-9.24 — neither revokes the base role via
@@ -1075,10 +1154,10 @@ class SyncService
         }
 
         $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
-        $orgManConfig      = \WicketORM\Config\OrgManConfig::get();
+        $settings          = (array) get_option(self::SETTINGS_OPTION, []);
 
         $skipTypes = array_values(array_filter(
-            array_map('strval', (array) ($orgManConfig['member_management']['addition']['protected_relationship_types'] ?? [])),
+            array_map('strval', (array) ($settings[self::SETTINGS_KEY_PROTECTED_RELATIONSHIP_TYPES] ?? [])),
             fn (string $type): bool => $type !== '',
         ));
 

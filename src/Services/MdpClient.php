@@ -583,24 +583,29 @@ class MdpClient
     }
 
     /**
-     * Whether the site's configured roster-management strategy (from
-     * WicketORM\Config\OrgManConfig) is 'cascade'.
+     * Whether removal should behave like the ORM's "cascade" membership
+     * strategy — i.e. a person's membership is derived from a person-to-org
+     * connection rather than managed as its own record.
      *
-     * Mirrors AdminNotices::renderCascadeStrategyNotice()'s detection,
-     * including its default-to-cascade fallback when the strategy key is
-     * unset, and its false-when-unavailable fallback when the ORM plugin
-     * (and therefore OrgManConfig) isn't active.
+     * Sourced from AORM's own wicket_aorm_settings[roster_type] setting rather
+     * than the wicket-wp-account-centre plugin's OrgManConfig: the two settings
+     * describe the same distinction (relationship-derived membership vs. a
+     * directly-managed membership assignment), and AORM already has its own
+     * roster_type setting driving this exact fork in SyncService::syncRecord().
+     * Mirrors AdminNotices::renderCascadeStrategyNotice()'s detection — true
+     * (cascade-like) when roster_type is SyncService::ROSTER_TYPE_RELATIONSHIP
+     * or absent (the default falls back to ROSTER_TYPE_RELATIONSHIP); false
+     * otherwise. Comparing by equality to ROSTER_TYPE_RELATIONSHIP rather than
+     * by inequality to ROSTER_TYPE_DIRECT_ASSIGNMENT is equivalent in practice
+     * — SettingsPage::sanitize() only ever persists one of the two valid
+     * roster_type values — and reads more directly.
      */
     private function isCascadeStrategyActive(): bool
     {
-        if (! class_exists(\WicketORM\Config\OrgManConfig::class)) {
-            return false;
-        }
+        $settings   = (array) get_option(SyncService::SETTINGS_OPTION, []);
+        $rosterType = (string) ($settings['roster_type'] ?? SyncService::ROSTER_TYPE_RELATIONSHIP);
 
-        $config   = \WicketORM\Config\OrgManConfig::get();
-        $strategy = (string) ($config['membership']['strategy'] ?? 'cascade');
-
-        return $strategy === 'cascade';
+        return $rosterType === SyncService::ROSTER_TYPE_RELATIONSHIP;
     }
 
     /**
