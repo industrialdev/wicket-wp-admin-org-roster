@@ -7,11 +7,12 @@ namespace WicketAORM\Admin;
 /**
  * Register admin pages (React mount points and WP_List_Table pages).
  *
- * Page architecture (per AORM-1 / AORM-3):
+ * Page architecture (per AORM-1 / AORM-3 / AORM-10):
  *   - Org memberships list  (wicket-aorm)                → WP_List_Table, NO React
  *   - Org roster detail     (wicket-aorm-roster-detail)  → React island, hidden from menu
  *   - Group Rosters         (wicket-aorm-group-rosters)  → React island
  *   - Settings              (wicket-aorm-settings)       → classic PHP admin page, NO React
+ *   - Global Logs           (wicket-aorm-logs)           → WP_List_Table, NO React
  */
 class MenuPage
 {
@@ -30,6 +31,9 @@ class MenuPage
 
     /** Hidden detail page slug — linked to from list-table rows. */
     public const DETAIL_SLUG = 'wicket-aorm-roster-detail';
+
+    /** Global Logs page slug (AORM-10). */
+    public const LOGS_SLUG = 'wicket-aorm-logs';
 
     /** Required capability for all AORM pages. */
     private const CAPABILITY = 'manage_options';
@@ -95,6 +99,18 @@ class MenuPage
             self::CAPABILITY,
             'wicket-aorm-settings',
             [$this, 'renderSettingsPage'],
+        );
+
+        // Global Logs — read-only WP_List_Table across every roster (AORM-10).
+        // Registered after Settings (appended, not inserted) so existing
+        // index-based submenu assertions elsewhere are unaffected.
+        add_submenu_page(
+            self::MENU_SLUG,
+            __('Activity Logs', 'wicket-aorm'),
+            __('Logs', 'wicket-aorm'),
+            self::CAPABILITY,
+            self::LOGS_SLUG,
+            [$this, 'renderLogsPage'],
         );
 
         // Hide the detail page from the visible sidebar via CSS.
@@ -217,6 +233,69 @@ class MenuPage
         echo '</form>';
 
         echo '</div>';
+    }
+
+    /**
+     * Render the Global Logs page (AORM-10).
+     *
+     * Instantiates LogsListTable, fetches items via prepare_items(), and
+     * renders the standard WordPress admin page scaffold — same pattern as
+     * renderOrgRostersPage(). No search box (not part of this ticket's
+     * acceptance criteria; filtering is handled entirely by the dropdowns
+     * and date range LogsListTable renders in its own extra_tablenav()).
+     *
+     * Ends with a small inline toggle script (AORM-10.7) so each row's
+     * "View Details" button can expand/collapse its hidden JSON detail row
+     * without a page reload or an AJAX round-trip.
+     *
+     * @see AORM-10.1
+     */
+    public function renderLogsPage(): void
+    {
+        $table = new LogsListTable();
+        $table->prepare_items();
+
+        echo '<div class="wrap">';
+        echo '<h1 class="wp-heading-inline">' . esc_html__('Activity Logs', 'wicket-aorm') . '</h1>';
+        echo '<hr class="wp-header-end" />';
+        echo '<form method="get">';
+        echo '<input type="hidden" name="page" value="' . esc_attr(self::LOGS_SLUG) . '" />';
+        $table->display();
+        echo '</form>';
+        $this->renderLogsToggleScript();
+        echo '</div>';
+    }
+
+    /**
+     * Echo the inline JS that toggles a Global Logs row's hidden detail row.
+     *
+     * Uses click-event delegation on the document rather than binding a
+     * listener per button, so it works correctly regardless of pagination
+     * (each page load re-renders fresh buttons, and delegation needs no
+     * re-binding). Matches the existing pattern of small inline <script>/
+     * <style> blocks elsewhere in this class (e.g. hideDetailPageFromMenu()).
+     *
+     * @see AORM-10.7
+     */
+    private function renderLogsToggleScript(): void
+    {
+        ?>
+        <script>
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('.aorm-log-toggle');
+            if (!button) {
+                return;
+            }
+            var target = document.getElementById(button.getAttribute('data-target'));
+            if (!target) {
+                return;
+            }
+            var isHidden = target.style.display === 'none' || target.style.display === '';
+            target.style.display = isHidden ? 'table-row' : 'none';
+            button.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+        });
+        </script>
+        <?php
     }
 
     // -------------------------------------------------------------------------
