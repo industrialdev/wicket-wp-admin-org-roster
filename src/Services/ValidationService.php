@@ -102,25 +102,9 @@ class ValidationService
     public const PHONE_REGEX = '/^[+]?[\d\s\-().]{7,20}$/';
 
     /**
-     * Maximum allowed run of the same digit repeated consecutively in a
-     * phone number, after stripping non-numeric characters (bugfix,
-     * post-AORM-6.14).
-     *
-     * Digit-count-only validation let obviously-fake numbers through as
-     * long as the total digit count fell within PHONE_MIN_DIGITS–
-     * PHONE_MAX_DIGITS — e.g. "123-78945-1111111" strips to exactly 15
-     * digits and passed despite the trailing run of seven repeated "1"s.
-     * Real phone numbers essentially never contain a run this long, so
-     * rejecting 6+ consecutive identical digits catches this class of junk
-     * data with minimal risk of flagging a legitimate number.
-     */
-    public const PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS = 6;
-
-    /**
      * Human-readable validation label for rows where the phone value is
-     * present but fails the character-shape, digit-count, or
-     * repeated-digit checks (AORM-6.14; extended by the repeated-digit
-     * bugfix above).
+     * present but fails the character-shape or digit-count checks
+     * (AORM-6.14).
      *
      * Stored in the validation_message column of wp_wicket_aorm_staged_records.
      */
@@ -161,8 +145,7 @@ class ValidationService
      *   3. Email format matches EMAIL_REGEX.
      *   4. Phone (only when phone is provided): character shape matches
      *      PHONE_REGEX; digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS
-     *      after stripping non-numeric characters; no run of
-     *      PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS or more identical digits.
+     *      after stripping non-numeric characters.
      *
      * @param array<string, string> $fields Associative array of field values.
      * @return array<string, string> Field-keyed error messages (empty = valid).
@@ -214,17 +197,13 @@ class ValidationService
         }
 
         // 4. Phone format (optional field — only validate when provided).
-        //    An absent or blank value is valid (empty is OK). Three checks,
+        //    An absent or blank value is valid (empty is OK). Two checks,
         //    in order (cheapest/most-decisive first):
         //      a. Character shape — PHONE_REGEX (bugfix, post-AORM-6.14).
         //         Rejects disallowed characters (e.g. letters) and enforces
         //         overall length before looking at digit content at all.
         //      b. Digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
         //         stripping non-numeric characters (AORM-6.14, MDP rules).
-        //      c. No run of PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS or more
-        //         identical digits (bugfix, post-AORM-6.14) — catches
-        //         obviously-fake numbers (e.g. "123-78945-1111111") that
-        //         satisfy (a) and (b) but aren't a plausible real number.
         $phone = trim((string) ($fields['phone'] ?? ''));
 
         if ($phone !== '') {
@@ -235,8 +214,6 @@ class ValidationService
                 $digitCount = strlen($digits);
 
                 if ($digitCount < self::PHONE_MIN_DIGITS || $digitCount > self::PHONE_MAX_DIGITS) {
-                    $errors['phone'] = 'Invalid phone number format.';
-                } elseif (preg_match('/(\d)\1{' . (self::PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS - 1) . ',}/', $digits)) {
                     $errors['phone'] = 'Invalid phone number format.';
                 }
             }

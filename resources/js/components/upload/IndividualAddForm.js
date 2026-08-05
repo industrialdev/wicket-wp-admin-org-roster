@@ -9,8 +9,7 @@
  *   - first_name, last_name, email are required.
  *   - first_name, last_name must match NAME_REGEX (letters, spaces, hyphens, apostrophes only).
  *   - email must match EMAIL_REGEX.
- *   - phone, when provided, must match PHONE_REGEX and must not contain a run
- *     of PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS or more identical digits.
+ *   - phone, when provided, must match PHONE_REGEX.
  *
  * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
  * session_id via startNewSession(), stores match_category via setMatchCategory(),
@@ -70,30 +69,6 @@ export const NAME_REGEX = /^[a-zA-Z\s'-]+$/;
  */
 export const PHONE_REGEX = /^[+]?[\d\s\-().]{7,20}$/;
 
-/**
- * Maximum allowed run of the same digit repeated consecutively in a phone
- * number, checked after stripping non-numeric characters (bugfix, mirrors
- * ValidationService::PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS server-side).
- *
- * PHONE_REGEX alone allows an obviously-fake number like
- * "123-78945-1111111" through, since it only constrains character shape and
- * overall length — the trailing run of seven repeated "1"s isn't otherwise
- * caught. Real phone numbers essentially never contain a run this long.
- *
- * @type {number}
- */
-export const PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS = 6;
-
-/**
- * Regex testing whether a digit-only string contains a run of the same
- * digit repeated PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS or more times.
- *
- * @type {RegExp}
- */
-const PHONE_REPEATED_DIGIT_REGEX = new RegExp(
-	`(\\d)\\1{${ PHONE_MAX_CONSECUTIVE_REPEATED_DIGITS - 1 },}`
-);
-
 // ---------------------------------------------------------------------------
 // Pure validation helper — exported for unit testing.
 // ---------------------------------------------------------------------------
@@ -134,14 +109,8 @@ export function validateFields( fields ) {
 		errors.email = __( 'Please enter a valid email address.', 'wicket-aorm' );
 	}
 
-	const trimmedPhone = fields.phone.trim();
-
-	if ( trimmedPhone ) {
-		if ( ! PHONE_REGEX.test( trimmedPhone ) ) {
-			errors.phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
-		} else if ( PHONE_REPEATED_DIGIT_REGEX.test( trimmedPhone.replace( /\D/g, '' ) ) ) {
-			errors.phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
-		}
+	if ( fields.phone.trim() && ! PHONE_REGEX.test( fields.phone.trim() ) ) {
+		errors.phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
 	}
 
 	return errors;
