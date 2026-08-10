@@ -375,7 +375,10 @@ export default function CsvValidationStep( {
 							isDismissible={ false }
 							className="aorm-csv-validation__status-notice"
 						>
-							{ __( 'All rows passed validation and are ready to sync.', 'wicket-aorm' ) }
+							{ __(
+								"All rows passed validation. We're already checking these records against the MDP for duplicates in the background — click Proceed to view progress.",
+								'wicket-aorm'
+							) }
 						</Notice>
 					) }
 
