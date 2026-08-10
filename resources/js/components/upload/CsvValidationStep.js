@@ -18,7 +18,11 @@
  *   - Counts summary bar: Total / Valid / Invalid / Duplicate.
  *   - Per-row table: row #, first name, last name, email, phone, status badge,
  *     and the validation reason for invalid or duplicate rows.
- *   - Proceed button (disabled when any rows are invalid/duplicate) — AORM-6.19.
+ *   - Proceed button — AORM-6.19. Hidden entirely (not just disabled) whenever
+ *     any rows are invalid/duplicate: a file with any problem rows fails
+ *     validation outright (the backend never dispatches the MDP matching job
+ *     for it — see UploadController), so there is no "in progress" state to
+ *     proceed to. Re-upload is the only path forward in that case.
  *   - Re-upload button (calls DELETE on current session, returns to step 1) — AORM-6.19.
  *
  * @param {{
@@ -34,7 +38,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from '@wordpress/element';
-import { __, sprintf } from '@wordpress/i18n';
+import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 import { apiFetch } from '../../utils/apiFetch';
 
@@ -355,18 +359,13 @@ export default function CsvValidationStep( {
 					{ /* ── Problems / all-clear notice ────────────────────────── */ }
 					{ hasProblems ? (
 						<Notice
-							status="warning"
+							status="error"
 							isDismissible={ false }
 							className="aorm-csv-validation__status-notice"
 						>
-							{ sprintf(
-								/* translators: 1: number of invalid rows, 2: number of duplicate rows */
-								__(
-									'%1$d invalid and %2$d duplicate row(s) were found. Rows with issues will be discarded and cannot be synced.',
-									'wicket-aorm'
-								),
-								invalidCount,
-								dupCount
+							{ __(
+								'Your file has failed to pass validation. You may re-attempt your upload after correcting these issues.',
+								'wicket-aorm'
 							) }
 						</Notice>
 					) : (
@@ -473,15 +472,16 @@ export default function CsvValidationStep( {
 
 					{ /* ── Actions (Proceed / Re-upload — AORM-6.19) ─────────── */ }
 					<div className="aorm-csv-validation__actions">
+						{ ! hasProblems && (
+							<Button
+								variant="primary"
+								onClick={ () => goToStep( 'matching-progress' ) }
+							>
+								{ __( 'Proceed', 'wicket-aorm' ) }
+							</Button>
+						) }
 						<Button
-							variant="primary"
-							disabled={ hasProblems }
-							onClick={ () => goToStep( 'matching-progress' ) }
-						>
-							{ __( 'Proceed', 'wicket-aorm' ) }
-						</Button>
-						<Button
-							variant="secondary"
+							variant={ hasProblems ? 'primary' : 'secondary' }
 							isBusy={ isAbandoning }
 							disabled={ isAbandoning }
 							onClick={ handleReupload }

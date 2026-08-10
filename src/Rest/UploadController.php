@@ -296,9 +296,10 @@ class UploadController extends RestController
         );
 
         // AORM-7: Dispatch the background MDP matching job for all valid rows.
-        // Only dispatched when at least one valid row exists — invalid/duplicate
-        // rows are excluded by MatchingJobRunner (validation_status = 'valid').
-        if ($validCount > 0) {
+        // Only dispatched when the entire file passes validation — a file with
+        // any invalid/duplicate rows fails validation outright and must be
+        // corrected and re-uploaded rather than partially matched.
+        if ($validCount > 0 && 0 === $invalidCount && 0 === $duplicateCount) {
             $scheduler = $this->schedulerService ?? new SchedulerService();
             $scheduler->dispatch(
                 MatchingJobRunner::HOOK,
