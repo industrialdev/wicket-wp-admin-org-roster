@@ -3,20 +3,20 @@
  *
  * Reusable table component for staged records in the upload validation-review
  * accordion. Provides:
- *  - Three base sortable columns: First Name, Last Name, Email (asc/desc toggle).
+ *  - Five base sortable columns: First Name, Last Name, Email, Phone, Title (asc/desc toggle).
  *  - SearchControl that filters across ALL records before pagination.
  *  - Client-side pagination at PAGE_SIZE (10) records per page.
  *  - Optional CheckboxControl row selection (AORM-8B.2) via `selectable` prop.
  *
  * Additional columns for specific categories (AORM-8.4 – 8.10) are injected
- * via the `extraColumns` prop; they are appended after the three base columns.
+ * via the `extraColumns` prop; they are appended after the base columns.
  *
  * Record shape (from GET /wicket-aorm/v1/uploads/{session_id}/staged):
  *   {
  *     id:                number,
  *     record_status:     string,
  *     sync_status:       string,
- *     raw_data:          { first_name?: string, last_name?: string, email?: string, … },
+ *     raw_data:          { first_name?: string, last_name?: string, email?: string, phone?: string, title?: string, … },
  *     match_count:       number,
  *     previous_category: string|null,
  *   }
@@ -45,6 +45,8 @@ export const BASE_COLUMNS = [
 	{ key: 'first_name', label: __( 'First Name', 'wicket-aorm' ) },
 	{ key: 'last_name',  label: __( 'Last Name',  'wicket-aorm' ) },
 	{ key: 'email',      label: __( 'Email',      'wicket-aorm' ) },
+	{ key: 'phone',      label: __( 'Phone',      'wicket-aorm' ) },
+	{ key: 'title',      label: __( 'Title',      'wicket-aorm' ) },
 ];
 
 /**
@@ -270,7 +272,7 @@ export default function RecordsTable( {
 				<SearchControl
 					label={ __( 'Search records', 'wicket-aorm' ) }
 					hideLabelFromVision
-					placeholder={ __( 'Search by name or email…', 'wicket-aorm' ) }
+					placeholder={ __( 'Search by name, email, phone, or title…', 'wicket-aorm' ) }
 					value={ searchQuery }
 					onChange={ handleSearchChange }
 				/>
