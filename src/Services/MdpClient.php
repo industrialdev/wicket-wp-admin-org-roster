@@ -247,7 +247,7 @@ class MdpClient
 
         $queryParams = [
             'include' => 'person,membership,organization_membership',
-            'sort'    => 'person_family_name',
+            // 'sort'    => 'person_family_name', // this breaks the filtering on the MDP side
             'filter'  => [
                 'active_at' => 'now',
             ],
