@@ -13,7 +13,8 @@ use WicketAORM\Services\MdpClient;
  *
  * Routes registered under the wicket-aorm/v1 namespace:
  *   GET    /rosters/{org_uuid}/{membership_uuid}          — org+membership detail (AORM-4.1)
- *   GET    /rosters/{org_uuid}/{membership_uuid}/members  — paginated member list (AORM-4.5)
+ *   GET    /rosters/{org_uuid}/{membership_uuid}/members  — paginated member list (AORM-4.5), optional
+ *                                                            ?search= filters by name/email (AORM-4.21)
  *   DELETE /rosters/{org_uuid}/{membership_uuid}/members  — bulk remove members   (AORM-4.9)
  *   POST   /rosters/{org_uuid}/{membership_uuid}/roles    — bulk add/remove roles (AORM-4.10)
  *   GET    /rosters/{org_uuid}/{membership_uuid}/activity — paginated activity log (AORM-4.18)
@@ -95,6 +96,11 @@ class RosterController extends RestController
                             'required'          => false,
                             'sanitize_callback' => 'absint',
                             'default'           => 25,
+                        ],
+                        'search'          => [
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                            'default'           => '',
                         ],
                     ],
                 ],
@@ -278,6 +284,11 @@ class RosterController extends RestController
      * Fetches the list of people assigned to the roster from the MDP and
      * returns a paginated JSON payload with member details.
      *
+     * Accepts an optional `search` param (AORM-4.21) that filters the result
+     * to members whose name or email address contains the given term —
+     * passed straight through to MdpClient::getRosterMembers(), which applies
+     * it as a Ransack `filter[]` param on the MDP request.
+     *
      * @param \WP_REST_Request $request
      */
     public function get_members($request): \WP_REST_Response
@@ -286,11 +297,13 @@ class RosterController extends RestController
         $membershipUuid = (string) $request->get_param('membership_uuid');
         $page           = max(1, (int) ($request->get_param('page') ?? 1));
         $perPage        = max(1, (int) ($request->get_param('per_page') ?? 10));
+        $search         = (string) ($request->get_param('search') ?? '');
 
         $client = $this->mdpClient ?? new MdpClient();
         $result = $client->getRosterMembers($orgUuid, $membershipUuid, [
             'page'     => $page,
             'per_page' => $perPage,
+            'search'   => $search,
         ]);
 
         return new \WP_REST_Response($result, 200);

@@ -24,6 +24,43 @@
  * before issuing DELETE /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/members.
  * On success the member list is refreshed and the selection is cleared.
  *
+ * AORM-4.21 adds a server-side search box (name or email address) above the
+ * table. Typing debounces for SEARCH_DEBOUNCE_MS before the committed
+ * `search` state updates, which is appended to the REST path as `?search=`
+ * (handled by RosterController::get_members() → MdpClient::getRosterMembers()
+ * via a Ransack `filter[person_full_name_or_person_emails_address_cont]`
+ * param). Committing a new search resets to page 1 and clears the current
+ * selection, same as changing pages. Because the fetched `total` is scoped
+ * to the active search term, a search with zero matches is distinguished
+ * from a genuinely empty roster (`hasActiveSearch`) so the upload CTA empty
+ * state only shows when the roster has no members at all. The search box
+ * itself is rendered unconditionally (outside the loading/error/empty/data
+ * branches below) so it never unmounts while a debounced request is
+ * in flight — unmounting would drop focus and cursor position out from
+ * under whatever the admin is mid-typing.
+ *
+ * Bugfix history (post-AORM-4.21) — two earlier attempts at closing the
+ * render-timing gap between committing a new `search` value and
+ * useRestApi's `isLoading` reflecting the resulting request both lived in
+ * this component (a bridging `isCommittingSearch` flag) and both had their
+ * own failure modes: the first left a one-render gap where a stale `total`
+ * plus an already-flipped `hasActiveSearch` could flash the "no members
+ * assigned yet" CTA; fixing that by setting the flag on every debounce
+ * settle then caused it to get stuck `true` forever whenever a settle
+ * didn't actually change the committed value (no new fetch to ever clear
+ * it), and — once THAT was fixed to only flag genuine changes — it could
+ * still get stuck whenever a new commit landed while the previous request
+ * was still in flight (`isLoading` never dipped back to `false` in between
+ * for the flag's clearing effect to catch). All three symptoms traced back
+ * to the same root cause: `useRestApi()` didn't know which `path` its
+ * `isLoading`/`data` actually corresponded to. That's now fixed at the
+ * hook level (see useRestApi.js) — `isLoading` is correct synchronously and
+ * safe against overlapping requests, so no bridging state is needed here
+ * at all. `committedSearchRef` remains solely as an optimization: it avoids
+ * committing (and re-fetching) when a debounce settles on a value that's
+ * already the current search — e.g. typing then deleting back to the same
+ * term, or the very first settle after mount when nothing was typed.
+ *
  * @param {{
  *   orgUuid:        string,
  *   membershipUuid: string,
@@ -31,9 +68,9 @@
  * }} props
  */
 
-import { useState } from '@wordpress/element';
+import { useState, useEffect, useRef } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
-import { Button, Notice, Spinner } from '@wordpress/components';
+import { Button, Notice, SearchControl, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../utils/apiFetch';
 import { useRestApi } from '../hooks/useRestApi';
@@ -42,7 +79,32 @@ import ConfirmRemoveModal from './ConfirmRemoveModal';
 import EditPermissionsModal from './EditPermissionsModal';
 import MemberTable from './MemberTable';
 
-const PER_PAGE = 10;
+export const PER_PAGE = 10;
+
+/** Debounce delay (ms) between typing in the search box and committing the search term (AORM-4.21). */
+export const SEARCH_DEBOUNCE_MS = 400;
+
+/**
+ * Build the REST API path for the member list, including pagination and an
+ * optional search term (AORM-4.21).
+ *
+ * @param {string} orgUuid
+ * @param {string} membershipUuid
+ * @param {string} search  Committed search term; omitted from the query string when empty.
+ * @param {number} page    Current page number (1-based).
+ * @param {number} perPage Items per page.
+ * @returns {string}
+ */
+export function buildMembersPath( orgUuid, membershipUuid, search, page = 1, perPage = PER_PAGE ) {
+	const base = `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/members`;
+
+	const params = new URLSearchParams();
+	params.set( 'page', String( page ) );
+	params.set( 'per_page', String( perPage ) );
+	if ( search ) params.set( 'search', search );
+
+	return `${ base }?${ params.toString() }`;
+}
 
 export default function RosterAssignment( {
 	orgUuid,
@@ -51,6 +113,39 @@ export default function RosterAssignment( {
 } ) {
 	const [ selectedIds, setSelectedIds ] = useState( new Set() );
 	const [ page, setPage ] = useState( 1 );
+
+	// Search box state (AORM-4.21). `searchInput` tracks every keystroke for
+	// a responsive text field; `search` is the debounced value actually sent
+	// to the API, committed SEARCH_DEBOUNCE_MS after the person stops typing.
+	const [ searchInput, setSearchInput ] = useState( '' );
+	const [ search, setSearch ] = useState( '' );
+
+	// Tracks the last-committed search value via a ref (rather than reading
+	// `search` state directly) so this effect can compare against it without
+	// needing `search` as a dependency — which would otherwise re-schedule
+	// the timer every time a commit fires. Read at call time inside the
+	// timeout, so it's never stale. Purely an optimization now that
+	// useRestApi() handles its own loading-state correctness (see the
+	// bugfix history above) — this just avoids re-fetching when a debounce
+	// settles on a value that's already the current search.
+	const committedSearchRef = useRef( '' );
+
+	useEffect( () => {
+		const handle = setTimeout( () => {
+			const trimmed = searchInput.trim();
+
+			if ( trimmed === committedSearchRef.current ) {
+				return;
+			}
+
+			committedSearchRef.current = trimmed;
+			setSearch( trimmed );
+			setPage( 1 );
+			setSelectedIds( new Set() );
+		}, SEARCH_DEBOUNCE_MS );
+
+		return () => clearTimeout( handle );
+	}, [ searchInput ] );
 
 	// Edit-Permissions modal state (AORM-4.11).
 	// pendingIds holds the selection snapshot at the moment the modal opened.
@@ -227,13 +322,18 @@ export default function RosterAssignment( {
 
 	const { data, isLoading, error, refresh } = useRestApi(
 		orgUuid && membershipUuid
-			? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/members?per_page=${ PER_PAGE }&page=${ page }`
+			? buildMembersPath( orgUuid, membershipUuid, search, page, PER_PAGE )
 			: null
 	);
 
 	const members    = data?.members    ?? [];
 	const total      = data?.total      ?? 0;
 	const totalPages = data?.total_pages ?? 1;
+
+	// A committed search term is active (AORM-4.21). Used to distinguish
+	// "search matched nothing" from a genuinely empty roster, since `total`
+	// above is always scoped to the current search.
+	const hasActiveSearch = search !== '';
 
 	function goToPage( next ) {
 		setPage( next );
@@ -243,6 +343,19 @@ export default function RosterAssignment( {
 
 	return (
 		<div className="aorm-assignment">
+			{ /* Always visible (AORM-4.21) — must not unmount while a debounced
+			     search request is loading, or the input loses focus/cursor
+			     position mid-keystroke. */ }
+			<div className="aorm-assignment__search">
+				<SearchControl
+					label={ __( 'Search members', 'wicket-aorm' ) }
+					hideLabelFromVision
+					placeholder={ __( 'Search by name or email…', 'wicket-aorm' ) }
+					value={ searchInput }
+					onChange={ setSearchInput }
+				/>
+			</div>
+
 			{ isLoading && <Spinner /> }
 
 			{ ! isLoading && error && (
@@ -262,7 +375,7 @@ export default function RosterAssignment( {
 				</Notice>
 			) }
 
-			{ ! isLoading && ! error && total === 0 && (
+			{ ! isLoading && ! error && total === 0 && ! hasActiveSearch && (
 				<div className="aorm-assignment__empty-state">
 					<span
 						className="dashicons dashicons-upload aorm-assignment__empty-state-icon"
@@ -286,7 +399,7 @@ export default function RosterAssignment( {
 				</div>
 			) }
 
-		{ ! isLoading && ! error && total > 0 && (
+		{ ! isLoading && ! error && ( total > 0 || hasActiveSearch ) && (
 				<>
 					<BulkActionToolbar
 						selectedCount={ selectedIds.size }

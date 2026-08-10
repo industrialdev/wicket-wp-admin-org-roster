@@ -39,6 +39,13 @@
 	text-align: center;
 }
 
+/* ── Search box (AORM-4.21) ────────────────────────────────────────────── */
+
+.aorm-assignment__search {
+	max-width: 320px;
+	margin-bottom: 12px;
+}
+
 /* ── Empty state (AORM-4.7) ───────────────────────────────────────────── */
 
 .aorm-assignment__empty-state {

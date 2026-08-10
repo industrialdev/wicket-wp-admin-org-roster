@@ -204,7 +204,15 @@ class MdpClient
      * @param array{
      *   page?: int,
      *   per_page?: int,
-     * } $args
+     *   search?: string,
+     * } $args Search term (when present) matches the member's full name or
+     *         any of their email addresses — applied via the same
+     *         `person_full_name_or_person_emails_address_cont` Ransack
+     *         predicate used for this same purpose elsewhere in the Wicket
+     *         ecosystem (e.g. MembershipRosterReader/MembershipService in
+     *         wicket-wp-account-centre), just sent as a GET filter[] param
+     *         on this endpoint's existing request rather than switching to
+     *         their POST /person_memberships/query action.
      * @param bool $includeRoles Whether to fetch org-scoped roles and phone for
      *                           each member (an extra MDP request per page).
      *
@@ -248,6 +256,10 @@ class MdpClient
                 'number' => max(1, (int) ($args['page'] ?? 1)),
             ],
         ];
+
+        if (! empty($args['search'])) {
+            $queryParams['filter']['person_full_name_or_person_emails_address_cont'] = (string) $args['search'];
+        }
 
         $query = (string) preg_replace(
             '/\%5B\d+\%5D/',
