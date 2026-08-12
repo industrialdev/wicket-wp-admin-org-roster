@@ -2,8 +2,8 @@
  * Roster Upload tab wizard — AORM-4.14 / AORM-5.7.
  *
  * Orchestrates the multi-step bulk upload + individual add flows.
- * State lives here; each step is a self-contained component that
- * receives goToStep / shared session props and renders its own UI.
+ * Each step is a self-contained component that receives goToStep / shared
+ * session props and renders its own UI.
  *
  * Steps
  * -----
@@ -16,23 +16,36 @@
  * validation-review — accordion review screen      (AORM-8)
  * sync-progress     — commit & sync progress       (AORM-9)
  *
- * Initial step resolution
- * -----------------------
- * Assets.php queries the database at page-render time and injects an
- * `activeSession` object into window.aormContext:
+ * State ownership
+ * ----------------
+ * This component is intentionally presentational — the wizard's step and
+ * session state live in `useUploadWizardState()`, owned by the parent
+ * (`OrgRosterDetail`) instead of here. That's a deliberate fix for a
+ * tab-switch bug: `OrgRosterDetail`'s `TabPanel` unmounts this component
+ * whenever the admin switches away from the "Roster Upload" tab, and
+ * remounts a fresh instance when they switch back. State that lived in a
+ * local `useState` here (seeded once from `window.aormContext.activeSession`,
+ * a snapshot taken at the initial full page load) would reset to `'landing'`
+ * on every remount, silently forgetting any session created client-side
+ * since the page loaded — see `useUploadWizardState.js` for the full
+ * writeup. Keeping state in the never-unmounted parent means it survives
+ * tab switches for the lifetime of the page view.
  *
- *   null                        → no active session → start at 'landing'
- *   { isComplete: false, … }    → matching in progress → 'matching-progress'
- *   { isComplete: true,  … }    → matching done        → 'validation-review'
- *
- * Exported constants
- * ------------------
- * WIZARD_STEPS — ordered array of all step names (useful for tests).
- *
- * @param {{ orgUuid: string, membershipUuid: string }} props
+ * @param {Object} props
+ * @param {string} props.orgUuid
+ * @param {string} props.membershipUuid
+ * @param {string} props.step             Current wizard step (see WIZARD_STEPS).
+ * @param {string|null} props.sessionId
+ * @param {string} props.uploadAction
+ * @param {string|null} props.matchCategory
+ * @param {File|null} props.selectedFile
+ * @param {Function} props.goToStep
+ * @param {Function} props.startNewSession
+ * @param {Function} props.setMatchCategory
+ * @param {Function} props.setUploadAction
+ * @param {Function} props.setSelectedFile
+ * @param {Function} props.resetWizard
  */
-
-import { useState, useCallback } from '@wordpress/element';
 
 import WizardLanding        from './upload/WizardLanding';
 import IndividualAddForm    from './upload/IndividualAddForm';
@@ -45,107 +58,25 @@ import SyncProgressStep     from './upload/SyncProgressStep';
 
 import '../../css/roster-upload.css';
 
-/** Ordered list of all wizard step names. */
-export const WIZARD_STEPS = [
-	'landing',
-	'individual-form',
-	'upload-file',
-	'action-select',
-	'csv-validation',
-	'matching-progress',
-	'validation-review',
-	'sync-progress',
-];
+// Re-exported for backward compatibility — WIZARD_STEPS now lives alongside
+// the wizard state it describes in useUploadWizardState.js.
+export { WIZARD_STEPS } from '../hooks/useUploadWizardState';
 
-/**
- * Derive the initial wizard step from the PHP-injected active session.
- *
- * Assets.php resolves the correct step server-side and passes it as
- * activeSession.step.  The legacy isComplete boolean is no longer used.
- *
- * @param {{ sessionId: string, step: string }|null} activeSession
- * @returns {string}
- */
-function initialStep( activeSession ) {
-	if ( ! activeSession?.sessionId ) {
-		return 'landing';
-	}
-
-	// Use the explicit step provided by the server when available.
-	if ( activeSession.step && WIZARD_STEPS.includes( activeSession.step ) ) {
-		return activeSession.step;
-	}
-
-	// Fallback for any cached/older server responses that still use isComplete.
-	return activeSession.isComplete ? 'validation-review' : 'matching-progress';
-}
-
-export default function RosterUpload( { orgUuid, membershipUuid } ) {
-	// Active session injected by Assets.php at page-render time.
-	const activeSession = window.aormContext?.activeSession ?? null;
-
-	/**
-	 * Active wizard step — initialised from the PHP-injected session so the
-	 * correct step is shown immediately on page load with no flash or extra
-	 * request, regardless of which admin opened the page.
-	 *
-	 * @type {[string, Function]}
-	 */
-	const [ step, setStep ] = useState( () => initialStep( activeSession ) );
-
-	/**
-	 * Active upload session ID — pre-populated when Assets.php found an
-	 * in-progress session, otherwise set after a CSV upload creates one.
-	 *
-	 * @type {[string|null, Function]}
-	 */
-	const [ sessionId, setSessionId ] = useState( activeSession?.sessionId ?? null );
-
-	/**
-	 * Bulk-upload action chosen by the admin: 'add' (default) or 'replace'.
-	 * @type {[string, Function]}
-	 */
-	const [ uploadAction, setUploadAction ] = useState( 'add' );
-
-	/**
-	 * Match category returned by the individual add endpoint (AORM-5.7).
-	 * One of 'ready_to_sync' | 'probable_match' | 'possible_match' | null.
-	 *
-	 * @type {[string|null, Function]}
-	 */
-	const [ matchCategory, setMatchCategory ] = useState( null );
-
-	/**
-	 * The File object chosen by the admin in the upload-file step.
-	 * Lifted here so CsvValidationStep can POST it to the upload endpoint.
-	 *
-	 * @type {[File|null, Function]}
-	 */
-	const [ selectedFile, setSelectedFile ] = useState( null );
-
-	// ── Wizard actions ────────────────────────────────────────────────────────
-
-	/** Navigate to any named step. */
-	const goToStep = useCallback( ( nextStep ) => {
-		setStep( nextStep );
-	}, [] );
-
-	/** Record the upload session ID returned by the server after CSV upload. */
-	const startNewSession = useCallback( ( newSessionId ) => {
-		setSessionId( newSessionId );
-	}, [] );
-
-	/** Return the wizard to its initial state (landing + cleared session). */
-	const resetWizard = useCallback( () => {
-		setStep( 'landing' );
-		setSessionId( null );
-		setUploadAction( 'add' );
-		setMatchCategory( null );
-		setSelectedFile( null );
-	}, [] );
-
-	// ── Render ────────────────────────────────────────────────────────────────
-
+export default function RosterUpload( {
+	orgUuid,
+	membershipUuid,
+	step,
+	sessionId,
+	uploadAction,
+	matchCategory,
+	selectedFile,
+	goToStep,
+	startNewSession,
+	setMatchCategory,
+	setUploadAction,
+	setSelectedFile,
+	resetWizard,
+} ) {
 	/** Props forwarded to every step component. */
 	const sharedProps = {
 		orgUuid,

@@ -10,6 +10,14 @@
  *   1. Roster Assignment  — current members table with bulk/row actions
  *   2. Roster Upload      — bulk upload wizard + individual add (AORM-5 – 9)
  *   3. Roster Activity    — scoped audit trail (nice-to-have, AORM-4)
+ *
+ * The Roster Upload wizard's step/session state is owned here (via
+ * useUploadWizardState()) rather than inside RosterUpload itself, because
+ * TabPanel unmounts inactive tab content — RosterUpload would lose its
+ * in-progress session every time the admin switched to another tab and
+ * back. This component sits above the TabPanel and never unmounts across
+ * tab switches, so the state survives. See useUploadWizardState.js for the
+ * full bugfix writeup.
  */
 
 import { useState } from '@wordpress/element';
@@ -17,6 +25,7 @@ import { __ } from '@wordpress/i18n';
 import { Notice, Spinner, TabPanel } from '@wordpress/components';
 
 import { useRestApi } from '../hooks/useRestApi';
+import { useUploadWizardState } from '../hooks/useUploadWizardState';
 import RosterBreadcrumb from '../components/RosterBreadcrumb';
 import RosterHeading from '../components/RosterHeading';
 import RosterAssignment from '../components/RosterAssignment';
@@ -45,6 +54,12 @@ export default function OrgRosterDetail() {
 			? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }`
 			: null
 	);
+
+	// Owned here (not inside RosterUpload) so it survives TabPanel unmounting
+	// the "Roster Upload" tab's content when the admin switches tabs. Must be
+	// called unconditionally, before the early returns below, per the rules
+	// of hooks.
+	const uploadWizard = useUploadWizardState();
 
 	if ( ! orgUuid || ! membershipUuid ) {
 		return (
@@ -112,6 +127,7 @@ export default function OrgRosterDetail() {
 							<RosterUpload
 								orgUuid={ orgUuid }
 								membershipUuid={ membershipUuid }
+								{ ...uploadWizard }
 							/>
 						) }
 						{ tab.name === 'activity' && (
