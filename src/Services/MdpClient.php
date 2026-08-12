@@ -332,10 +332,21 @@ class MdpClient
      * type phone, so filtering by org would zero out phone numbers entirely.
      * Instead, each included `phones` resource is resolved back to its owner
      * via `relationships.phoneable.data.id` (rather than depending on a
-     * forward `people.relationships.phones` link, which may not be present)
-     * and the phone flagged `attributes.primary === true` wins; if none is
-     * flagged primary, the first phone encountered for that person is used.
-     * `attributes.number_national_format` is used for display.
+     * forward `people.relationships.phones` link, which may not be present).
+     * `attributes.number_international_format` is used for display.
+     *
+     * Which phone wins depends on the wicket_aorm_settings[phone_match_type]
+     * setting (MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE), read directly
+     * here via get_option() rather than threaded through as a parameter:
+     *   - '' (Any type, the default): the phone flagged `attributes.primary
+     *     === true` wins; if none is flagged primary, the first phone
+     *     encountered for that person is used. Unchanged from before this
+     *     was configurable.
+     *   - a specific type: only a phone whose `attributes.type` matches
+     *     is considered (primary-preferred among those); a person with no
+     *     phone of that type gets '' — even if they have a primary phone of a
+     *     different type — since the whole point of the setting is to show
+     *     that specific type's number, not "whatever's primary".
      *
      * Never throws — a failed or malformed response yields an empty map so a
      * lookup failure degrades to "no roles/phone shown" rather than breaking
@@ -381,6 +392,11 @@ class MdpClient
             return [];
         }
 
+        $phoneSettings  = (array) get_option(SyncService::SETTINGS_OPTION, []);
+        $phoneMatchType = (string) (
+            $phoneSettings[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
+        );
+
         // Index included `roles` resources by id => role name, but only the
         // ones actually scoped to $orgUuid. A role's `relationships.resource.data`
         // is null for global roles (e.g. "user") and points at whichever org the
@@ -392,7 +408,8 @@ class MdpClient
         $roleNamesById = [];
 
         // Index included `phones` resources by owning person_uuid => display
-        // number, preferring whichever phone is flagged primary.
+        // number. See the phone_match_type doc block above the method for how
+        // $phoneMatchType changes which phone wins.
         $phoneByPerson = [];
 
         foreach ($response['included'] ?? [] as $item) {
@@ -412,13 +429,29 @@ class MdpClient
                 }
             } elseif ($itemType === 'phones') {
                 $ownerUuid = (string) ($item['relationships']['phoneable']['data']['id'] ?? '');
-                $number    = (string) ($item['attributes']['number_national_format'] ?? '');
+                $number    = (string) ($item['attributes']['number_international_format'] ?? '');
 
                 if ($ownerUuid === '' || $number === '') {
                     continue;
                 }
 
                 $isPrimary = (bool) ($item['attributes']['primary'] ?? false);
+
+                if ($phoneMatchType !== '') {
+                    // Restricted to a specific type — a phone of a different
+                    // type is not a candidate at all, even if it's primary.
+                    $phoneType = (string) ($item['attributes']['type'] ?? '');
+
+                    if ($phoneType !== $phoneMatchType) {
+                        continue;
+                    }
+
+                    if ($isPrimary || ! isset($phoneByPerson[$ownerUuid])) {
+                        $phoneByPerson[$ownerUuid] = $number;
+                    }
+
+                    continue;
+                }
 
                 if ($isPrimary || ! isset($phoneByPerson[$ownerUuid])) {
                     $phoneByPerson[$ownerUuid] = $number;
@@ -1371,24 +1404,48 @@ class MdpClient
      */
     public function searchPersons(array $fields): array
     {
-        $group = ['m' => 'or'];
+        $settings       = (array) get_option(SyncService::SETTINGS_OPTION, []);
+        $phoneMatchType = (string) (
+            $settings[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
+        );
+
+        $group          = ['m' => 'or'];
+        $hasSearchField = false;
 
         if (($fields['email'] ?? '') !== '') {
             $group['emails_address_eq'] = (string) $fields['email'];
+            $hasSearchField             = true;
         }
 
         $normalizedPhone = preg_replace('/\D/', '', (string) ($fields['phone'] ?? '')) ?? '';
 
         if ($normalizedPhone !== '') {
-            $group['phones_number_cont'] = $normalizedPhone;
+            if ($phoneMatchType !== '') {
+                // Restrict the phone leg to phones of the configured type only.
+                // A nested AND-group (rather than two flat OR'd keys) is required
+                // so the number match and the type match apply to the *same*
+                // phone record, still OR'd against the email/last-name legs above.
+                $group['g'] = [
+                    [
+                        'm'                    => 'and',
+                        'phones_number_cont'   => $normalizedPhone,
+                        'phones_phone_type_eq' => $phoneMatchType,
+                    ],
+                ];
+            } else {
+                $group['phones_number_cont'] = $normalizedPhone;
+            }
+
+            $hasSearchField = true;
         }
 
         if (($fields['last_name'] ?? '') !== '') {
             $group['family_name_eq'] = (string) $fields['last_name'];
+            $hasSearchField          = true;
         }
 
         // All fields empty — nothing to search.
-        if (count($group) <= 1) {
+        if (! $hasSearchField) {
             return [];
         }
 
@@ -1418,7 +1475,7 @@ class MdpClient
                 fn () => $client->post('people/query?' . $queryArgs, ['json' => $args]),
             );
 
-            return $this->normalizePeopleSearchResults($response);
+            return $this->normalizePeopleSearchResults($response, $phoneMatchType);
         } catch (\Exception $e) {
             return [];
         }
@@ -1530,7 +1587,7 @@ class MdpClient
             $relId    = (string) ($rel['id'] ?? '');
             $relAttrs = $included['phones:' . $relId] ?? [];
             $number   = (string) ($relAttrs['number'] ?? '');
-            $type     = (string) ($relAttrs['phone_type'] ?? '');
+            $type     = (string) ($relAttrs['type'] ?? '');
             $primary  = (bool) ($relAttrs['primary'] ?? false);
 
             if ($number === '') {
@@ -2015,13 +2072,23 @@ class MdpClient
      * suitable for MatchingService scoring.
      *
      * When the response includes sideloaded `phones` resources (via
-     * `?include=phones`), the primary phone number — or the first phone if no
-     * primary is flagged — is extracted and added to each result row.
+     * `?include=phones`), the phone number added to each result row is
+     * resolved as follows:
+     *   - $phoneMatchType === '' (Any type, the default): the primary phone —
+     *     or the first phone if no primary is flagged — same as before this
+     *     was configurable.
+     *   - $phoneMatchType !== '': only a phone whose `type` attribute matches
+     *     is considered (primary-preferred among those); '' when the person has
+     *     no phone of that type, even if they have a primary phone of a
+     *     different type. This keeps the phone_exact scoring signal in
+     *     ScoringService consistent with what searchPersons() actually
+     *     matched on when a type restriction is configured.
      *
      * The `relationships.organizations.data` array is extracted as `org_uuids`
      * so callers can check org overlap without an additional API round-trip.
      *
-     * @param mixed $response Raw API response.
+     * @param mixed  $response       Raw API response.
+     * @param string $phoneMatchType Configured phone type restriction ('' = Any type).
      *
      * @return list<array{
      *   uuid:        string,
@@ -2033,7 +2100,7 @@ class MdpClient
      *   org_uuids:   list<string>,
      * }>
      */
-    private function normalizePeopleSearchResults(mixed $response): array
+    private function normalizePeopleSearchResults(mixed $response, string $phoneMatchType = ''): array
     {
         if (! is_array($response) || empty($response['data'])) {
             return [];
@@ -2062,8 +2129,28 @@ class MdpClient
             $phone          = '';
             $phoneRelations = $item['relationships']['phones']['data'] ?? [];
 
-            if (! empty($phoneRelations)) {
-                // Prefer the primary phone; fall back to the first in the list.
+            if (! empty($phoneRelations) && $phoneMatchType !== '') {
+                // Restricted to a specific type — no fallback to primary.
+                $resolvedId = '';
+
+                foreach ($phoneRelations as $rel) {
+                    $relId    = (string) ($rel['id'] ?? '');
+                    $relAttrs = $phoneMap[$relId] ?? [];
+
+                    if ((string) ($relAttrs['type'] ?? '') !== $phoneMatchType) {
+                        continue;
+                    }
+
+                    if ($resolvedId === '' || ! empty($relAttrs['primary'])) {
+                        $resolvedId = $relId;
+                    }
+                }
+
+                if ($resolvedId !== '' && isset($phoneMap[$resolvedId])) {
+                    $phone = (string) ($phoneMap[$resolvedId]['number'] ?? '');
+                }
+            } elseif (! empty($phoneRelations)) {
+                // Any type — prefer the primary phone; fall back to the first in the list.
                 $primaryId  = '';
                 $fallbackId = (string) ($phoneRelations[0]['id'] ?? '');
 

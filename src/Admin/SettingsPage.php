@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace WicketAORM\Admin;
 
+use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\MdpClient;
 use WicketAORM\Services\SyncService;
 use WicketAORM\Services\SyncJobRunner;
@@ -20,6 +21,7 @@ use WicketAORM\Services\SyncJobRunner;
  *   - protected_relationship_types  (string[]) relationship type slugs never end-dated
  *   - email_address_type            (string) e.g. 'work', 'home', 'personal'
  *   - phone_number_type             (string) e.g. 'work', 'home', 'mobile'
+ *   - phone_match_type              (string) e.g. '', 'work', 'home', 'mobile' ('' = Any type)
  *   - security_roles                (string[]) array of MDP role slug strings
  *   - sync_batch_size               (int) positive integer, default 50
  *   - cleanup_ttl_days              (int) positive integer, default 30
@@ -130,6 +132,23 @@ class SettingsPage
 
     /** Field ID for the phone_number_type select. */
     public const FIELD_PHONE_TYPE = 'aorm_field_phone_type';
+
+    /**
+     * Section 6 — Phone Match Type.
+     *
+     * Stores the MDP `phone_type` that MDP candidate matching/searching is
+     * restricted to, and that the "Phone" column on the Roster Assignment tab
+     * and Review Match modal displays. Distinct from Section 5's
+     * phone_number_type (used only when creating a phone on sync) — see
+     * MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE for the full contract.
+     * Options are fetched from the MDP the same way as Section 5, with an
+     * additional leading "Any type" option (empty string) that preserves the
+     * original unrestricted matching/display behavior.
+     */
+    public const SECTION_PHONE_MATCH_TYPE = 'aorm_section_phone_match_type';
+
+    /** Field ID for the phone_match_type select. */
+    public const FIELD_PHONE_MATCH_TYPE = 'aorm_field_phone_match_type';
 
     /**
      * Section 7 — Background job settings.
@@ -288,6 +307,27 @@ class SettingsPage
             self::PAGE_SLUG,
             self::SECTION_PHONE_TYPE,
             ['label_for' => self::FIELD_PHONE_TYPE],
+        );
+
+        // ── Section 6: Phone Match Type ───────────────────────────────────
+        // The MDP phone_type that candidate matching/searching is restricted
+        // to, and that the Roster Assignment tab / Review Match modal use to
+        // label and populate the "Phone" column. "Any type" (empty string)
+        // preserves the original unrestricted behavior.
+        add_settings_section(
+            self::SECTION_PHONE_MATCH_TYPE,
+            __('Phone Match Type', 'wicket-aorm'),
+            [$this, 'renderPhoneMatchTypeSectionDescription'],
+            self::PAGE_SLUG,
+        );
+
+        add_settings_field(
+            self::FIELD_PHONE_MATCH_TYPE,
+            __('Phone match type', 'wicket-aorm'),
+            [$this, 'renderPhoneMatchTypeField'],
+            self::PAGE_SLUG,
+            self::SECTION_PHONE_MATCH_TYPE,
+            ['label_for' => self::FIELD_PHONE_MATCH_TYPE],
         );
 
         // ── Section 7: Background Job Settings (AORM-11.10) ──────────────
@@ -609,6 +649,60 @@ class SettingsPage
     }
 
     /**
+     * Render the introductory description for Section 6 (Phone Match Type).
+     */
+    public function renderPhoneMatchTypeSectionDescription(): void
+    {
+        echo '<p class="description">';
+        echo esc_html__(
+            'Choose the phone number type used to match uploaded/added records against existing MDP people, and shown in the "Phone" column on the Roster Assignment tab and Review Match modal. Choose "Any type" to match on any phone number regardless of type (original behavior).',
+            'wicket-aorm',
+        );
+        echo '</p>';
+    }
+
+    /**
+     * Render the phone_match_type <select> field.
+     *
+     * Options are the same MdpClient::getPhoneTypes() set used by Section 5,
+     * with a leading "Any type" option (empty string) that preserves the
+     * original unrestricted matching/display behavior. The current saved
+     * value is pre-selected; defaults to
+     * MatchingService::DEFAULT_PHONE_MATCH_TYPE ('' / Any type) when no value
+     * has been stored.
+     */
+    public function renderPhoneMatchTypeField(): void
+    {
+        $options = (array) get_option(self::OPTION_NAME, []);
+        $current = (string) (
+            $options[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
+        );
+        $types = (new MdpClient())->getPhoneTypes();
+
+        echo '<select id="' . esc_attr(self::FIELD_PHONE_MATCH_TYPE) . '" '
+            . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE) . ']">';
+
+        echo '<option value=""' . selected($current, '', false) . '>'
+            . esc_html__('Any type', 'wicket-aorm')
+            . '</option>';
+
+        foreach ($types as $value => $label) {
+            echo '<option value="' . esc_attr((string) $value) . '"'
+                . selected($current, (string) $value, false) . '>'
+                . esc_html((string) $label)
+                . '</option>';
+        }
+
+        echo '</select>';
+        echo '<p class="description">';
+        echo esc_html__(
+            'Restricts matching to phone numbers of this type only, and shows that type\'s number (blank if the person has none) instead of the primary phone.',
+            'wicket-aorm',
+        );
+        echo '</p>';
+    }
+
+    /**
      * Render the introductory description for Section 7 (Background Job Settings).
      *
      * @see AORM-11.10
@@ -751,6 +845,20 @@ class SettingsPage
         // ── phone_number_type ─────────────────────────────────────────────
         $out['phone_number_type'] = sanitize_text_field(
             (string) ($raw['phone_number_type'] ?? $prev['phone_number_type'] ?? SyncService::DEFAULT_PHONE_TYPE),
+        );
+
+        // ── phone_match_type ──────────────────────────────────────────────
+        // Empty string is a valid, meaningful value here ("Any type" — no
+        // restriction), unlike phone_number_type above which always wants a
+        // concrete type. No whitelist validation, matching the precedent set
+        // by phone_number_type/email_address_type — both trust the rendered
+        // <select> options rather than re-validating against the MDP.
+        $out[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] = sanitize_text_field(
+            (string) (
+                $raw[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE]
+                    ?? $prev[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE]
+                    ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
+            ),
         );
 
         // ── security_roles ────────────────────────────────────────────────

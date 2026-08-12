@@ -6,6 +6,9 @@ namespace WicketAORM;
 
 use WicketAORM\Admin\MenuPage;
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\MatchingService;
+use WicketAORM\Services\MdpClient;
+use WicketAORM\Services\SyncService;
 
 /**
  * Enqueue React bundles and WP admin styles.
@@ -103,6 +106,11 @@ class Assets
      *   step='validation-review'    → matching done, no sync dispatched yet
      *   step='sync-progress'        → sync dispatched or running
      *
+     * Also includes phoneMatchType/phoneMatchTypeLabel — the configured
+     * wicket_aorm_settings[phone_match_type] value (raw slug + human label,
+     * both '' for "Any type") — used by MemberTable.js and MatchesTable.js to
+     * label and populate the "Phone" column consistently with MdpClient.
+     *
      * @param string $hookSuffix
      * @return array<string, mixed>
      */
@@ -137,6 +145,22 @@ class Assets
 
             // Active session context — lets React set the correct initial wizard.
             $data['activeSession'] = $this->resolveActiveSession($orgUuid, $membershipUuid);
+
+            // Configured phone match type — lets the Roster Assignment tab
+            // (MemberTable.js) and Review Match modal (MatchesTable.js) label
+            // and populate the "Phone" column consistently with what
+            // MdpClient actually matched/fetched. Empty string ("Any type")
+            // yields an empty label so those components fall back to the
+            // plain "Phone" header + today's primary-phone display.
+            $settings       = (array) get_option(SyncService::SETTINGS_OPTION, []);
+            $phoneMatchType = (string) (
+                $settings[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
+            );
+
+            $data['phoneMatchType']      = $phoneMatchType;
+            $data['phoneMatchTypeLabel'] = $phoneMatchType !== ''
+                ? ((new MdpClient())->getPhoneTypes()[$phoneMatchType] ?? ucfirst($phoneMatchType))
+                : '';
         }
 
         return $data;

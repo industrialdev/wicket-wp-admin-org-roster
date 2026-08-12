@@ -68,6 +68,36 @@ class MatchingService
     public const CATEGORY_PROBABLE_MATCH = 'probable_match';
     public const CATEGORY_POSSIBLE_MATCH = 'possible_match';
 
+    // ── Phone match type setting ────────────────────────────────────────────
+
+    /**
+     * Settings key for the phone type MDP matching/searching is restricted to.
+     *
+     * Stored under wicket_aorm_settings[phone_match_type]. Distinct from
+     * SyncService::SETTINGS_KEY_PHONE_TYPE (wicket_aorm_settings[phone_number_type]),
+     * which only controls the phone type used when *creating* a phone on a new
+     * MDP person during sync. This setting instead controls:
+     *   1. MdpClient::searchPersons() — when non-empty, restricts the phone leg
+     *      of the candidate search to phones of this type only (AND'd with the
+     *      number match, not just another OR condition).
+     *   2. Display — the "Phone" column on the Roster Assignment tab
+     *      (MdpClient::fetchOrgScopedRolesAndPhones()) and the Review Match
+     *      modal (MatchesTable.js) show the phone number of this specific type
+     *      (blank when the person has none of that type) and relabel the
+     *      column header to include the type, e.g. "Phone (Mobile)".
+     *
+     * Empty string means "Any type" — the original unrestricted behavior:
+     * matching considers any phone number regardless of type, and display
+     * falls back to whichever phone MDP flags primary.
+     */
+    public const SETTINGS_KEY_PHONE_MATCH_TYPE = 'phone_match_type';
+
+    /**
+     * Default phone match type when the setting is absent: "Any type" (no
+     * restriction on matching, primary-preferred phone shown on display).
+     */
+    public const DEFAULT_PHONE_MATCH_TYPE = '';
+
     public const STATUS_NEW_RECORD        = 'new_record';
     public const STATUS_EXACT_MATCH       = 'exact_match';
     public const STATUS_ALREADY_ON_ROSTER = 'already_on_roster';

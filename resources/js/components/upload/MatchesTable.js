@@ -12,9 +12,13 @@
  *   - First name — imported first_name vs match given_name  (highlighted independently)
  *   - Last name  — imported last_name vs match family_name  (highlighted independently)
  *   - Email      — imported email vs each entry in match.emails (see below)
- *   - Phone      — imported phone vs match primary_phone
+ *   - Phone      — imported phone vs the displayed phone (see Phone column note below)
  *   - Title      — imported title vs match title
- * Comparison is case-insensitive and whitespace-normalised. First and last
+ * Comparison is case-insensitive and whitespace-normalised, except Phone,
+ * which is compared digits-only (stripping "+", spaces, dashes, parentheses)
+ * so an MDP number in E.164 format (e.g. "+16512343651") still matches a
+ * plain imported CSV value ("16512343651") — mirrors the same normalisation
+ * MdpClient::searchPersons()/ScoringService use server-side. First and last
  * name are compared and highlighted separately so a partial match (e.g. only
  * the last name lines up) is still visible — the Name cell no longer requires
  * both parts to match before showing any highlight.
@@ -40,7 +44,15 @@
  *   - Name / ID  — full_name on the first line, UUID below in muted text.
  *   - Email      — every known email address (see above), primary first.
  *   - Location   — city + country from location object, comma-joined.
- *   - Phone      — primary_phone.
+ *   - Phone      — primary_phone, unless a phone match type is configured
+ *                  (window.aormContext.phoneMatchType), in which case the
+ *                  candidate's phone of that specific type is shown instead
+ *                  (from match.phones — {number, type, primary}[] — falling
+ *                  back to "—" when the candidate has no phone of that type,
+ *                  even if they have a primary phone of a different type).
+ *                  The column header includes the type label when configured,
+ *                  e.g. "Phone (Mobile)" — mirrors MemberTable.js's Roster
+ *                  Assignment tab column for consistency.
  *   - Title      — job title.
  *   - Employer   — employer name (lazy-loaded by the server via a secondary
  *                  organisations call in AORM-8B.12).
@@ -54,7 +66,7 @@
  */
 
 import { useEffect, useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import { ExternalLink, Notice, Spinner } from '@wordpress/components';
 import apiFetch from '@wordpress/api-fetch';
 
@@ -83,11 +95,35 @@ export const COL_LABEL_EMAIL = __( 'Email', 'wicket-aorm' );
 export const COL_LABEL_LOCATION = __( 'Location', 'wicket-aorm' );
 
 /**
- * Header label for the Phone column.
+ * Base header label for the Phone column, used as-is when no phone match
+ * type is configured (window.aormContext.phoneMatchType is empty / "Any
+ * type"). Use buildPhoneColumnLabel() to get the type-aware label actually
+ * rendered in the header.
  *
  * @type {string}
  */
 export const COL_LABEL_PHONE = __( 'Phone', 'wicket-aorm' );
+
+/**
+ * Builds the Phone column header label, including the configured phone
+ * match type when one is set (e.g. "Phone (Mobile)") — mirrors
+ * MemberTable.js's buildPhoneColumnLabel() for the Roster Assignment tab so
+ * both surfaces stay consistent.
+ *
+ * @param {string} phoneMatchTypeLabel
+ * @return {string}
+ */
+export function buildPhoneColumnLabel( phoneMatchTypeLabel ) {
+	if ( ! phoneMatchTypeLabel ) {
+		return COL_LABEL_PHONE;
+	}
+
+	return sprintf(
+		/* translators: %s: configured phone type label, e.g. "Mobile" */
+		__( 'Phone (%s)', 'wicket-aorm' ),
+		phoneMatchTypeLabel
+	);
+}
 
 /**
  * Header label for the Title column.
@@ -200,6 +236,41 @@ export function buildEmailEntries( match ) {
 }
 
 /**
+ * Resolve the phone number to display/highlight for a match candidate.
+ *
+ * When no phone match type is configured (phoneMatchType === ''), returns
+ * match.primary_phone — unchanged from before this was configurable. When a
+ * type is configured, only phones of that type (from match.phones —
+ * {number, type, primary}[]) are considered, preferring whichever is flagged
+ * primary among those; returns '' when the candidate has none of that type,
+ * even if they have a primary phone of a different type — this keeps the
+ * Phone column and its highlighting consistent with what MdpClient actually
+ * matched/fetched server-side (see MdpClient::normalizePeopleSearchResults()
+ * and ::fetchOrgScopedRolesAndPhones()).
+ *
+ * @param {{primary_phone?: string, phones?: Object[]}} match
+ * @param {string}                                       phoneMatchType
+ * @return {string}
+ */
+export function resolveDisplayPhone( match, phoneMatchType ) {
+	if ( ! phoneMatchType ) {
+		return match?.primary_phone || '';
+	}
+
+	const phonesOfType = ( Array.isArray( match?.phones ) ? match.phones : [] ).filter(
+		( phone ) => phone?.type === phoneMatchType
+	);
+
+	if ( phonesOfType.length === 0 ) {
+		return '';
+	}
+
+	const primary = phonesOfType.find( ( phone ) => phone?.primary );
+
+	return ( primary ?? phonesOfType[ 0 ] )?.number || '';
+}
+
+/**
  * Normalise a value for field comparison: convert to string, trim, lowercase.
  * Returns an empty string for null/undefined/empty values.
  *
@@ -212,6 +283,26 @@ function normalizeForCompare( value ) {
 	}
 
 	return String( value ).trim().toLowerCase();
+}
+
+/**
+ * Normalise a phone number for comparison by stripping every non-digit
+ * character — mirrors MdpClient::searchPersons()'s / ScoringService's phone
+ * normalisation server-side. Without this, an MDP number rendered in E.164
+ * format (e.g. "+16512343651") never highlights as a match against a plain
+ * imported CSV value ("16512343651"), even though they're the same number —
+ * the generic normalizeForCompare() above only trims/lowercases, it doesn't
+ * strip the "+" (or spaces/dashes/parentheses).
+ *
+ * @param {*} value
+ * @return {string}
+ */
+export function normalizePhoneForCompare( value ) {
+	if ( value === null || value === undefined ) {
+		return '';
+	}
+
+	return String( value ).replace( /\D/g, '' );
 }
 
 // ── MatchesTable ───────────────────────────────────────────────────────────────
@@ -298,6 +389,10 @@ export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded 
 		);
 	}
 
+	const context = window.aormContext ?? {};
+	const phoneMatchType = context.phoneMatchType ?? '';
+	const phoneColumnLabel = buildPhoneColumnLabel( context.phoneMatchTypeLabel ?? '' );
+
 	return (
 		<div className="aorm-matches-table__wrapper">
 			<table className="aorm-matches-table wp-list-table widefat fixed striped">
@@ -313,7 +408,7 @@ export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded 
 							{ COL_LABEL_LOCATION }
 						</th>
 						<th scope="col" className="aorm-matches-table__th aorm-matches-table__th--phone">
-							{ COL_LABEL_PHONE }
+							{ phoneColumnLabel }
 						</th>
 						<th scope="col" className="aorm-matches-table__th aorm-matches-table__th--title">
 							{ COL_LABEL_TITLE }
@@ -331,7 +426,12 @@ export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded 
 				</thead>
 				<tbody>
 					{ matches.map( ( match ) => (
-						<MatchRow key={ match.uuid } match={ match } rawData={ rawData } />
+						<MatchRow
+							key={ match.uuid }
+							match={ match }
+							rawData={ rawData }
+							phoneMatchType={ phoneMatchType }
+						/>
 					) ) }
 				</tbody>
 			</table>
@@ -351,9 +451,9 @@ export default function MatchesTable( { recordId, rawData = {}, onMatchesLoaded 
  * matching only the last name (for example) still highlights that part even
  * though the first name differs.
  *
- * @param {{ match: Object, rawData: Object }} props
+ * @param {{ match: Object, rawData: Object, phoneMatchType?: string }} props
  */
-function MatchRow( { match, rawData = {} } ) {
+function MatchRow( { match, rawData = {}, phoneMatchType = '' } ) {
 	const location = [ match.location?.city, match.location?.country ]
 		.filter( Boolean )
 		.join( ', ' );
@@ -365,16 +465,22 @@ function MatchRow( { match, rawData = {} } ) {
 	 * value; returns an empty string otherwise. Skips comparison when the
 	 * imported value is empty (nothing to compare against).
 	 *
-	 * @param {string} importedValue  — already-normalised imported field value
-	 * @param {*}      matchValue     — raw candidate field value
+	 * @param {string}   importedValue — already-normalised imported field value
+	 * @param {*}        matchValue    — raw candidate field value
+	 * @param {Function} normalizer    — normaliser applied to matchValue before
+	 *                                   comparing; must match whichever one was
+	 *                                   used to produce importedValue. Defaults
+	 *                                   to normalizeForCompare (case/whitespace
+	 *                                   only); pass normalizePhoneForCompare for
+	 *                                   phone fields.
 	 * @return {string}
 	 */
-	function highlightClass( importedValue, matchValue ) {
+	function highlightClass( importedValue, matchValue, normalizer = normalizeForCompare ) {
 		if ( ! importedValue ) {
 			return '';
 		}
 
-		return normalizeForCompare( matchValue ) === importedValue
+		return normalizer( matchValue ) === importedValue
 			? HIGHLIGHT_CLASS
 			: '';
 	}
@@ -391,9 +497,11 @@ function MatchRow( { match, rawData = {} } ) {
 	);
 	const normalizedImportedEmail = normalizeForCompare( rawData.email );
 	const emailEntries            = buildEmailEntries( match );
+	const displayPhone            = resolveDisplayPhone( match, phoneMatchType );
 	const phoneHighlight = highlightClass(
-		normalizeForCompare( rawData.phone ),
-		match.primary_phone
+		normalizePhoneForCompare( rawData.phone ),
+		displayPhone,
+		normalizePhoneForCompare
 	);
 	const titleHighlight = highlightClass(
 		normalizeForCompare( rawData.title ),
@@ -458,7 +566,7 @@ function MatchRow( { match, rawData = {} } ) {
 			</td>
 
 			<td className={ `aorm-matches-table__cell aorm-matches-table__cell--phone ${ phoneHighlight }`.trim() }>
-				{ match.primary_phone || '—' }
+				{ displayPhone || '—' }
 			</td>
 
 			<td className={ `aorm-matches-table__cell aorm-matches-table__cell--title ${ titleHighlight }`.trim() }>

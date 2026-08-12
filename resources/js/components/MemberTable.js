@@ -39,6 +39,28 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Button, CheckboxControl } from '@wordpress/components';
 import '../../css/member-table.css';
 
+/**
+ * Builds the "Phone" column header label, including the configured phone
+ * match type when one is set (e.g. "Phone (Mobile)"), so admins can see at a
+ * glance which phone number is being shown/matched-against — sourced from
+ * window.aormContext.phoneMatchTypeLabel (injected server-side by
+ * Assets.php), empty when the setting is "Any type".
+ *
+ * @param {string} phoneMatchTypeLabel
+ * @return {string}
+ */
+export function buildPhoneColumnLabel( phoneMatchTypeLabel ) {
+	if ( ! phoneMatchTypeLabel ) {
+		return __( 'Phone', 'wicket-aorm' );
+	}
+
+	return sprintf(
+		/* translators: %s: configured phone type label, e.g. "Mobile" */
+		__( 'Phone (%s)', 'wicket-aorm' ),
+		phoneMatchTypeLabel
+	);
+}
+
 /** Sortable column definitions (AORM-4.16). Key matches the member field name. */
 const SORTABLE_COLUMNS = [
 	{ key: 'given_name', label: __( 'First Name', 'wicket-aorm' ) },
@@ -146,6 +168,9 @@ export default function MemberTable( {
 	const [ sortField, setSortField ] = useState( null );
 	const [ sortDir, setSortDir ] = useState( 'asc' );
 
+	const phoneMatchTypeLabel = ( window.aormContext ?? {} ).phoneMatchTypeLabel ?? '';
+	const phoneColumnLabel = buildPhoneColumnLabel( phoneMatchTypeLabel );
+
 	const sorted = sortedMembers( members, sortField, sortDir );
 
 	function handleSort( field ) {
@@ -224,7 +249,7 @@ export default function MemberTable( {
 						</th>
 					) ) }
 					<td>{ __( 'Title', 'wicket-aorm' ) }</td>
-					<td>{ __( 'Phone', 'wicket-aorm' ) }</td>
+					<td>{ phoneColumnLabel }</td>
 					<td>{ __( 'Roles', 'wicket-aorm' ) }</td>
 					<td className="aorm-member-table__col--action">
 						<span className="screen-reader-text">
