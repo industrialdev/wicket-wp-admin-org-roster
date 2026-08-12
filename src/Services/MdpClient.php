@@ -1380,7 +1380,7 @@ class MdpClient
         $normalizedPhone = preg_replace('/\D/', '', (string) ($fields['phone'] ?? '')) ?? '';
 
         if ($normalizedPhone !== '') {
-            $group['phones_number_eq'] = $normalizedPhone;
+            $group['phones_number_cont'] = $normalizedPhone;
         }
 
         if (($fields['last_name'] ?? '') !== '') {
