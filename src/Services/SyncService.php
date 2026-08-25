@@ -819,11 +819,14 @@ class SyncService
      * MdpClient, both to avoid duplicating that end-dating logic and because
      * it already handles the case of more than one active person_membership
      * row for the same org membership (a single hasActivePersonMembershipAssignment
-     * ()-style lookup would only surface the first). It swallows and logs its
-     * own errors (returning `['ended' => [...], 'errors' => [...]]`), so —
-     * same as syncRemoveExistingViaRelationship()'s call to
-     * ConnectionService::endActivePersonOrganizationConnections() — its return
-     * value is not inspected here.
+     * ()-style lookup would only surface the first). It logs its own
+     * failures: per-record end failures come back in the `errors` array of
+     * `['ended' => [...], 'errors' => [...]]`, and a failed lookup returns a
+     * `WP_Error` (WWID-2219 change). Same as
+     * syncRemoveExistingViaRelationship()'s call to
+     * ConnectionService::endActivePersonOrganizationConnections(), the return
+     * value is not inspected here: the staged sync keeps its documented
+     * partial-success contract and retries on the next run.
      *
      * The person UUID is read from raw_data.person_uuid (not matched_persons
      * — that field is always null for synthetic remove_existing rows
