@@ -1459,7 +1459,7 @@ class MdpClient
             '/\%5B\d+\%5D/',
             '%5B%5D',
             http_build_query([
-                'page'    => ['size' => 20],
+                'page'    => ['size' => 100],
                 'include' => 'phones',
             ]),
         );
