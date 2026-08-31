@@ -16,6 +16,13 @@
  * the rest of the admin UI. Checkboxes are rendered with
  * @wordpress/components CheckboxControl for accessible, consistent markup.
  *
+ * The membership owner cannot be removed from their own roster — their
+ * row checkbox is disabled (with an explanatory tooltip) and excluded from
+ * "select all," so the owner can never end up in a bulk "Remove from
+ * Roster" selection in the first place. This mirrors a corresponding
+ * server-side guard in MdpClient::removeRosterMembers(), which would
+ * otherwise still be reachable (e.g. by devtools) if this were UI-only.
+ *
  * @param {{
  *   members: Array<{
  *     person_uuid: string,
@@ -26,6 +33,7 @@
  *     title: string,
  *     phone: string,
  *     roles: string[],
+ *     is_owner?: boolean,
  *   }>,
  *   selectedIds: Set<string>,
  *   onSelectionChange: function(Set<string>): void,
@@ -173,6 +181,11 @@ export default function MemberTable( {
 
 	const sorted = sortedMembers( members, sortField, sortDir );
 
+	// The membership owner can never be removed from their own roster, so
+	// they're excluded from "select all" and from bulk-selectable rows —
+	// selecting them would only lead to a confusing failed removal attempt.
+	const selectableMembers = sorted.filter( ( m ) => ! m.is_owner );
+
 	function handleSort( field ) {
 		if ( sortField === field ) {
 			setSortDir( ( d ) => ( d === 'asc' ? 'desc' : 'asc' ) );
@@ -183,21 +196,25 @@ export default function MemberTable( {
 	}
 
 	const allSelected =
-		sorted.length > 0 &&
-		sorted.every( ( m ) => selectedIds.has( m.person_uuid ) );
+		selectableMembers.length > 0 &&
+		selectableMembers.every( ( m ) => selectedIds.has( m.person_uuid ) );
 
 	const someSelected =
-		! allSelected && sorted.some( ( m ) => selectedIds.has( m.person_uuid ) );
+		! allSelected && selectableMembers.some( ( m ) => selectedIds.has( m.person_uuid ) );
 
 	function toggleAll() {
 		if ( allSelected ) {
 			onSelectionChange( new Set() );
 		} else {
-			onSelectionChange( new Set( sorted.map( ( m ) => m.person_uuid ) ) );
+			onSelectionChange( new Set( selectableMembers.map( ( m ) => m.person_uuid ) ) );
 		}
 	}
 
-	function toggleRow( personUuid ) {
+	function toggleRow( personUuid, isOwner ) {
+		if ( isOwner ) {
+			return;
+		}
+
 		const next = new Set( selectedIds );
 
 		if ( next.has( personUuid ) ) {
@@ -280,14 +297,33 @@ export default function MemberTable( {
 								.join( ' ' ) }
 						>
 							<th className="check-column" scope="row">
-								<CheckboxControl
-									aria-label={ `${ __(
-										'Select',
-										'wicket-aorm'
-									) } ${ memberFullName( member ) }` }
-									checked={ selectedIds.has( member.person_uuid ) }
-									onChange={ () => toggleRow( member.person_uuid ) }
-								/>
+								<span
+									title={
+										isOwner
+											? __(
+													'The membership owner cannot be removed from the roster.',
+													'wicket-aorm'
+											  )
+											: undefined
+									}
+								>
+									<CheckboxControl
+										aria-label={
+											isOwner
+												? __(
+														'The membership owner cannot be removed from the roster',
+														'wicket-aorm'
+												  )
+												: `${ __(
+														'Select',
+														'wicket-aorm'
+												  ) } ${ memberFullName( member ) }`
+										}
+										checked={ ! isOwner && selectedIds.has( member.person_uuid ) }
+										disabled={ isOwner }
+										onChange={ () => toggleRow( member.person_uuid, isOwner ) }
+									/>
+								</span>
 							</th>
 							<td>
 								<span className="aorm-member-table__first-name">
