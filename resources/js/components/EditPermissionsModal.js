@@ -4,8 +4,7 @@
  * A @wordpress/components Modal that lets an admin select which roles to add
  * or remove for the currently selected roster members.
  *
- * Two roles are available:
- *   • org_editor       → "Org Editor"
+ * One role is available:
  *   • membership_manager → "Membership Manager"
  *
  * The modal is intentionally unaware of the underlying REST call; it simply
@@ -34,7 +33,6 @@ import '../../css/edit-permissions-modal.css';
 
 /** Available permission roles for org rosters. */
 const ROLES = [
-	{ slug: 'org_editor',         label: __( 'Org Editor',         'wicket-aorm' ) },
 	{ slug: 'membership_manager', label: __( 'Membership Manager', 'wicket-aorm' ) },
 ];
 

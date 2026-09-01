@@ -77,7 +77,7 @@ Shows everyone currently on this roster: name, email, relationship or assignment
 From here an admin can:
 
 - Search the list by name or email.
-- Select one or more people and, in bulk, **remove them from the roster**, **add a role** to them, or **remove a role** from them (available roles depend on what's configured in Settings — commonly things like Org Editor or Membership Manager).
+- Select one or more people and, in bulk, **remove them from the roster**, **add a role** to them, or **remove a role** from them (currently just Membership Manager).
 - Click "Edit Permissions" on an individual row to toggle their roles one at a time.
 
 Removing someone asks for confirmation first, since it also strips their configured roles for this organization.
@@ -154,7 +154,7 @@ The Settings page controls how syncing behaves. Changes here only affect future 
 | **Roster type** | Whether this site manages membership through person-to-organization *relationships*, or through direct *membership assignments*. This determines which sync logic runs. |
 | **Base member role** | An MDP role automatically applied to everyone synced to any roster (e.g. "member"). Leave blank to apply none. |
 | **Protected relationship types** | Relationship types (e.g. "admin") that should never be automatically ended when a person's relationship to another organization is superseded by joining this roster. |
-| **Additional security roles** | Extra MDP roles (beyond the base member role) applied to everyone synced — for example, giving roster members "Org Editor" or "Membership Manager" access. |
+| **Additional security roles** | Extra MDP roles (beyond the base member role) applied to everyone synced — for example, giving roster members "Membership Manager" access. |
 | **Default email type** | Which email type (work, home, personal, etc.) is used when a new email address is created for someone during a sync. |
 | **Default phone type** | Same idea, for phone numbers. |
 | **Sync batch size** | How many records the background job processes per run. Higher = faster syncing, but more load on the MDP at once. Defaults to 50. |

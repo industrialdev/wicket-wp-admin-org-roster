@@ -56,7 +56,7 @@ Settings are managed via the native **WordPress Settings API** (`register_settin
 
 2. **Relationship Configuration** (shown only when type = Relationship) — dropdown of person/org relationship types from the connected MDP environment. The selected type is what the roster tool adds/removes/edits.
 
-3. **Security Roles** — multi-select of security roles from the connected MDP environment. When roster edits occur (add/remove), these security roles are applied or removed, scoped to the roster org. Available roles include Org Editor and Membership Manager.
+3. **Security Roles** — multi-select of security roles from the connected MDP environment. When roster edits occur (add/remove), these security roles are applied or removed, scoped to the roster org.
 
 4. **Default Email Type** — dropdown of email types from the MDP. When a new person record is created or an email is added via the roster, this type is assigned.
 
@@ -120,11 +120,11 @@ Table displaying the current roster. Allows management of current roster entries
 
 **Bulk actions** (applied to selected rows via checkboxes):
 - Remove person(s) from roster — also removes configured security roles scoped to roster org
-- Add role(s) to selected persons — Org Editor and/or Membership Manager
-- Remove role(s) from selected persons — Org Editor and/or Membership Manager
+- Add role(s) to selected persons — Membership Manager
+- Remove role(s) from selected persons — Membership Manager
 
 **Per-row action:**
-- "Edit Permissions" link → opens a Modal with two CheckboxControls: Org Editor and Membership Manager. Admin can toggle either on/off for that specific person.
+- "Edit Permissions" link → opens a Modal with a CheckboxControl for Membership Manager. Admin can toggle it on/off for that specific person.
 
 #### Tab 2: Roster Upload
 
