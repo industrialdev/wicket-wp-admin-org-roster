@@ -60,12 +60,25 @@ export default function WizardLanding( { goToStep } ) {
 							'wicket-aorm'
 						) }
 					</p>
-					<Button
-						variant="primary"
-						onClick={ () => goToStep( 'upload-file' ) }
-					>
-						{ __( 'Upload CSV', 'wicket-aorm' ) }
-					</Button>
+					<div className="aorm-wizard-landing__path-actions">
+						<Button
+							variant="primary"
+							onClick={ () => goToStep( 'upload-file' ) }
+						>
+							{ __( 'Upload CSV', 'wicket-aorm' ) }
+						</Button>
+
+						{ /* Template download button — mirrors UploadFileStep's templateDownloadUrl (AORM-6.3) */ }
+						{ window.aormContext?.templateDownloadUrl && (
+							<Button
+								variant="tertiary"
+								href={ window.aormContext.templateDownloadUrl }
+								download="roster-template.csv"
+							>
+								{ __( 'Download CSV template', 'wicket-aorm' ) }
+							</Button>
+						) }
+					</div>
 				</div>
 			</div>
 		</div>

@@ -49,6 +49,13 @@
 	min-height: 2.5em; /* keep cards the same height when descriptions differ */
 }
 
+.aorm-wizard-landing__path-actions {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
 /* -----------------------------------------------------------------------
    Generic step wrapper
    ----------------------------------------------------------------------- */
