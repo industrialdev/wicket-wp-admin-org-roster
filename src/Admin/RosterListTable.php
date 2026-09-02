@@ -126,12 +126,14 @@ class RosterListTable extends WP_List_Table
     /**
      * Fetch org memberships from MDP, enrich with local DB data, and populate $this->items.
      *
-     * Retrieves all current organization memberships (no status filter — every
-     * MDP status, including Active, Delayed, Grace Period, and Inactive, is
-     * shown) from the MDP via MdpClient::getOrgMemberships(). Normalises the
-     * JSON:API response into flat item rows, then enriches each row with
-     * roster_status, last_updated, last_updated_by, and last_synced_at from
-     * wp_wicket_aorm_roster_meta using a single indexed IN query (AORM-3.3).
+     * Retrieves only "current" organization memberships (Active or Delayed —
+     * Inactive/lapsed memberships are excluded server-side via
+     * `filter[status_in][]=Active&…=Delayed` in MdpClient::getOrgMemberships();
+     * see that method's docblock for why a boolean `active_eq` filter was
+     * tried first and rejected). Normalises the JSON:API response into flat
+     * item rows, then enriches each row with roster_status, last_updated, last_updated_by,
+     * and last_synced_at from wp_wicket_aorm_roster_meta using a single
+     * indexed IN query (AORM-3.3).
      *
      * Fields populated by later tickets:
      *   - column render logic  (AORM-3.8, AORM-3.9)

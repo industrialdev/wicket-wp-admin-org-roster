@@ -30,11 +30,17 @@ class MdpClient
     /**
      * Fetch organization memberships from the MDP.
      *
-     * Calls the `organization_memberships` JSON:API endpoint with no status
-     * filter, so every current membership is returned regardless of its MDP
-     * status (Active, Delayed, Grace Period, or Inactive). Includes related
-     * `organization` and `membership` resources so the caller can resolve
-     * org names and tier names without additional round-trips.
+     * Calls the `organization_memberships` JSON:API endpoint, scoped to
+     * "current" memberships only via `filter[status_in][]=Active&…=Delayed`
+     * — bugfix, previously no status filter was applied at all, which let
+     * Inactive organizations appear on the Organization Rosters list. An
+     * earlier version of this fix used `filter[active_eq]=1`, but the MDP's
+     * `active` boolean is false for Delayed memberships (it only reflects
+     * `starts_at` having been reached), which incorrectly excluded them —
+     * `status_in` targets the `status` string attribute directly instead.
+     * Includes related `organization` and `membership` resources so the
+     * caller can resolve org names and tier names without additional
+     * round-trips.
      *
      * Returns an empty result structure when `wicket_api_client()` is
      * unavailable or the request throws, so callers never need to handle null.
@@ -66,7 +72,17 @@ class MdpClient
         }
 
         $queryParams = [
-            'filter' => [],
+            'filter' => [
+                // Always scope to "current" memberships — Inactive/lapsed
+                // memberships should never appear on the Organization Rosters
+                // list. `status_in` targets the MDP's `status` string
+                // attribute directly. A boolean `active_eq=1` filter was
+                // tried first but rejected — the MDP's `active` attribute is
+                // false for Delayed memberships (it only reflects whether
+                // `starts_at` has been reached), which incorrectly excluded
+                // them.
+                'status_in' => ['Active', 'Delayed'],
+            ],
             'page' => [
                 'size'   => max(1, (int) ($args['per_page'] ?? 20)),
                 'number' => max(1, (int) ($args['page'] ?? 1)),
