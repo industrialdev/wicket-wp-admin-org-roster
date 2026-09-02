@@ -1367,16 +1367,30 @@ class MdpClient
     }
 
     /**
-     * Search MDP for people by email, phone, or last name.
+     * Search MDP for people by email, phone, or full name.
      *
      * Issues a single POST to `people/query` with a Ransack OR group so all
      * supplied fields are searched in one round-trip. Empty fields are omitted
      * from the group; if no non-empty fields remain the method returns early
      * without making any API call.
      *
-     * First name is intentionally excluded from the search axes — it is too
-     * common to be a useful search criterion and would flood the result set
-     * with false positives. It remains a scoring signal in ScoringService.
+     * Name matching pairs first+last name into a nested AND-group
+     * (`given_name_eq` AND `family_name_eq`) rather than matching on last
+     * name alone. A bare last-name leg matches every person with that
+     * surname — on a common last name in a large org this can flood the OR
+     * group with candidates unrelated to the row being matched, potentially
+     * pushing the actual best candidate out of the page fetched. Pairing
+     * first+last narrows this back down to a small handful of candidates in
+     * virtually every org, without using first name as a standalone search
+     * axis — it's still too common alone (e.g. "John" would flood the result
+     * set on its own) and remains excluded as a lone search criterion; it is
+     * only ever paired with last name here. This is also consistent with
+     * ScoringService: last_name_exact alone (25) sits below
+     * THRESHOLD_POSSIBLE (30), so a last-name-only candidate can never
+     * actually produce a match by itself. When first name is unavailable,
+     * the search falls back to the broader last-name-only leg (best-effort;
+     * every normal call site validates first_name as required alongside
+     * last_name, so this fallback isn't exercised in practice).
      *
      * Phone numbers are normalised to digits-only before being added to the
      * query so formatting differences (parentheses, dashes, spaces) do not
@@ -1424,13 +1438,13 @@ class MdpClient
                 // Restrict the phone leg to phones of the configured type only.
                 // A nested AND-group (rather than two flat OR'd keys) is required
                 // so the number match and the type match apply to the *same*
-                // phone record, still OR'd against the email/last-name legs above.
-                $group['g'] = [
-                    [
-                        'm'                    => 'and',
-                        'phones_number_cont'   => $normalizedPhone,
-                        'phones_phone_type_eq' => $phoneMatchType,
-                    ],
+                // phone record, still OR'd against the other legs. Appended to
+                // $group['g'] (not assigned) since the name leg below may also
+                // need to add its own AND-group alongside this one.
+                $group['g'][] = [
+                    'm'                    => 'and',
+                    'phones_number_cont'   => $normalizedPhone,
+                    'phones_phone_type_eq' => $phoneMatchType,
                 ];
             } else {
                 $group['phones_number_cont'] = $normalizedPhone;
@@ -1439,9 +1453,28 @@ class MdpClient
             $hasSearchField = true;
         }
 
-        if (($fields['last_name'] ?? '') !== '') {
-            $group['family_name_eq'] = (string) $fields['last_name'];
-            $hasSearchField          = true;
+        $firstName = (string) ($fields['first_name'] ?? '');
+        $lastName  = (string) ($fields['last_name'] ?? '');
+
+        if ($lastName !== '') {
+            if ($firstName !== '') {
+                // Pair first+last name into a nested AND-group — see the
+                // method docblock for why this replaces a bare family_name_eq
+                // leg. Appended to $group['g'] (not assigned) since the phone
+                // leg above may already have added its own AND-group.
+                $group['g'][] = [
+                    'm'              => 'and',
+                    'given_name_eq'  => $firstName,
+                    'family_name_eq' => $lastName,
+                ];
+            } else {
+                // No first name to pair with — fall back to the broader
+                // last-name-only leg. See the method docblock for why this
+                // is a defensive fallback rather than a path normally hit.
+                $group['family_name_eq'] = $lastName;
+            }
+
+            $hasSearchField = true;
         }
 
         // All fields empty — nothing to search.
