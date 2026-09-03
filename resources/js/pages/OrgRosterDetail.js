@@ -25,7 +25,27 @@
  * admin never leaves this page during upload → sync, so nothing re-ran the
  * initial fetch. useRestApi() already exposes a refresh() for this; it's
  * now passed down as onSyncComplete so SyncProgressStep can call it the
- * moment a sync finishes. See SyncProgressStep.js for where it's invoked.
+ * moment a sync finishes (live update while the Results screen is showing).
+ * SyncProgressStep's "Done" button additionally does a full
+ * window.location.reload() rather than navigating client-side back to this
+ * tab — see SyncProgressStep.js for why. Because of that, this component no
+ * longer needs to hand it a client-side "go to Roster Assignment" callback.
+ *
+ * Bugfix (Done button disappearing / Sync Complete screen resetting):
+ * useRestApi()'s `refresh()` sets the SAME `isLoading` flag as the initial
+ * fetch. The full-page early return below used to be `if (isLoading)` with
+ * no other condition, so calling `refreshRoster` from deep inside
+ * SyncProgressStep (via onSyncComplete, above) replaced this entire
+ * component's tree — header, tabs, the in-progress wizard, all of it — with
+ * a bare Spinner, then remounted everything fresh once the refetch
+ * resolved. That remount wiped SyncProgressStep's local state (`phase`,
+ * synced/failed counts, ...), so it came back at 'syncing' and immediately
+ * re-polled, found `is_complete` true again, called onSyncComplete() again,
+ * and repeated — a flash-the-whole-page-and-remount loop, which is why the
+ * Done button appeared to vanish. Fixed by only showing the full-page
+ * Spinner on the genuine initial load (`isLoading && !roster`); once roster
+ * data exists, a background refresh updates the header in place without
+ * unmounting anything else on the page.
  */
 
 import { useState } from '@wordpress/element';
@@ -80,7 +100,11 @@ export default function OrgRosterDetail() {
 		);
 	}
 
-	if ( isLoading ) {
+	// Only block the whole page on the genuine initial load. Once roster data
+	// exists, a background refresh() (e.g. onSyncComplete below) sets
+	// isLoading again but must NOT unmount the rest of the page — see the
+	// bugfix note above.
+	if ( isLoading && ! roster ) {
 		return (
 			<>
 				<Spinner />
@@ -88,7 +112,7 @@ export default function OrgRosterDetail() {
 		);
 	}
 
-	if ( error ) {
+	if ( error && ! roster ) {
 		return (
 			<>
 				<Notice status="error" isDismissible={ false }>
@@ -135,7 +159,6 @@ export default function OrgRosterDetail() {
 							<RosterUpload
 								orgUuid={ orgUuid }
 								membershipUuid={ membershipUuid }
-								onGoToAssignment={ () => goToTab( 'assignment' ) }
 								onSyncComplete={ refreshRoster }
 								{ ...uploadWizard }
 							/>

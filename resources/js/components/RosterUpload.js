@@ -45,12 +45,6 @@
  * @param {Function} props.setUploadAction
  * @param {Function} props.setSelectedFile
  * @param {Function} props.resetWizard
- * @param {Function} [props.onGoToAssignment] Switches the parent TabPanel to the
- *                                            "Roster Assignment" tab. Passed through
- *                                            to SyncProgressStep, whose "Done" button
- *                                            calls it after clearing the session so
- *                                            the admin lands on the roster they just
- *                                            synced instead of back on the wizard.
  * @param {Function} [props.onSyncComplete]  Re-fetches the roster header data owned
  *                                            by OrgRosterDetail (its useRestApi()
  *                                            `refresh`). Passed through to
@@ -90,7 +84,6 @@ export default function RosterUpload( {
 	setUploadAction,
 	setSelectedFile,
 	resetWizard,
-	onGoToAssignment,
 	onSyncComplete,
 } ) {
 	/** Props forwarded to every step component. */
@@ -107,7 +100,6 @@ export default function RosterUpload( {
 		setUploadAction,
 		setSelectedFile,
 		resetWizard,
-		onGoToAssignment,
 		onSyncComplete,
 	};
 

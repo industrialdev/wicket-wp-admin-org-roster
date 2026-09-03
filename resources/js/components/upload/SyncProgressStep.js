@@ -15,11 +15,9 @@
  *      failed record IDs, then resets to the Syncing phase.
  *    - A **Done** button that clears the session (DELETE /uploads/{sessionId},
  *      errors ignored — idempotent, same pattern as CsvValidationStep's
- *      abandonSession()), calls `resetWizard()` so the wizard is back at
- *      "landing" whenever the admin next opens the Roster Upload tab, and
- *      then calls `onGoToAssignment()` (when provided) to switch the parent
- *      TabPanel to the Roster Assignment tab — so the admin lands on the
- *      roster they just synced rather than back on the upload wizard.
+ *      abandonSession()) and then does a full `window.location.reload()` —
+ *      see the bugfix note below for why a hard reload rather than
+ *      client-side navigation.
  *
  * Polling stops immediately on:
  *   - `is_complete === true`   → transitions to Results phase after COMPLETION_DELAY_MS.
@@ -36,16 +34,25 @@
  * Bugfix ("Current Roster count" not updating after sync): RosterHeading's
  * assigned_count comes from a roster object OrgRosterDetail fetches exactly
  * once, on page mount — nothing re-fetched it once a sync ran, since the
- * admin never leaves the page during upload → sync. The optional
- * `onSyncComplete` prop is OrgRosterDetail's useRestApi() `refresh` for that
- * roster data; it's called as soon as `is_complete` is detected (i.e. the
- * moment the Results phase is reached), not gated behind clicking "Done",
- * so the header count is correct as soon as the admin sees the sync results.
+ * admin never leaves the page during upload → sync. Two complementary fixes:
+ *   1. The optional `onSyncComplete` prop is OrgRosterDetail's useRestApi()
+ *      `refresh` for that roster data; it's called as soon as `is_complete`
+ *      is detected (i.e. the moment the Results phase is reached), so the
+ *      header count is already correct while the admin is reading the sync
+ *      results.
+ *   2. The **Done** button additionally does a full `window.location.reload()`
+ *      instead of the previous `resetWizard()` + `onGoToAssignment()`
+ *      client-side reset. A hard reload re-runs Assets.php from scratch,
+ *      which re-fetches everything on the page fresh (roster header, member
+ *      table, activity log) rather than relying on each piece of client
+ *      state to have been individually kept in sync — simpler and more
+ *      thorough, and it still lands the admin on the Roster Assignment tab
+ *      since that's OrgRosterDetail's default initial tab and the upload
+ *      session is already gone.
  *
  * @param {{
  *   sessionId:        string|null,
  *   resetWizard:      () => void,
- *   onGoToAssignment: (() => void)|undefined,
  *   onSyncComplete:   (() => void)|undefined,
  * }} props
  */
@@ -92,7 +99,7 @@ export const START_OVER_BTN_CLASS = 'aorm-sync-progress__start-over-btn';
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssignment, onSyncComplete } ) {
+export default function SyncProgressStep( { sessionId, resetWizard, onSyncComplete } ) {
 
 	// ── Phase ─────────────────────────────────────────────────────────────────
 
@@ -273,17 +280,23 @@ export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssign
 	// ── Done handler ──────────────────────────────────────────────────────────
 
 	/**
-	 * Clears the staged-records session on the server before returning the
-	 * wizard to its initial state, so a fully-synced session doesn't linger
-	 * until the cleanup TTL job purges it. Mirrors CsvValidationStep's
-	 * abandonSession(): DELETE errors are ignored — deleting an
-	 * already-cleared or unknown session is a no-op on the server, and Done
-	 * should always be able to return the admin to the landing step.
+	 * Clears the staged-records session on the server, so a fully-synced
+	 * session doesn't linger until the cleanup TTL job purges it. Mirrors
+	 * CsvValidationStep's abandonSession(): DELETE errors are ignored —
+	 * deleting an already-cleared or unknown session is a no-op on the
+	 * server, and Done should always be able to proceed regardless.
 	 *
-	 * After the wizard is reset, hands off to `onGoToAssignment()` (when
-	 * provided) to switch the admin to the Roster Assignment tab, so they
-	 * land on the roster they just synced instead of back on the (now blank)
-	 * upload wizard.
+	 * Bugfix ("Current Roster count" not updating after sync): this used to
+	 * call `resetWizard()` + `onGoToAssignment()` to reset client-side state
+	 * and switch tabs without leaving the page. That left every other piece
+	 * of page state (the roster header count chief among them) exactly as
+	 * stale as it was before the sync, since nothing re-fetched it. A full
+	 * `window.location.reload()` re-runs the page from scratch instead —
+	 * Assets.php recomputes the roster header, the member table and activity
+	 * log re-fetch on mount, and the page naturally lands back on the
+	 * default "Roster Assignment" tab (there's no session left to resume on
+	 * Roster Upload). Simpler than keeping every piece of client state in
+	 * sync by hand, at the cost of a visible reload.
 	 */
 	const handleDone = useCallback( async () => {
 		if ( sessionId ) {
@@ -296,16 +309,15 @@ export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssign
 				} );
 			} catch {
 				// Ignore — idempotent; the session may already be gone.
-			} finally {
-				if ( isMountedRef.current ) {
-					setIsClearingSession( false );
-				}
 			}
+
+			// No `finally` clearing isClearingSession here — the page is
+			// about to reload, so there's nothing left to un-busy the button
+			// for.
 		}
 
-		resetWizard();
-		onGoToAssignment?.();
-	}, [ sessionId, resetWizard, onGoToAssignment ] );
+		window.location.reload();
+	}, [ sessionId ] );
 
 	// ── Derived display value ─────────────────────────────────────────────────
 
