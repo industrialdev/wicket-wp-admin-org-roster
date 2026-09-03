@@ -12,9 +12,13 @@ use WicketAORM\Database\StagedRecordsTable;
  * Routes:
  *   GET /wicket-aorm/v1/uploads/{session_id}/replacements
  *       Returns the pre-computed replace-mode diff for the given upload session:
- *       all staged records with record_status = 'remove_existing'. These rows
- *       represent current roster members who will be removed when the session is
- *       synced in replace mode.
+ *       all staged records with record_status = 'remove_existing' AND
+ *       category = 'ready_to_sync'. These rows represent current roster
+ *       members who will be removed when the session is synced in replace
+ *       mode. Rows an admin has discarded via "Discard Removal" (category
+ *       moved to 'discard') are excluded — they still have record_status =
+ *       'remove_existing' but no longer belong in this table (bugfix,
+ *       post-AORM-8B.4/8B.3).
  *
  *       The rows are inserted by the background matching job (AORM-7.9) which
  *       fetches the current MDP roster and injects a synthetic staged record for

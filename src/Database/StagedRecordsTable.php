@@ -638,11 +638,21 @@ class StagedRecordsTable
     }
 
     /**
-     * Return all remove_existing staged records for the given session.
+     * Return all remove_existing staged records for the given session that
+     * are still awaiting sync (category = 'ready_to_sync').
      *
      * Used by ReplacementDiffController (AORM-8B.4) to power the dedicated
      * GET /uploads/{session_id}/replacements endpoint. Each record represents
      * a current roster member who would be removed in replace mode.
+     *
+     * The category filter (bugfix, post-AORM-8B.4) excludes rows an admin has
+     * moved out of ready_to_sync — most notably via the "Discard Removal"
+     * action (AORM-8B.3), which PATCHes category to 'discard' but leaves
+     * record_status at 'remove_existing'. Without this filter, a discarded
+     * removal row kept appearing in the "Records being removed" table even
+     * though it also (correctly) showed up under the Discard panel — mirrors
+     * the same category = 'ready_to_sync' guard already used by
+     * getPendingSyncRecords() and getSyncProgress().
      *
      * @param  string $sessionId  The upload_session_id UUID.
      * @return list<array{
@@ -668,6 +678,7 @@ class StagedRecordsTable
                  WHERE upload_session_id = %s
                    AND validation_status = 'valid'
                    AND record_status = 'remove_existing'
+                   AND category = 'ready_to_sync'
                  ORDER BY id ASC",
                 $sessionId,
             ),
