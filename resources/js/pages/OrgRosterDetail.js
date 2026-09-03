@@ -127,6 +127,7 @@ export default function OrgRosterDetail() {
 							<RosterUpload
 								orgUuid={ orgUuid }
 								membershipUuid={ membershipUuid }
+								onGoToAssignment={ () => goToTab( 'assignment' ) }
 								{ ...uploadWizard }
 							/>
 						) }

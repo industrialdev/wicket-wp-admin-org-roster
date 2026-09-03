@@ -45,6 +45,12 @@
  * @param {Function} props.setUploadAction
  * @param {Function} props.setSelectedFile
  * @param {Function} props.resetWizard
+ * @param {Function} [props.onGoToAssignment] Switches the parent TabPanel to the
+ *                                            "Roster Assignment" tab. Passed through
+ *                                            to SyncProgressStep, whose "Done" button
+ *                                            calls it after clearing the session so
+ *                                            the admin lands on the roster they just
+ *                                            synced instead of back on the wizard.
  */
 
 import WizardLanding        from './upload/WizardLanding';
@@ -76,6 +82,7 @@ export default function RosterUpload( {
 	setUploadAction,
 	setSelectedFile,
 	resetWizard,
+	onGoToAssignment,
 } ) {
 	/** Props forwarded to every step component. */
 	const sharedProps = {
@@ -91,6 +98,7 @@ export default function RosterUpload( {
 		setUploadAction,
 		setSelectedFile,
 		resetWizard,
+		onGoToAssignment,
 	};
 
 	return (

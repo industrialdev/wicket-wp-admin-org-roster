@@ -15,7 +15,11 @@
  *      failed record IDs, then resets to the Syncing phase.
  *    - A **Done** button that clears the session (DELETE /uploads/{sessionId},
  *      errors ignored — idempotent, same pattern as CsvValidationStep's
- *      abandonSession()) and then calls `resetWizard()`.
+ *      abandonSession()), calls `resetWizard()` so the wizard is back at
+ *      "landing" whenever the admin next opens the Roster Upload tab, and
+ *      then calls `onGoToAssignment()` (when provided) to switch the parent
+ *      TabPanel to the Roster Assignment tab — so the admin lands on the
+ *      roster they just synced rather than back on the upload wizard.
  *
  * Polling stops immediately on:
  *   - `is_complete === true`   → transitions to Results phase after COMPLETION_DELAY_MS.
@@ -30,8 +34,9 @@
  * already confirmed gone server-side.
  *
  * @param {{
- *   sessionId:   string|null,
- *   resetWizard: () => void,
+ *   sessionId:        string|null,
+ *   resetWizard:      () => void,
+ *   onGoToAssignment: (() => void)|undefined,
  * }} props
  */
 
@@ -77,7 +82,7 @@ export const START_OVER_BTN_CLASS = 'aorm-sync-progress__start-over-btn';
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SyncProgressStep( { sessionId, resetWizard } ) {
+export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssignment } ) {
 
 	// ── Phase ─────────────────────────────────────────────────────────────────
 
@@ -257,6 +262,11 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 	 * abandonSession(): DELETE errors are ignored — deleting an
 	 * already-cleared or unknown session is a no-op on the server, and Done
 	 * should always be able to return the admin to the landing step.
+	 *
+	 * After the wizard is reset, hands off to `onGoToAssignment()` (when
+	 * provided) to switch the admin to the Roster Assignment tab, so they
+	 * land on the roster they just synced instead of back on the (now blank)
+	 * upload wizard.
 	 */
 	const handleDone = useCallback( async () => {
 		if ( sessionId ) {
@@ -277,7 +287,8 @@ export default function SyncProgressStep( { sessionId, resetWizard } ) {
 		}
 
 		resetWizard();
-	}, [ sessionId, resetWizard ] );
+		onGoToAssignment?.();
+	}, [ sessionId, resetWizard, onGoToAssignment ] );
 
 	// ── Derived display value ─────────────────────────────────────────────────
 
