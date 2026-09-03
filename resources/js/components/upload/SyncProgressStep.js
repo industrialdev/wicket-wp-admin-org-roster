@@ -33,10 +33,20 @@
  * — unlike the Done button, this skips the DELETE call since the session is
  * already confirmed gone server-side.
  *
+ * Bugfix ("Current Roster count" not updating after sync): RosterHeading's
+ * assigned_count comes from a roster object OrgRosterDetail fetches exactly
+ * once, on page mount — nothing re-fetched it once a sync ran, since the
+ * admin never leaves the page during upload → sync. The optional
+ * `onSyncComplete` prop is OrgRosterDetail's useRestApi() `refresh` for that
+ * roster data; it's called as soon as `is_complete` is detected (i.e. the
+ * moment the Results phase is reached), not gated behind clicking "Done",
+ * so the header count is correct as soon as the admin sees the sync results.
+ *
  * @param {{
  *   sessionId:        string|null,
  *   resetWizard:      () => void,
  *   onGoToAssignment: (() => void)|undefined,
+ *   onSyncComplete:   (() => void)|undefined,
  * }} props
  */
 
@@ -82,7 +92,7 @@ export const START_OVER_BTN_CLASS = 'aorm-sync-progress__start-over-btn';
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssignment } ) {
+export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssignment, onSyncComplete } ) {
 
 	// ── Phase ─────────────────────────────────────────────────────────────────
 
@@ -163,6 +173,13 @@ export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssign
 				setFinalFailed( data.failed ?? 0 );
 				setFailedRecords( data.failed_records ?? [] );
 
+				// Refresh the roster header's assigned_count (see the bugfix
+				// note in the file docblock) as soon as the sync is known to
+				// be complete, rather than waiting for the admin to click
+				// "Done" — the count should already be correct by the time
+				// the Results phase renders.
+				onSyncComplete?.();
+
 				setTimeout( () => {
 					if ( isMountedRef.current ) {
 						setPhase( 'complete' );
@@ -180,7 +197,7 @@ export default function SyncProgressStep( { sessionId, resetWizard, onGoToAssign
 					__( 'An error occurred while checking sync progress.', 'wicket-aorm' )
 			);
 		}
-	}, [ sessionId, clearPollInterval ] );
+	}, [ sessionId, clearPollInterval, onSyncComplete ] );
 
 	const startPolling = useCallback( () => {
 		clearPollInterval();

@@ -51,6 +51,14 @@
  *                                            calls it after clearing the session so
  *                                            the admin lands on the roster they just
  *                                            synced instead of back on the wizard.
+ * @param {Function} [props.onSyncComplete]  Re-fetches the roster header data owned
+ *                                            by OrgRosterDetail (its useRestApi()
+ *                                            `refresh`). Passed through to
+ *                                            SyncProgressStep, which calls it as soon
+ *                                            as a sync finishes so the "Current
+ *                                            Roster count" in RosterHeading reflects
+ *                                            the sync instead of staying stuck at
+ *                                            whatever it was on initial page load.
  */
 
 import WizardLanding        from './upload/WizardLanding';
@@ -83,6 +91,7 @@ export default function RosterUpload( {
 	setSelectedFile,
 	resetWizard,
 	onGoToAssignment,
+	onSyncComplete,
 } ) {
 	/** Props forwarded to every step component. */
 	const sharedProps = {
@@ -99,6 +108,7 @@ export default function RosterUpload( {
 		setSelectedFile,
 		resetWizard,
 		onGoToAssignment,
+		onSyncComplete,
 	};
 
 	return (

@@ -18,6 +18,14 @@
  * back. This component sits above the TabPanel and never unmounts across
  * tab switches, so the state survives. See useUploadWizardState.js for the
  * full bugfix writeup.
+ *
+ * Bugfix ("Current Roster count" not updating after sync): the roster
+ * object backing RosterHeading's assigned_count (fetched once here via
+ * useRestApi) previously had no way to be refreshed after a sync — the
+ * admin never leaves this page during upload → sync, so nothing re-ran the
+ * initial fetch. useRestApi() already exposes a refresh() for this; it's
+ * now passed down as onSyncComplete so SyncProgressStep can call it the
+ * moment a sync finishes. See SyncProgressStep.js for where it's invoked.
  */
 
 import { useState } from '@wordpress/element';
@@ -49,7 +57,7 @@ export default function OrgRosterDetail() {
 		setTabNav( ( prev ) => ( { tab: name, key: prev.key + 1 } ) );
 	}
 
-	const { data: roster, isLoading, error } = useRestApi(
+	const { data: roster, isLoading, error, refresh: refreshRoster } = useRestApi(
 		orgUuid && membershipUuid
 			? `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }`
 			: null
@@ -128,6 +136,7 @@ export default function OrgRosterDetail() {
 								orgUuid={ orgUuid }
 								membershipUuid={ membershipUuid }
 								onGoToAssignment={ () => goToTab( 'assignment' ) }
+								onSyncComplete={ refreshRoster }
 								{ ...uploadWizard }
 							/>
 						) }
