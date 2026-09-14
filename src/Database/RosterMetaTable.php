@@ -102,6 +102,59 @@ class RosterMetaTable
     }
 
     /**
+     * Fetch membership UUIDs whose roster_status matches the given value.
+     *
+     * Used by RosterListTable's Roster Status filter (AORM-3.x) to restrict
+     * the MDP org-memberships query to only rosters in the selected
+     * lifecycle state. Filtering has to work this way round — resolve
+     * matching UUIDs locally first, then constrain the MDP call via
+     * `filter[uuid_in]` — because roster_status lives only in this table,
+     * while pagination/sorting for the list is driven entirely by the MDP.
+     *
+     * @param  string       $status  ENUM value to match ('idle', 'in_progress',
+     *                               'syncing', 'has_failures', 'synced').
+     * @return list<string>          Membership UUID strings (empty when none match).
+     */
+    public function getMembershipUuidsByStatus(string $status): array
+    {
+        $table = $this->wpdb->prefix . 'wicket_aorm_roster_meta';
+
+        $rows = (array) $this->wpdb->get_col(
+            $this->wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT membership_uuid FROM {$table} WHERE roster_status = %s",
+                $status,
+            ),
+        );
+
+        return array_values(array_map('strval', $rows));
+    }
+
+    /**
+     * Fetch every membership UUID that has a roster_meta row at all,
+     * regardless of roster_status.
+     *
+     * Used by RosterListTable's "Not Started" Roster Status filter option:
+     * a roster with no meta row yet is exactly what the list currently
+     * renders as "—" / "No roster activity yet" (see
+     * RosterListTable::column_roster_status()) — there is no stored ENUM
+     * value for that state, so "Not Started" is implemented as excluding
+     * (`filter[uuid_not_in]`) every UUID this method returns, rather than
+     * matching one.
+     *
+     * @return list<string> Membership UUID strings.
+     */
+    public function getAllTrackedMembershipUuids(): array
+    {
+        $table = $this->wpdb->prefix . 'wicket_aorm_roster_meta';
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $rows = (array) $this->wpdb->get_col("SELECT DISTINCT membership_uuid FROM {$table}");
+
+        return array_values(array_map('strval', $rows));
+    }
+
+    /**
      * Create or update the roster meta row for a given org + membership.
      *
      * Issues an INSERT … ON DUPLICATE KEY UPDATE so callers do not need to

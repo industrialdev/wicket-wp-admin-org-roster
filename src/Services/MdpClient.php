@@ -28,6 +28,23 @@ class MdpClient
     public const RETRY_BASE_DELAY_MS = 1000;
 
     /**
+     * Page size used when scanning organization_memberships to build the
+     * distinct Membership Tier filter option list (getDistinctMembershipTiers()).
+     */
+    public const TIER_SCAN_PAGE_SIZE = 200;
+
+    /**
+     * Safety cap on how many pages getDistinctMembershipTiers() will scan,
+     * bounding worst-case cost on very large tenants.
+     */
+    public const TIER_SCAN_MAX_PAGES = 20;
+
+    /**
+     * How long getDistinctMembershipTiers() caches its result, in seconds.
+     */
+    public const TIER_CACHE_TTL_SECONDS = 300;
+
+    /**
      * Fetch organization memberships from the MDP.
      *
      * Calls the `organization_memberships` JSON:API endpoint, scoped to
@@ -51,9 +68,22 @@ class MdpClient
      *   sort?: string,
      *   search?: string,
      *   cascadeable_only?: bool,
+     *   membership_status?: string,
+     *   membership_tier?: string,
+     *   uuid_in?: list<string>|null,
+     *   uuid_not_in?: list<string>|null,
      * } $args Search term (when present) matches org legal name (partial),
      *         org UUID (exact), or identifying number / org ID (exact) — see
-     *         the Ransack grouping filter applied below.
+     *         the Ransack grouping filter applied below. `membership_status`
+     *         is one of '' (no filter), 'Active', 'Delayed', or the sentinel
+     *         'grace_period' (see RosterListTable::MEMBERSHIP_STATUS_GRACE_PERIOD).
+     *         `membership_tier` is an exact tier name match. `uuid_in` /
+     *         `uuid_not_in` restrict/exclude by this resource's own uuid —
+     *         used by RosterListTable's Roster Status filter, which resolves
+     *         matching membership UUIDs from the local roster_meta table
+     *         first (see RosterMetaTable::getMembershipUuidsByStatus() /
+     *         ::getAllTrackedMembershipUuids()) since roster_status itself is
+     *         local-only data the MDP has no knowledge of.
      *
      * @return array{
      *   data: list<array<string,mixed>>,
@@ -122,6 +152,39 @@ class MdpClient
             $queryParams['filter']['is_cascadeable_eq'] = 1;
         }
 
+        // Membership Status filter: 'Active'/'Delayed' additionally exclude
+        // in_grace rows so the filter matches what column_membership_status()
+        // actually displays (a grace-period row renders as "Grace Period",
+        // never as its underlying status). The 'grace_period' sentinel
+        // selects only in_grace rows, regardless of status.
+        $membershipStatus = (string) ($args['membership_status'] ?? '');
+
+        if ($membershipStatus === 'grace_period') {
+            $queryParams['filter']['in_grace_eq'] = 1;
+        } elseif ($membershipStatus !== '') {
+            $queryParams['filter']['status_eq']   = $membershipStatus;
+            $queryParams['filter']['in_grace_eq'] = 0;
+        }
+
+        // Membership Tier filter: exact match against the related
+        // membership's English name — the same attribute mapColumnToSortField()
+        // already sorts by (membership_name_en).
+        if (! empty($args['membership_tier'])) {
+            $queryParams['filter']['membership_name_en_eq'] = (string) $args['membership_tier'];
+        }
+
+        // Roster Status filter (local-only data): restrict/exclude by this
+        // resource's own uuid, same predicate name used elsewhere in this
+        // class to filter a resource by its own uuid (see
+        // fetchOrgScopedRolesAndPhones()'s `people?filter[uuid_in]`).
+        if (! empty($args['uuid_in'])) {
+            $queryParams['filter']['uuid_in'] = array_values((array) $args['uuid_in']);
+        }
+
+        if (! empty($args['uuid_not_in'])) {
+            $queryParams['filter']['uuid_not_in'] = array_values((array) $args['uuid_not_in']);
+        }
+
         $query = (string) preg_replace(
             '/\%5B\d+\%5D/',
             '%5B%5D',
@@ -135,6 +198,87 @@ class MdpClient
         } catch (\Exception $e) {
             return $empty;
         }
+    }
+
+    /**
+     * Fetch the full set of membership tier names from the MDP's `memberships`
+     * catalog endpoint, for the Membership Tier dropdown filter on the
+     * Organization Rosters list (RosterListTable).
+     *
+     * Calls `GET /memberships?page[number]=…&page[size]=…&sort=name`,
+     * paginating through TIER_SCAN_MAX_PAGES pages of TIER_SCAN_PAGE_SIZE
+     * each (a safety cap bounding worst-case cost on very large tenants — a
+     * tenant with more tiers defined than that window covers will see a
+     * partial list rather than a failure). Cached in a transient for
+     * TIER_CACHE_TTL_SECONDS so repeated page loads/pagination clicks on the
+     * roster list don't re-fetch the catalog on every request.
+     *
+     * Returns an empty array when `wicket_api_client()` is unavailable or
+     * the request throws.
+     *
+     * @return list<string> Distinct tier names, sorted alphabetically.
+     */
+    public function getDistinctMembershipTiers(): array
+    {
+        $cacheKey = 'wicket_aorm_distinct_membership_tiers';
+        $cached   = get_transient($cacheKey);
+
+        if (is_array($cached)) {
+            /** @var list<string> $cached */
+            return $cached;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return [];
+        }
+
+        $tiers    = [];
+        $pageSize = self::TIER_SCAN_PAGE_SIZE;
+
+        for ($page = 1; $page <= self::TIER_SCAN_MAX_PAGES; $page++) {
+            $queryParams = [
+                'page' => [
+                    'size'   => $pageSize,
+                    'number' => $page,
+                ],
+                'sort' => 'name',
+            ];
+
+            $query = http_build_query($queryParams);
+
+            try {
+                $response = $client->get('memberships?' . $query);
+            } catch (\Exception $e) {
+                break;
+            }
+
+            if (! is_array($response)) {
+                break;
+            }
+
+            foreach ((array) ($response['data'] ?? []) as $resource) {
+                $name = (string) ($resource['attributes']['name'] ?? '');
+
+                if ($name !== '') {
+                    $tiers[$name] = true;
+                }
+            }
+
+            $totalItems = (int) ($response['meta']['page']['total_items'] ?? 0);
+
+            if ($page * $pageSize >= $totalItems) {
+                break;
+            }
+        }
+
+        $tierNames = array_keys($tiers);
+        sort($tierNames, SORT_STRING | SORT_FLAG_CASE);
+
+        set_transient($cacheKey, $tierNames, self::TIER_CACHE_TTL_SECONDS);
+
+        return $tierNames;
     }
 
     /**

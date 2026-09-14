@@ -58,6 +58,71 @@ class RosterListTable extends WP_List_Table
      */
     public const CASCADEABLE_FILTER_VALUE = '1';
 
+    /**
+     * GET query-arg name for the "Roster Status" dropdown filter. Value is
+     * one of the ROSTER_STATUS_LABELS keys, or '' / absent for "All".
+     */
+    public const ROSTER_STATUS_FILTER_PARAM = 'roster_status_filter';
+
+    /**
+     * GET query-arg name for the "Membership Status" dropdown filter. Value
+     * is one of the MEMBERSHIP_STATUS_LABELS keys, or '' / absent for "All".
+     */
+    public const MEMBERSHIP_STATUS_FILTER_PARAM = 'membership_status_filter';
+
+    /**
+     * GET query-arg name for the "Membership Tier" dropdown filter. Value is
+     * an exact tier name (see MdpClient::getDistinctMembershipTiers()), or ''
+     * / absent for "All".
+     */
+    public const MEMBERSHIP_TIER_FILTER_PARAM = 'membership_tier_filter';
+
+    /**
+     * Sentinel ROSTER_STATUS_FILTER_PARAM value meaning "no roster_meta row
+     * exists yet" — not a stored roster_status ENUM value. See
+     * RosterMetaTable::getAllTrackedMembershipUuids().
+     */
+    public const ROSTER_STATUS_NOT_STARTED = 'not_started';
+
+    /**
+     * Sentinel MEMBERSHIP_STATUS_FILTER_PARAM value meaning "in_grace = 1",
+     * regardless of the underlying MDP `status` attribute. Matches the
+     * derived "Grace Period" state column_membership_status() renders in
+     * place of the raw status.
+     */
+    public const MEMBERSHIP_STATUS_GRACE_PERIOD = 'grace_period';
+
+    /**
+     * Roster Status filter dropdown options, value => label. Order here is
+     * the order rendered in the <select>. 'not_started' is a sentinel (see
+     * ROSTER_STATUS_NOT_STARTED); the remaining five are the real
+     * wp_wicket_aorm_roster_meta.roster_status ENUM values.
+     *
+     * @var array<string, string>
+     */
+    private const ROSTER_STATUS_LABELS = [
+        'not_started'  => 'Not Started',
+        'idle'         => 'Idle',
+        'in_progress'  => 'In Progress',
+        'syncing'      => 'Syncing',
+        'has_failures' => 'Has Failures',
+        'synced'       => 'Synced',
+    ];
+
+    /**
+     * Membership Status filter dropdown options, value => label.
+     * 'grace_period' is a sentinel (see MEMBERSHIP_STATUS_GRACE_PERIOD); the
+     * other two are the raw MDP organization_membership `status` values this
+     * list is already scoped to (see MdpClient::getOrgMemberships()).
+     *
+     * @var array<string, string>
+     */
+    private const MEMBERSHIP_STATUS_LABELS = [
+        'Active'       => 'Active',
+        'Delayed'      => 'Delayed',
+        'grace_period' => 'Grace Period',
+    ];
+
     private MdpClient $mdpClient;
 
     private RosterMetaTable $rosterMetaTable;
@@ -164,12 +229,59 @@ class RosterListTable extends WP_List_Table
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $search = sanitize_text_field((string) ($_REQUEST['s'] ?? ''));
 
+        // Roster Status filter: resolve the local-only roster_status value
+        // into a set of membership UUIDs to include/exclude from the MDP
+        // query, since roster_status itself lives only in
+        // wp_wicket_aorm_roster_meta and the MDP has no knowledge of it.
+        // When the selected status matches zero local rows, no UUID list
+        // could ever satisfy an `uuid_in` filter (an empty filter value is
+        // indistinguishable from "no filter" to the MDP), so that case is
+        // short-circuited to an empty result set below instead.
+        $uuidIn           = null;
+        $uuidNotIn        = null;
+        $rosterStatusFilter = $this->currentFilterValue(self::ROSTER_STATUS_FILTER_PARAM);
+        $forceEmptyResult   = false;
+
+        if ($rosterStatusFilter !== '' && isset(self::ROSTER_STATUS_LABELS[$rosterStatusFilter])) {
+            if ($rosterStatusFilter === self::ROSTER_STATUS_NOT_STARTED) {
+                $tracked = $this->rosterMetaTable->getAllTrackedMembershipUuids();
+
+                if (! empty($tracked)) {
+                    $uuidNotIn = $tracked;
+                }
+            } else {
+                $matching = $this->rosterMetaTable->getMembershipUuidsByStatus($rosterStatusFilter);
+
+                if (empty($matching)) {
+                    $forceEmptyResult = true;
+                } else {
+                    $uuidIn = $matching;
+                }
+            }
+        }
+
+        if ($forceEmptyResult) {
+            $this->items = [];
+
+            $this->set_pagination_args([
+                'total_items' => 0,
+                'per_page'    => $perPage,
+                'total_pages' => 0,
+            ]);
+
+            return;
+        }
+
         $response = $this->mdpClient->getOrgMemberships([
-            'page'             => $currentPage,
-            'per_page'         => $perPage,
-            'sort'             => $sortField,
-            'search'           => $search,
-            'cascadeable_only' => $this->isCascadeableFilterActive(),
+            'page'              => $currentPage,
+            'per_page'          => $perPage,
+            'sort'              => $sortField,
+            'search'            => $search,
+            'cascadeable_only'  => $this->isCascadeableFilterActive(),
+            'membership_status' => $this->currentFilterValue(self::MEMBERSHIP_STATUS_FILTER_PARAM),
+            'membership_tier'   => $this->currentFilterValue(self::MEMBERSHIP_TIER_FILTER_PARAM),
+            'uuid_in'           => $uuidIn,
+            'uuid_not_in'       => $uuidNotIn,
         ]);
 
         $data       = (array) ($response['data'] ?? []);
@@ -436,6 +548,15 @@ class RosterListTable extends WP_List_Table
      * Only rendered for $which === 'top' — WordPress core never repeats
      * filter dropdowns in the bottom tablenav.
      *
+     * Also renders three further dropdowns using the same "native WP filter
+     * dropdown" pattern, each independently combinable with the others, with
+     * Cascadeable, and with search/sort/pagination (all round-trip via the
+     * same <form method="get">):
+     *   - Roster Status     (ROSTER_STATUS_FILTER_PARAM)     — local data
+     *   - Membership Tier   (MEMBERSHIP_TIER_FILTER_PARAM)   — MDP data
+     *   - Membership Status (MEMBERSHIP_STATUS_FILTER_PARAM) — MDP data
+     * A single shared "Filter" submit button applies all of them at once.
+     *
      * @param string $which 'top' or 'bottom'.
      */
     protected function extra_tablenav($which): void
@@ -452,6 +573,28 @@ class RosterListTable extends WP_List_Table
         echo '<option value="">' . esc_html__('All Rosters', 'wicket-aorm') . '</option>';
         echo '<option value="' . esc_attr(self::CASCADEABLE_FILTER_VALUE) . '"' . ($isActive ? ' selected="selected"' : '') . '>' . esc_html__('Cascadeable Only', 'wicket-aorm') . '</option>';
         echo '</select>';
+
+        $this->renderSelectFilter(
+            self::ROSTER_STATUS_FILTER_PARAM,
+            __('All Roster Statuses', 'wicket-aorm'),
+            self::ROSTER_STATUS_LABELS,
+            __('Filter by roster status', 'wicket-aorm'),
+        );
+
+        $this->renderSelectFilter(
+            self::MEMBERSHIP_TIER_FILTER_PARAM,
+            __('All Membership Tiers', 'wicket-aorm'),
+            $this->buildMembershipTierOptions(),
+            __('Filter by membership tier', 'wicket-aorm'),
+        );
+
+        $this->renderSelectFilter(
+            self::MEMBERSHIP_STATUS_FILTER_PARAM,
+            __('All Membership Statuses', 'wicket-aorm'),
+            self::MEMBERSHIP_STATUS_LABELS,
+            __('Filter by membership status', 'wicket-aorm'),
+        );
+
         echo '<input type="submit" name="filter_action" id="aorm-cascadeable-filter-submit" class="button" value="' . esc_attr__('Filter', 'wicket-aorm') . '" />';
         echo '</div>';
     }
@@ -470,6 +613,68 @@ class RosterListTable extends WP_List_Table
     {
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         return (string) ($_GET[self::CASCADEABLE_FILTER_PARAM] ?? '') === self::CASCADEABLE_FILTER_VALUE;
+    }
+
+    /**
+     * Read and sanitize the current value of a GET-based dropdown filter.
+     *
+     * Uses sanitize_text_field() rather than sanitize_key() so exact-match
+     * values containing spaces/mixed case (e.g. a membership tier name like
+     * "Gold Tier") survive the round trip unchanged.
+     *
+     * @param string $param GET query-arg name.
+     */
+    private function currentFilterValue(string $param): string
+    {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        return sanitize_text_field((string) ($_GET[$param] ?? ''));
+    }
+
+    /**
+     * Render a single <select> filter dropdown, matching the native
+     * WordPress admin dropdown-filter markup (label, "All …" default option,
+     * one <option> per value => label pair, current value pre-selected).
+     *
+     * @param array<string, string> $options Value => label.
+     */
+    private function renderSelectFilter(string $param, string $allLabel, array $options, string $srLabel): void
+    {
+        $current = $this->currentFilterValue($param);
+
+        echo '<label for="aorm-' . esc_attr($param) . '-filter" class="screen-reader-text">' . esc_html($srLabel) . '</label>';
+        echo '<select name="' . esc_attr($param) . '" id="aorm-' . esc_attr($param) . '-filter">';
+        echo '<option value="">' . esc_html($allLabel) . '</option>';
+
+        foreach ($options as $value => $label) {
+            printf(
+                '<option value="%1$s"%2$s>%3$s</option>',
+                esc_attr((string) $value),
+                $current === (string) $value ? ' selected="selected"' : '',
+                esc_html((string) $label),
+            );
+        }
+
+        echo '</select>';
+    }
+
+    /**
+     * Build the Membership Tier dropdown's value => label options from
+     * MdpClient::getDistinctMembershipTiers() (the MDP's `memberships`
+     * catalog). Both value and label are the tier name itself — the filter
+     * matches on exact name (see MdpClient::getOrgMemberships()'s
+     * `membership_name_en_eq`), and there is no separate id to key on here.
+     *
+     * @return array<string, string>
+     */
+    private function buildMembershipTierOptions(): array
+    {
+        $options = [];
+
+        foreach ($this->mdpClient->getDistinctMembershipTiers() as $tierName) {
+            $options[$tierName] = $tierName;
+        }
+
+        return $options;
     }
 
     /**
