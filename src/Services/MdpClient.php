@@ -68,6 +68,7 @@ class MdpClient
      *   sort?: string,
      *   search?: string,
      *   cascadeable_only?: bool,
+     *   non_cascadeable_only?: bool,
      *   membership_status?: string,
      *   membership_tier?: string,
      *   uuid_in?: list<string>|null,
@@ -148,8 +149,13 @@ class MdpClient
         // organization is flagged is_cascadeable in the MDP. Wired to the
         // "Cascadeable" dropdown filter on the Organization Rosters admin
         // list table (RosterListTable::extra_tablenav()).
+        // `non_cascadeable_only` is the inverse ("Non-Cascadeable Only"
+        // option on the same dropdown). The two are mutually exclusive in the
+        // UI; if both are somehow set, cascadeable_only wins.
         if (! empty($args['cascadeable_only'])) {
             $queryParams['filter']['is_cascadeable_eq'] = 1;
+        } elseif (! empty($args['non_cascadeable_only'])) {
+            $queryParams['filter']['is_cascadeable_eq'] = 0;
         }
 
         // Membership Status filter: 'Active'/'Delayed' additionally exclude

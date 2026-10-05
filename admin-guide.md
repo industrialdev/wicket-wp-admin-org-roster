@@ -64,7 +64,7 @@ This page lists every manageable roster with the following information:
 - **Roster Last Saved** — the last time someone made a change in this tool, and who did it.
 - **MDP** — a direct link to view the record in the MDP.
 
-You can search by organization name, ID, or UUID, sort by most columns, and filter to "Cascadeable Only" organizations using the dropdown above the table.
+You can search by organization name, ID, or UUID, sort by most columns, and filter to "Cascadeable Only" or "Non-Cascadeable Only" organizations using the dropdown above the table.
 
 ## Managing a single roster
 

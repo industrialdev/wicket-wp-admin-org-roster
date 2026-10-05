@@ -53,10 +53,18 @@ class RosterListTable extends WP_List_Table
     public const CASCADEABLE_FILTER_PARAM = 'is_cascadeable';
 
     /**
-     * Value of CASCADEABLE_FILTER_PARAM that activates the filter. Any other
-     * value (including absence of the param) means "All Rosters".
+     * Value of CASCADEABLE_FILTER_PARAM that restricts the list to
+     * cascadeable orgs ("Cascadeable Only").
      */
     public const CASCADEABLE_FILTER_VALUE = '1';
+
+    /**
+     * Value of CASCADEABLE_FILTER_PARAM that restricts the list to
+     * non-cascadeable orgs ("Non-Cascadeable Only"). Any value other than
+     * this or CASCADEABLE_FILTER_VALUE (including absence of the param)
+     * means "All Rosters".
+     */
+    public const NON_CASCADEABLE_FILTER_VALUE = '0';
 
     /**
      * GET query-arg name for the "Roster Status" dropdown filter. Value is
@@ -273,15 +281,16 @@ class RosterListTable extends WP_List_Table
         }
 
         $response = $this->mdpClient->getOrgMemberships([
-            'page'              => $currentPage,
-            'per_page'          => $perPage,
-            'sort'              => $sortField,
-            'search'            => $search,
-            'cascadeable_only'  => $this->isCascadeableFilterActive(),
-            'membership_status' => $this->currentFilterValue(self::MEMBERSHIP_STATUS_FILTER_PARAM),
-            'membership_tier'   => $this->currentFilterValue(self::MEMBERSHIP_TIER_FILTER_PARAM),
-            'uuid_in'           => $uuidIn,
-            'uuid_not_in'       => $uuidNotIn,
+            'page'                 => $currentPage,
+            'per_page'             => $perPage,
+            'sort'                 => $sortField,
+            'search'               => $search,
+            'cascadeable_only'     => $this->isCascadeableFilterActive(),
+            'non_cascadeable_only' => $this->isNonCascadeableFilterActive(),
+            'membership_status'    => $this->currentFilterValue(self::MEMBERSHIP_STATUS_FILTER_PARAM),
+            'membership_tier'      => $this->currentFilterValue(self::MEMBERSHIP_TIER_FILTER_PARAM),
+            'uuid_in'              => $uuidIn,
+            'uuid_not_in'          => $uuidNotIn,
         ]);
 
         $data       = (array) ($response['data'] ?? []);
@@ -537,7 +546,8 @@ class RosterListTable extends WP_List_Table
      * Render extra controls in the table navigation row.
      *
      * Adds a "Cascadeable" dropdown filter to the top tablenav — a <select>
-     * with "All Rosters" / "Cascadeable Only" options plus a "Filter" submit
+     * with "All Rosters" / "Cascadeable Only" (`1`) / "Non-Cascadeable Only"
+     * (`0`) options plus a "Filter" submit
      * button, matching the native WordPress admin pattern used for dropdown
      * filters elsewhere in core (e.g. the category filter on the Posts list
      * table). Rendered inside the same <form method="get"> that wraps the
@@ -565,13 +575,15 @@ class RosterListTable extends WP_List_Table
             return;
         }
 
-        $isActive = $this->isCascadeableFilterActive();
+        $isActive    = $this->isCascadeableFilterActive();
+        $isNonActive = $this->isNonCascadeableFilterActive();
 
         echo '<div class="alignleft actions">';
         echo '<label for="aorm-cascadeable-filter" class="screen-reader-text">' . esc_html__('Filter by cascadeable', 'wicket-aorm') . '</label>';
         echo '<select name="' . esc_attr(self::CASCADEABLE_FILTER_PARAM) . '" id="aorm-cascadeable-filter">';
         echo '<option value="">' . esc_html__('All Rosters', 'wicket-aorm') . '</option>';
         echo '<option value="' . esc_attr(self::CASCADEABLE_FILTER_VALUE) . '"' . ($isActive ? ' selected="selected"' : '') . '>' . esc_html__('Cascadeable Only', 'wicket-aorm') . '</option>';
+        echo '<option value="' . esc_attr(self::NON_CASCADEABLE_FILTER_VALUE) . '"' . ($isNonActive ? ' selected="selected"' : '') . '>' . esc_html__('Non-Cascadeable Only', 'wicket-aorm') . '</option>';
         echo '</select>';
 
         $this->renderSelectFilter(
@@ -613,6 +625,18 @@ class RosterListTable extends WP_List_Table
     {
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         return (string) ($_GET[self::CASCADEABLE_FILTER_PARAM] ?? '') === self::CASCADEABLE_FILTER_VALUE;
+    }
+
+    /**
+     * Whether the "Non-Cascadeable Only" filter is currently active, based on
+     * the CASCADEABLE_FILTER_PARAM GET query-arg.
+     *
+     * @see NON_CASCADEABLE_FILTER_VALUE
+     */
+    private function isNonCascadeableFilterActive(): bool
+    {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        return (string) ($_GET[self::CASCADEABLE_FILTER_PARAM] ?? '') === self::NON_CASCADEABLE_FILTER_VALUE;
     }
 
     /**
