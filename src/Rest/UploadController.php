@@ -8,6 +8,7 @@ use WicketAORM\Database\StagedRecordsTable;
 use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\FileParserService;
 use WicketAORM\Services\MatchingJobRunner;
+use WicketAORM\Services\RosterTouchpointService;
 use WicketAORM\Services\SchedulerService;
 use WicketAORM\Services\ValidationService;
 
@@ -28,6 +29,8 @@ use WicketAORM\Services\ValidationService;
  *   3. Parse CSV using fgetcsv, validate required column headers exist (AORM-6.10).
  *   4. Validate each row for missing required fields; insert staged records with
  *      validation_status and validation_message set accordingly (AORM-6.12–6.16).
+ *   5. Write the "Roster Upload Started" MDP touchpoint, plus "Roster in Progress"
+ *      when no matching job will run (see RosterTouchpointService).
  */
 class UploadController extends RestController
 {
@@ -50,6 +53,7 @@ class UploadController extends RestController
         private readonly ?ValidationService $validationService = null,
         private readonly ?ActivityLogger $activityLogger = null,
         private readonly ?SchedulerService $schedulerService = null,
+        private readonly ?RosterTouchpointService $rosterTouchpointService = null,
     ) {
     }
 
@@ -299,11 +303,40 @@ class UploadController extends RestController
         // Only dispatched when the entire file passes validation — a file with
         // any invalid/duplicate rows fails validation outright and must be
         // corrected and re-uploaded rather than partially matched.
-        if ($validCount > 0 && 0 === $invalidCount && 0 === $duplicateCount) {
+        $dispatchMatching = $validCount > 0 && 0 === $invalidCount && 0 === $duplicateCount;
+
+        // Roster activity touchpoints (written to the membership owner).
+        // "Roster Upload Started" is always written once the rows are staged.
+        // "Roster in Progress" is written here only when no matching job will
+        // run — staging is already complete. Otherwise MatchingJobRunner writes
+        // it when matching finishes. Never throws / never blocks the upload.
+        $touchpoints = $this->rosterTouchpointService ?? new RosterTouchpointService();
+        $touchpoints->logUploadStarted(
+            $sessionId,
+            $orgUuid,
+            $membershipUuid,
+            $uploadedBy,
+            count($rows),
+            $actionType,
+        );
+
+        if ($dispatchMatching) {
             $scheduler = $this->schedulerService ?? new SchedulerService();
             $scheduler->dispatch(
                 MatchingJobRunner::HOOK,
                 ['upload_session_id' => $sessionId],
+            );
+        } else {
+            // No matching will run, so no row can require match review.
+            $touchpoints->logProcessingReady(
+                $sessionId,
+                $orgUuid,
+                $membershipUuid,
+                $uploadedBy,
+                $validCount,
+                $validCount,
+                0,
+                $invalidCount + $duplicateCount,
             );
         }
 

@@ -417,6 +417,63 @@ class ActivityLogger
     }
 
     /**
+     * Log a skipped or failed MDP touchpoint write to wp_wicket_aorm_logs.
+     *
+     * Written by RosterTouchpointService when a roster-activity touchpoint
+     * could not be written (no membership owner, MDP rejected the write, …),
+     * so the gap is visible on the Global Logs page. Session-level entry
+     * (object_type = 'session'); no roster_meta update.
+     *
+     * @param string               $uploadSessionId Upload session UUID.
+     * @param string               $orgUuid         Organisation UUID.
+     * @param int                  $userId          WordPress user ID (0 = system).
+     * @param string               $action          Log action slug ('touchpoint_skipped' | 'touchpoint_failed').
+     * @param string               $level           Log level ENUM value ('warning' | 'error').
+     * @param string               $message         Human-readable summary.
+     * @param array<string, mixed> $context         JSON payload.
+     */
+    public function logTouchpointIssue(
+        string $uploadSessionId,
+        string $orgUuid,
+        int $userId,
+        string $action,
+        string $level,
+        string $message,
+        array $context = [],
+    ): void {
+        $db  = $this->wpdb ?? $GLOBALS['wpdb'];
+        $now = current_time('mysql', true);
+
+        $db->insert(
+            $db->prefix . 'wicket_aorm_logs',
+            [
+                'upload_session_id' => $uploadSessionId,
+                'org_uuid'          => $orgUuid,
+                'user_id'           => $userId,
+                'level'             => $level,
+                'action'            => $action,
+                'object_type'       => 'session',
+                'object_id'         => $uploadSessionId,
+                'message'           => $message,
+                'context'           => json_encode($context),
+                'created_at'        => $now,
+            ],
+            [
+                '%s', // upload_session_id
+                '%s', // org_uuid
+                '%d', // user_id
+                '%s', // level
+                '%s', // action
+                '%s', // object_type
+                '%s', // object_id
+                '%s', // message
+                '%s', // context
+                '%s', // created_at
+            ],
+        );
+    }
+
+    /**
      * Resolve a display name for the acting WordPress user.
      *
      * Preference order: user_email → "user:{id}" → "system" (unauthenticated).

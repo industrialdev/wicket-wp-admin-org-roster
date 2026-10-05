@@ -35,6 +35,8 @@ use WicketAORM\Database\StagedRecordsTable;
  *   AORM-7.8  — already-on-roster check (isPersonOnRoster → record_status=already_on_roster)
  *   AORM-7.9  — replace mode: inject remove_existing rows for absent roster members
  *   AORM-7.10 — process in configurable batch size (default 50), re-schedule for next batch
+ *   Touchpoints — on the final batch, write the "Roster in Progress" MDP
+ *                 touchpoint (RosterTouchpointService::logProcessingReady())
  */
 class MatchingJobRunner
 {
@@ -70,6 +72,7 @@ class MatchingJobRunner
         private readonly ?MdpClient $mdpClient = null,
         private readonly ?ScoringService $scoringService = null,
         private readonly ?ActivityLogger $activityLogger = null,
+        private readonly ?RosterTouchpointService $rosterTouchpointService = null,
     ) {
     }
 
@@ -267,6 +270,58 @@ class MatchingJobRunner
         $summary    = $table->getSummaryByCategory($uploadSessionId);
 
         $logger->logMatchingComplete($uploadSessionId, $orgUuid, $uploadedBy, $summary);
+
+        // Roster activity touchpoint: staging + matching complete, roster is
+        // ready for admin review. Never throws.
+        $this->writeProcessingReadyTouchpoint($uploadSessionId, $context, $summary, $client);
+    }
+
+    /**
+     * Write the "Roster in Progress" touchpoint from the matching summary.
+     *
+     * Counts (summary only covers validation_status='valid' rows):
+     *   - removal rows  = record_status 'remove_existing' (replace-mode synthetic rows,
+     *                     not part of the uploaded file)
+     *   - valid rows    = total − removal rows
+     *   - ready rows    = ready_to_sync − removal rows
+     *   - review rows   = possible_match + probable_match + manual_update
+     *   - rejected rows = 0 — matching only runs when the file had no
+     *                     invalid/duplicate rows (see UploadController)
+     *
+     * @param array<string, mixed>|null $context Session context.
+     * @param array<string, mixed>      $summary getSummaryByCategory() result.
+     */
+    private function writeProcessingReadyTouchpoint(
+        string $uploadSessionId,
+        ?array $context,
+        array $summary,
+        MdpClient $client,
+    ): void {
+        $membershipUuid = (string) ($context['membership_uuid'] ?? '');
+
+        if ($membershipUuid === '') {
+            return;
+        }
+
+        $byCategory = (array) ($summary['by_category'] ?? []);
+        $byStatus   = (array) ($summary['by_status'] ?? []);
+        $removal    = (int) ($byStatus['remove_existing'] ?? 0);
+        $review     = (int) ($byCategory['possible_match'] ?? 0)
+            + (int) ($byCategory['probable_match'] ?? 0)
+            + (int) ($byCategory['manual_update'] ?? 0);
+
+        $touchpoints = $this->rosterTouchpointService ?? new RosterTouchpointService($client);
+        $touchpoints->logProcessingReady(
+            $uploadSessionId,
+            (string) ($context['org_uuid'] ?? ''),
+            $membershipUuid,
+            (int) ($context['uploaded_by'] ?? 0),
+            max(0, (int) ($summary['total'] ?? 0) - $removal),
+            max(0, (int) ($byCategory['ready_to_sync'] ?? 0) - $removal),
+            $review,
+            0,
+            $removal,
+        );
     }
 
     // ── Private helpers ───────────────────────────────────────────────────

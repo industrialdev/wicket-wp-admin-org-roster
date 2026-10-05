@@ -306,6 +306,7 @@ class MdpClient
      *   membership_tier: string,
      *   membership_status: string,
      *   membership_owner: string,
+     *   membership_owner_uuid: string,
      *   assigned_count: int,
      *   max_assignments: int|null,
      *   unlimited_assignments: bool,
@@ -2695,6 +2696,7 @@ class MdpClient
      *   membership_tier: string,
      *   membership_status: string,
      *   membership_owner: string,
+     *   membership_owner_uuid: string,
      *   assigned_count: int,
      *   max_assignments: int|null,
      *   unlimited_assignments: bool,
@@ -2754,6 +2756,9 @@ class MdpClient
             'membership_tier'       => (string) ($membershipAttrs['name'] ?? ''),
             'membership_status'     => (string) ($attrs['status'] ?? ''),
             'membership_owner'      => $ownerName,
+            // Owner person UUID — the target person for roster activity
+            // touchpoints (RosterTouchpointService).
+            'membership_owner_uuid' => $ownerRelId,
             'assigned_count'        => (int) ($attrs['active_assignments_count'] ?? 0),
             'max_assignments'       => $maxAssignments,
             'unlimited_assignments' => $unlimitedAssignments,
