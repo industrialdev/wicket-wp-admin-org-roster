@@ -2497,6 +2497,53 @@ class MdpClient
     }
 
     /**
+     * Fetch available person-to-organization relationship types from the MDP.
+     *
+     * Uses wicket_get_resource_types('relationships-person-to-organization') — the
+     * same call the base plugin's own settings page uses for this list — and returns
+     * the list of relationship type slugs for the Relationship type <select> on the
+     * settings page. Slugs are shown as-is; no display labels are resolved.
+     *
+     * Falls back to the keys of wicket_get_person_org_relationship_types() (the base
+     * plugin's filterable, hardcoded list) when the MDP is unavailable or returns no
+     * data, and to an equivalent local slug list when that helper is not loaded.
+     *
+     * @return list<string> Relationship type slugs.
+     */
+    public function getRelationshipTypes(): array
+    {
+        $defaults = function_exists('wicket_get_person_org_relationship_types')
+            ? array_values(array_map('strval', array_keys((array) wicket_get_person_org_relationship_types())))
+            : ['employee_staff', 'manager', 'owner', 'member', 'contact', 'representative'];
+
+        if (! function_exists('wicket_get_resource_types')) {
+            return $defaults;
+        }
+
+        try {
+            $response = wicket_get_resource_types('relationships-person-to-organization');
+
+            if (! is_array($response) || empty($response['data'])) {
+                return $defaults;
+            }
+
+            $types = [];
+
+            foreach ($response['data'] as $item) {
+                $slug = (string) ($item['attributes']['slug'] ?? '');
+
+                if ($slug !== '' && ! in_array($slug, $types, true)) {
+                    $types[] = $slug;
+                }
+            }
+
+            return ! empty($types) ? $types : $defaults;
+        } catch (\Exception $e) {
+            return $defaults;
+        }
+    }
+
+    /**
      * Read the configured security role slugs from plugin settings.
      *
      * Admins configure these in the AORM Settings page under

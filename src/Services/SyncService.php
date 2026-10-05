@@ -112,6 +112,24 @@ class SyncService
     public const SETTINGS_KEY_PROTECTED_RELATIONSHIP_TYPES = 'protected_relationship_types';
 
     /**
+     * Settings key for the person-to-organization relationship type created by the
+     * Relationship sync path.
+     *
+     * Stored under wicket_aorm_settings[relationship_type] as a single MDP relationship
+     * type slug (e.g. 'employee_staff'). When non-empty it is passed as the 'type'
+     * override to ConnectionService::ensurePersonConnection(); when empty (the default,
+     * the "Default" option) no override is passed and ConnectionService falls
+     * back to RelationshipHelper::get_default_relationship_type()
+     * (OrgManConfig relationships.defaults.type).
+     *
+     * Not used by the Direct Assignment path, which never creates relationships.
+     */
+    public const SETTINGS_KEY_RELATIONSHIP_TYPE = 'relationship_type';
+
+    /** Default relationship_type value — '' means "defer to Account Centre config". */
+    public const DEFAULT_RELATIONSHIP_TYPE = '';
+
+    /**
      * @param \WicketORM\Services\PersonService|null    $personService
      *   Optional PersonService instance for DI / testing. When null, a fresh
      *   instance is created on first use.
@@ -252,10 +270,11 @@ class SyncService
      *
      * 1. Finds or creates the person in MDP via PersonService::createOrGetPerson(),
      *    using the email and phone types configured in wicket_aorm_settings (AORM-9.5).
-     * 2. Creates (or confirms existence of) a default-type person-to-org relationship
-     *    via ConnectionService::ensurePersonConnection() (AORM-9.6). The relationship
-     *    type defaults are resolved internally by ConnectionService via
-     *    RelationshipHelper::get_default_relationship_type(); start date and
+     * 2. Creates (or confirms existence of) a person-to-org relationship via
+     *    ConnectionService::ensurePersonConnection() (AORM-9.6). The relationship
+     *    type is wicket_aorm_settings[relationship_type] when configured; otherwise
+     *    it is resolved internally by ConnectionService via
+     *    RelationshipHelper::get_default_relationship_type(). Start date and
      *    idempotency are handled by the service — do not reimplement.
      * 3. Applies the base member role (from wicket_aorm_settings[base_member_role])
      *    and any configured security roles (from wicket_aorm_settings[security_roles])
@@ -307,7 +326,7 @@ class SyncService
         $orgUuid           = (string) ($record['org_uuid'] ?? '');
 
         $connectionService = $this->connectionService ?? new \WicketORM\Services\ConnectionService();
-        $connectionService->ensurePersonConnection($personUuid, $orgUuid);
+        $connectionService->ensurePersonConnection($personUuid, $orgUuid, $this->buildRelationshipConnectionOverrides());
 
         // ── AORM-9.7: apply user role + config security roles ─────────────
 
@@ -1168,7 +1187,24 @@ class SyncService
             $connectionService->endActivePersonOrganizationConnections($personUuid, $otherOrgUuid, $skipTypes);
         }
 
-        $connectionService->ensurePersonConnection($personUuid, $rosterOrgUuid);
+        $connectionService->ensurePersonConnection($personUuid, $rosterOrgUuid, $this->buildRelationshipConnectionOverrides());
+    }
+
+    /**
+     * Build the $overrides argument for ConnectionService::ensurePersonConnection().
+     *
+     * Returns ['type' => $slug] when wicket_aorm_settings[relationship_type] is set,
+     * or [] when it is empty (the "Default" option) so ConnectionService
+     * resolves the type itself via RelationshipHelper::get_default_relationship_type().
+     *
+     * @return array<string, string>
+     */
+    private function buildRelationshipConnectionOverrides(): array
+    {
+        $settings = (array) get_option(self::SETTINGS_OPTION, []);
+        $type     = trim((string) ($settings[self::SETTINGS_KEY_RELATIONSHIP_TYPE] ?? self::DEFAULT_RELATIONSHIP_TYPE));
+
+        return $type !== '' ? ['type' => $type] : [];
     }
 
     /**

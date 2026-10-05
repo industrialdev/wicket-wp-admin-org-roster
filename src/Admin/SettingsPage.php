@@ -18,6 +18,7 @@ use WicketAORM\Services\SyncJobRunner;
  * Keys registered here:
  *   - roster_type                   (string) 'relationship' | 'direct_assignment'
  *   - base_member_role              (string) MDP role slug, e.g. 'member'
+ *   - relationship_type             (string) MDP person-to-org relationship type slug ('' = Account Centre default)
  *   - protected_relationship_types  (string[]) relationship type slugs never end-dated
  *   - email_address_type            (string) e.g. 'work', 'home', 'personal'
  *   - phone_number_type             (string) e.g. 'work', 'home', 'mobile'
@@ -82,6 +83,9 @@ class SettingsPage
 
     /** Field ID for the base_member_role text input. */
     public const FIELD_BASE_MEMBER_ROLE = 'aorm_field_base_member_role';
+
+    /** Field ID for the relationship_type select. */
+    public const FIELD_RELATIONSHIP_TYPE = 'aorm_field_relationship_type';
 
     /** Field ID for the protected_relationship_types text input. */
     public const FIELD_PROTECTED_RELATIONSHIP_TYPES = 'aorm_field_protected_relationship_types';
@@ -239,6 +243,15 @@ class SettingsPage
             self::PAGE_SLUG,
             self::SECTION_RELATIONSHIP_CONFIG,
             ['label_for' => self::FIELD_BASE_MEMBER_ROLE],
+        );
+
+        add_settings_field(
+            self::FIELD_RELATIONSHIP_TYPE,
+            __('Relationship type', 'wicket-aorm'),
+            [$this, 'renderRelationshipTypeField'],
+            self::PAGE_SLUG,
+            self::SECTION_RELATIONSHIP_CONFIG,
+            ['label_for' => self::FIELD_RELATIONSHIP_TYPE],
         );
 
         add_settings_field(
@@ -464,6 +477,98 @@ class SettingsPage
             'wicket-aorm',
         );
         echo '</p>';
+    }
+
+    /**
+     * Render the relationship_type <select> field.
+     *
+     * Options are the slugs from MdpClient::getRelationshipTypes() (MDP person-to-org
+     * relationship resource types, with a fallback list), shown as-is, preceded by
+     * a leading "Default (<slug>)" option (empty string) naming the Account Centre
+     * default type — see buildDefaultRelationshipTypeLabel(). Empty means no type
+     * override is passed to ConnectionService::ensurePersonConnection(), which
+     * then resolves OrgManConfig relationships.defaults.type itself — the
+     * pre-existing behavior. Only used by the Relationship roster type.
+     *
+     * A saved slug that is no longer returned by the MDP is still rendered as
+     * a selected option so saving the page doesn't silently reset it.
+     */
+    public function renderRelationshipTypeField(): void
+    {
+        $options = (array) get_option(self::OPTION_NAME, []);
+        $current = (string) (
+            $options[SyncService::SETTINGS_KEY_RELATIONSHIP_TYPE] ?? SyncService::DEFAULT_RELATIONSHIP_TYPE
+        );
+        $types = (new MdpClient())->getRelationshipTypes();
+
+        if ($current !== '' && ! in_array($current, $types, true)) {
+            $types[] = $current;
+        }
+
+        echo '<select id="' . esc_attr(self::FIELD_RELATIONSHIP_TYPE) . '" '
+            . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(SyncService::SETTINGS_KEY_RELATIONSHIP_TYPE) . ']">';
+
+        echo '<option value=""' . selected($current, '', false) . '>'
+            . esc_html($this->buildDefaultRelationshipTypeLabel())
+            . '</option>';
+
+        foreach ($types as $slug) {
+            echo '<option value="' . esc_attr((string) $slug) . '"'
+                . selected($current, (string) $slug, false) . '>'
+                . esc_html((string) $slug)
+                . '</option>';
+        }
+
+        echo '</select>';
+        echo '<p class="description">';
+        echo esc_html__(
+            'Person-to-organization relationship type created for synced members when the roster type is Relationship. "Default" uses the type configured in the Account Centre org management config. Not used by Direct Assignment.',
+            'wicket-aorm',
+        );
+        echo '</p>';
+    }
+
+    /**
+     * Build the label for the relationship_type dropdown's empty ("Default") option.
+     *
+     * Returns "Default (<slug>)", where <slug> is the Account Centre default
+     * relationship type resolved via resolveDefaultRelationshipTypeSlug(), or
+     * plain "Default" when no default can be resolved.
+     */
+    private function buildDefaultRelationshipTypeLabel(): string
+    {
+        $slug = $this->resolveDefaultRelationshipTypeSlug();
+
+        if ($slug === '') {
+            return __('Default', 'wicket-aorm');
+        }
+
+        return sprintf(
+            /* translators: %s: default relationship type slug */
+            __('Default (%s)', 'wicket-aorm'),
+            $slug,
+        );
+    }
+
+    /**
+     * Resolve the Account Centre default relationship type slug — the same value
+     * ConnectionService::ensurePersonConnection() falls back to when AORM passes
+     * no type override (OrgManConfig relationships.defaults.type).
+     *
+     * Returns '' when the wicket-wp-account-centre helper is unavailable or throws.
+     * Protected so tests can override it without stubbing WicketORM classes.
+     */
+    protected function resolveDefaultRelationshipTypeSlug(): string
+    {
+        if (! class_exists(\WicketORM\Helpers\RelationshipHelper::class)) {
+            return '';
+        }
+
+        try {
+            return trim((string) \WicketORM\Helpers\RelationshipHelper::get_default_relationship_type());
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /**
@@ -828,6 +933,18 @@ class SettingsPage
         // ── base_member_role ──────────────────────────────────────────────
         $out[SyncService::SETTINGS_KEY_BASE_MEMBER_ROLE] = sanitize_text_field(
             (string) ($raw[SyncService::SETTINGS_KEY_BASE_MEMBER_ROLE] ?? $prev[SyncService::SETTINGS_KEY_BASE_MEMBER_ROLE] ?? ''),
+        );
+
+        // ── relationship_type ─────────────────────────────────────────────
+        // Empty string is meaningful (the "Default" option), same as
+        // phone_match_type. sanitize_key() matches how ACC normalizes
+        // relationship slugs (CascadeStrategy::resolveRelationshipInputs()).
+        $out[SyncService::SETTINGS_KEY_RELATIONSHIP_TYPE] = sanitize_key(
+            (string) (
+                $raw[SyncService::SETTINGS_KEY_RELATIONSHIP_TYPE]
+                    ?? $prev[SyncService::SETTINGS_KEY_RELATIONSHIP_TYPE]
+                    ?? SyncService::DEFAULT_RELATIONSHIP_TYPE
+            ),
         );
 
         // ── protected_relationship_types ──────────────────────────────────
