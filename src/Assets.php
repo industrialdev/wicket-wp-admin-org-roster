@@ -23,6 +23,12 @@ class Assets
     /** Script/style handle prefix. */
     private const HANDLE = 'wicket-aorm';
 
+    /** Post type the Wicket Memberships plugin uses for local membership records. */
+    public const LOCAL_MEMBERSHIP_POST_TYPE = 'wicket_membership';
+
+    /** Post meta key on a `wicket_membership` post holding the MDP org membership UUID. */
+    public const LOCAL_MEMBERSHIP_UUID_META_KEY = 'membership_wicket_uuid';
+
     /**
      * Page slugs that receive the React bundle.
      *
@@ -111,6 +117,10 @@ class Assets
      * both '' for "Any type") — used by MemberTable.js and MatchesTable.js to
      * label and populate the "Phone" column consistently with MdpClient.
      *
+     * Also includes hasLocalMembership — true when the Wicket Memberships
+     * plugin holds a local `wicket_membership` post for this membership;
+     * MemberTable.js shows the owner's "Change Owner" button only when true.
+     *
      * @param string $hookSuffix
      * @return array<string, mixed>
      */
@@ -161,9 +171,55 @@ class Assets
             $data['phoneMatchTypeLabel'] = $phoneMatchType !== ''
                 ? ((new MdpClient())->getPhoneTypes()[$phoneMatchType] ?? ucfirst($phoneMatchType))
                 : '';
+
+            // Whether the Wicket Memberships plugin holds a local record for
+            // this membership — MemberTable.js only shows the owner's
+            // "Change Owner" button (which links to that plugin's org member
+            // edit page) when true. Memberships created directly in the MDP
+            // portal have no local record.
+            $data['hasLocalMembership'] = $this->hasLocalMembershipRecord($membershipUuid);
         }
 
         return $data;
+    }
+
+    /**
+     * Whether the Wicket Memberships plugin holds a local record for an MDP
+     * organization membership.
+     *
+     * True only when the plugin is active (its `wicket_membership` post type
+     * is registered) AND a non-trashed `wicket_membership` post exists whose
+     * `membership_wicket_uuid` meta equals $membershipUuid.
+     *
+     * @param string $membershipUuid MDP organization_membership UUID.
+     */
+    private function hasLocalMembershipRecord(string $membershipUuid): bool
+    {
+        if ($membershipUuid === '' || ! function_exists('post_type_exists') || ! function_exists('get_posts')) {
+            return false;
+        }
+
+        if (! post_type_exists(self::LOCAL_MEMBERSHIP_POST_TYPE)) {
+            return false;
+        }
+
+        $postIds = get_posts([
+            'post_type'        => self::LOCAL_MEMBERSHIP_POST_TYPE,
+            'post_status'      => 'any',
+            'posts_per_page'   => 1,
+            'fields'           => 'ids',
+            'no_found_rows'    => true,
+            'suppress_filters' => true,
+            'meta_query'       => [
+                [
+                    'key'     => self::LOCAL_MEMBERSHIP_UUID_META_KEY,
+                    'value'   => $membershipUuid,
+                    'compare' => '=',
+                ],
+            ],
+        ]);
+
+        return ! empty($postIds);
     }
 
     /**

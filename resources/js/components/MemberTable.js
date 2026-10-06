@@ -34,6 +34,7 @@
  *     phone: string,
  *     roles: string[],
  *     is_owner?: boolean,
+ *     membership_details_page_url?: string,
  *   }>,
  *   selectedIds: Set<string>,
  *   onSelectionChange: function(Set<string>): void,
@@ -178,6 +179,12 @@ export default function MemberTable( {
 
 	const phoneMatchTypeLabel = ( window.aormContext ?? {} ).phoneMatchTypeLabel ?? '';
 	const phoneColumnLabel = buildPhoneColumnLabel( phoneMatchTypeLabel );
+
+	// "Change Owner" links to the Wicket Memberships plugin's org member edit
+	// page, which only works when that plugin holds a local record for this
+	// membership (Assets.php sets this flag). Memberships created directly in
+	// the MDP portal have no local record, so the button is hidden.
+	const hasLocalMembership = !! ( window.aormContext ?? {} ).hasLocalMembership;
 
 	const sorted = sortedMembers( members, sortField, sortDir );
 
@@ -360,7 +367,7 @@ export default function MemberTable( {
 								>
 									{ __( 'Edit Permissions', 'wicket-aorm' ) }
 								</Button> */}
-								{ isOwner &&
+								{ isOwner && hasLocalMembership && member.membership_details_page_url &&
 									<>
 										&nbsp;
 										<Button
