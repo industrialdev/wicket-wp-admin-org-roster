@@ -6,7 +6,11 @@
  *   - Per-row checkboxes for bulk-action selection
  *   - Columns: First Name, Last Name, Email Address, Title, Phone, Roles
  *   - Two action columns: Edit Permissions (AORM-4.11), Remove (AORM-4.9)
- *   - Membership owner pinned first with an "Owner" badge in the Last Name cell
+ *   - Membership owner pinned first with an "Owner" badge in the Last Name cell.
+ *     The owner is passed separately via the `owner` prop (the members
+ *     endpoint's `owner` key, resolved server-side independently of
+ *     pagination/search), so the row is sticky on every page and shown even
+ *     when the owner isn't an active member of the roster.
  *   - Client-side sortable First Name / Last Name / Email Address columns
  *     (AORM-4.16). Sorting is scoped to the members already loaded for the
  *     current page (data is paginated server-side by RosterAssignment.js);
@@ -36,6 +40,7 @@
  *     is_owner?: boolean,
  *     membership_details_page_url?: string,
  *   }>,
+ *   owner?: object|null,
  *   selectedIds: Set<string>,
  *   onSelectionChange: function(Set<string>): void,
  *   onEditPermissions?: function(member: object): void,
@@ -143,6 +148,34 @@ function compareMembers( a, b, field, direction ) {
 }
 
 /**
+ * Builds the row list with the pinned owner (when provided) always first.
+ *
+ * The owner comes from the members endpoint's separate `owner` key, resolved
+ * server-side independently of pagination/search, so it is shown on every
+ * page whether or not the owner is an active member. Any row in `members`
+ * for the same person (or flagged is_owner) is dropped to avoid a duplicate.
+ * Without an `owner` prop, falls back to pinning any is_owner row in
+ * `members` (legacy behaviour).
+ *
+ * @param {Array}        members
+ * @param {Object|null}  owner
+ * @param {string|null}  sortField
+ * @param {'asc'|'desc'} sortDir
+ * @return {Array}
+ */
+export function buildRows( members, owner, sortField, sortDir ) {
+	if ( ! owner ) {
+		return sortedMembers( members, sortField, sortDir );
+	}
+
+	const rest = members.filter(
+		( m ) => ! m.is_owner && m.person_uuid !== owner.person_uuid
+	);
+
+	return [ { ...owner, is_owner: true }, ...sortedMembers( rest, sortField, sortDir ) ];
+}
+
+/**
  * Sorts members so the roster owner (is_owner: true) always appears first,
  * then applies the active column sort (if any) to the remaining members.
  *
@@ -169,6 +202,7 @@ function sortedMembers( members, sortField, sortDir ) {
 
 export default function MemberTable( {
 	members = [],
+	owner = null,
 	selectedIds = new Set(),
 	onSelectionChange,
 	onEditPermissions,
@@ -186,7 +220,7 @@ export default function MemberTable( {
 	// the MDP portal have no local record, so the button is hidden.
 	const hasLocalMembership = !! ( window.aormContext ?? {} ).hasLocalMembership;
 
-	const sorted = sortedMembers( members, sortField, sortDir );
+	const sorted = buildRows( members, owner, sortField, sortDir );
 
 	// The membership owner can never be removed from their own roster, so
 	// they're excluded from "select all" and from bulk-selectable rows —
@@ -342,7 +376,17 @@ export default function MemberTable( {
 									{ member.family_name || '—' }
 								</span>
 								{ isOwner && (
-									<span className="aorm-member-table__owner-badge">
+									<span
+										className="aorm-member-table__owner-badge"
+										title={ __(
+											'Pinned: the membership owner is always shown first on every page.',
+											'wicket-aorm'
+										) }
+									>
+										<span
+											className="dashicons dashicons-sticky aorm-member-table__owner-pin"
+											aria-hidden="true"
+										/>
 										{ __( 'Owner', 'wicket-aorm' ) }
 									</span>
 								) }
@@ -398,7 +442,10 @@ export default function MemberTable( {
 						</tr>
 					);
 				} ) }
-				{ sorted.length === 0 && (
+				{ /* The pinned owner row doesn't count — show the empty
+				     message whenever no other members are listed (e.g. a
+				     search that matched nobody but the owner is still pinned). */ }
+				{ selectableMembers.length === 0 && (
 					<tr>
 						<td
 							colSpan={ TOTAL_COLS }

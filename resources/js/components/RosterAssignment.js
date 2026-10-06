@@ -11,7 +11,14 @@
  * and modal flows are wired in later tickets (AORM-4.9, 4.10, 4.13).
  *
  * When the roster has no members (total === 0) an empty state is shown
- * with a CTA directing the admin to the Roster Upload tab (AORM-4.7).
+ * with a CTA directing the admin to the Roster Upload tab (AORM-4.7) —
+ * unless the membership has an owner, in which case the table is shown
+ * with just the pinned owner row instead.
+ *
+ * Pinned owner: the members endpoint returns the membership owner under a
+ * separate `owner` key (excluded from `members`/`total`), passed to
+ * MemberTable as `owner` so it renders as a sticky first row on every page
+ * and every search, whether or not the owner is an active member.
  *
  * Pagination is handled client-side via page state; each page change
  * triggers a new REST request and clears the current selection.
@@ -330,6 +337,13 @@ export default function RosterAssignment( {
 	const total      = data?.total      ?? 0;
 	const totalPages = data?.total_pages ?? 1;
 
+	// Membership owner, resolved server-side independently of pagination and
+	// search (MdpClient::getRosterMembers() `pin_owner`) and excluded from
+	// `members`/`total`. Always rendered as a sticky first row, and on its
+	// own when the roster has no other members.
+	const owner    = data?.owner ?? null;
+	const hasOwner = !! owner;
+
 	// A committed search term is active (AORM-4.21). Used to distinguish
 	// "search matched nothing" from a genuinely empty roster, since `total`
 	// above is always scoped to the current search.
@@ -375,7 +389,7 @@ export default function RosterAssignment( {
 				</Notice>
 			) }
 
-			{ ! isLoading && ! error && total === 0 && ! hasActiveSearch && (
+			{ ! isLoading && ! error && total === 0 && ! hasActiveSearch && ! hasOwner && (
 				<div className="aorm-assignment__empty-state">
 					<span
 						className="dashicons dashicons-upload aorm-assignment__empty-state-icon"
@@ -399,7 +413,7 @@ export default function RosterAssignment( {
 				</div>
 			) }
 
-		{ ! isLoading && ! error && ( total > 0 || hasActiveSearch ) && (
+		{ ! isLoading && ! error && ( total > 0 || hasActiveSearch || hasOwner ) && (
 				<>
 					<BulkActionToolbar
 						selectedCount={ selectedIds.size }
@@ -410,6 +424,7 @@ export default function RosterAssignment( {
 
 					<MemberTable
 						members={ members }
+						owner={ owner }
 						selectedIds={ selectedIds }
 						onSelectionChange={ setSelectedIds }
 					/>

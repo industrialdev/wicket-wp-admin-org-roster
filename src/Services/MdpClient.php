@@ -372,7 +372,16 @@ class MdpClient
      *   page?: int,
      *   per_page?: int,
      *   search?: string,
-     * } $args Search term (when present) matches the member's full name or
+     *   pin_owner?: bool,
+     * } $args `pin_owner` (Roster Assignment tab only): resolve the membership
+     *         owner separately via fetchRosterOwner(), exclude them from the
+     *         paginated listing with `filter[person_uuid_not_eq]` (plus a
+     *         defensive local filter), and return them under an `owner` key
+     *         (null when the membership has no owner) — so the UI can pin
+     *         them on every page/search whether or not they're an active
+     *         member. `total`/`total_pages` then exclude the owner. Off by
+     *         default so getAllRosterMembers()'s replace-mode diff is unchanged.
+     *         Search term (when present) matches the member's full name or
      *         any of their email addresses — applied via the same
      *         `person_full_name_or_person_emails_address_cont` Ransack
      *         predicate used for this same purpose elsewhere in the Wicket
@@ -396,6 +405,7 @@ class MdpClient
      *   }>,
      *   total: int,
      *   total_pages: int,
+     *   owner?: array<string, mixed>|null,
      * }
      */
     public function getRosterMembers(
@@ -428,6 +438,24 @@ class MdpClient
             $queryParams['filter']['person_full_name_or_person_emails_address_cont'] = (string) $args['search'];
         }
 
+        // Pinned owner (Roster Assignment tab): resolve the membership owner
+        // independently of the paginated person_memberships listing so the
+        // UI can render them as a sticky first row on every page / search,
+        // whether or not they're an active member. The owner is then
+        // excluded from the paginated listing server-side so they never
+        // appear twice and pagination totals don't count them.
+        $pinOwner = ! empty($args['pin_owner']);
+        $owner    = $pinOwner ? $this->fetchRosterOwner($client, $org_uuid, $membership_uuid) : null;
+        $ownerId  = $owner['person_uuid'] ?? '';
+
+        if ($ownerId !== '') {
+            $queryParams['filter']['person_uuid_not_eq'] = $ownerId;
+        }
+
+        if ($pinOwner) {
+            $empty['owner'] = $owner;
+        }
+
         $query = (string) preg_replace(
             '/\%5B\d+\%5D/',
             '%5B%5D',
@@ -448,11 +476,26 @@ class MdpClient
             return $empty;
         }
 
-        if ($includeRoles && ! empty($result['members'])) {
-            $personUuids = array_values(array_unique(array_map(
+        if ($ownerId !== '') {
+            // Defensive: drop the owner from the page even if the MDP ignored
+            // the person_uuid_not_eq predicate, so the row is never duplicated.
+            $result['members'] = array_values(array_filter(
+                $result['members'],
+                static fn (array $member): bool => $member['person_uuid'] !== $ownerId,
+            ));
+        }
+
+        if ($includeRoles && (! empty($result['members']) || $ownerId !== '')) {
+            $personUuids = array_map(
                 static fn (array $member): string => (string) $member['person_uuid'],
                 $result['members'],
-            )));
+            );
+
+            if ($ownerId !== '') {
+                $personUuids[] = $ownerId;
+            }
+
+            $personUuids = array_values(array_unique($personUuids));
 
             $extraByPerson = $this->fetchOrgScopedRolesAndPhones($client, $org_uuid, $personUuids);
 
@@ -463,9 +506,134 @@ class MdpClient
             }
 
             unset($member);
+
+            if ($owner !== null) {
+                $extra          = $extraByPerson[$ownerId] ?? ['roles' => [], 'phone' => ''];
+                $owner['roles'] = $extra['roles'];
+                $owner['phone'] = $extra['phone'];
+            }
+        }
+
+        if ($pinOwner) {
+            $result['owner'] = $owner;
         }
 
         return $result;
+    }
+
+    /**
+     * Resolve the roster's membership owner as a member-shaped row.
+     *
+     * Reads the `owner` relationship of the organization_membership (same
+     * source as getOrgMembershipDetail() / normalizeRosterMembers()) via
+     * `organization_memberships/{uuid}?include=owner`, so the owner can be
+     * returned regardless of whether they hold an active person_membership
+     * on the roster. Roles and phone are left empty here — getRosterMembers()
+     * fills them via the same batched fetchOrgScopedRolesAndPhones() call it
+     * uses for the page's members.
+     *
+     * Never throws — returns null when there's no owner, the response is
+     * malformed, or the request fails.
+     *
+     * @param object $client          MDP API client (must be non-null).
+     * @param string $orgUuid         Organization UUID.
+     * @param string $membershipUuid  Organization membership UUID.
+     *
+     * @return array{
+     *   person_uuid: string,
+     *   name: string,
+     *   given_name: string,
+     *   family_name: string,
+     *   email: string,
+     *   title: string,
+     *   phone: string,
+     *   roles: list<string>,
+     *   is_owner: bool,
+     *   membership_details_page_url: string,
+     * }|null
+     */
+    private function fetchRosterOwner(object $client, string $orgUuid, string $membershipUuid): ?array
+    {
+        if ($membershipUuid === '') {
+            return null;
+        }
+
+        try {
+            $response = $client->get(
+                'organization_memberships/' . $membershipUuid . '?' . http_build_query(['include' => 'owner'])
+            );
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        if (! is_array($response)) {
+            return null;
+        }
+
+        $ownerUuid = (string) ($response['data']['relationships']['owner']['data']['id'] ?? '');
+
+        if ($ownerUuid === '') {
+            return null;
+        }
+
+        $ownerAttrs = [];
+
+        foreach ($response['included'] ?? [] as $item) {
+            if (($item['type'] ?? '') === 'people' && (string) ($item['id'] ?? '') === $ownerUuid) {
+                $ownerAttrs = (array) ($item['attributes'] ?? []);
+                break;
+            }
+        }
+
+        return $this->buildRosterMemberRow($ownerUuid, $ownerAttrs, true, $orgUuid, $membershipUuid);
+    }
+
+    /**
+     * Build a single normalized roster member row from a `people` resource's
+     * attributes. Shared by normalizeRosterMembers() and fetchRosterOwner()
+     * so the pinned owner row has exactly the same shape as listed members.
+     *
+     * @param array<string, mixed> $personAttrs
+     *
+     * @return array{
+     *   person_uuid: string,
+     *   name: string,
+     *   given_name: string,
+     *   family_name: string,
+     *   email: string,
+     *   title: string,
+     *   phone: string,
+     *   roles: list<string>,
+     *   is_owner: bool,
+     *   membership_details_page_url: string,
+     * }
+     */
+    private function buildRosterMemberRow(
+        string $personUuid,
+        array $personAttrs,
+        bool $isOwner,
+        string $orgUuid,
+        string $membershipUuid,
+    ): array {
+        return [
+            'person_uuid'                => $personUuid,
+            'name'                       => (string) ($personAttrs['full_name'] ?? ''),
+            'given_name'                 => (string) ($personAttrs['given_name'] ?? ''),
+            'family_name'                => (string) ($personAttrs['family_name'] ?? ''),
+            'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
+            'title'                      => (string) ($personAttrs['job_title'] ?? ''),
+            // Populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
+            // the `person`/`owner` includes carry no phone attribute.
+            'phone'                      => '',
+            // Also populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
+            // not read from person.attributes.role_names, which is global (not
+            // scoped to the org) and was misleading for a per-org roster.
+            'roles'                      => [],
+            'is_owner'                   => $isOwner,
+            'membership_details_page_url' => admin_url(
+                'admin.php?page=wicket_org_member_edit&id=' . $orgUuid . '&membership_uuid=' . $membershipUuid
+            ),
+        ];
     }
 
     /**
@@ -2643,25 +2811,13 @@ class MdpClient
             $personItem  = $included['people:' . $personRelId] ?? [];
             $personAttrs = $personItem['attributes'] ?? [];
 
-            $members[] = [
-                'person_uuid'                => $personRelId,
-                'name'                       => (string) ($personAttrs['full_name'] ?? ''),
-                'given_name'                 => (string) ($personAttrs['given_name'] ?? ''),
-                'family_name'                => (string) ($personAttrs['family_name'] ?? ''),
-                'email'                      => (string) ($personAttrs['primary_email_address'] ?? ''),
-                'title'                      => (string) ($personAttrs['job_title'] ?? ''),
-                // Populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
-                // this endpoint's `person` include has no phone attribute.
-                'phone'                      => '',
-                // Also populated by getRosterMembers() via fetchOrgScopedRolesAndPhones() —
-                // not read from person.attributes.role_names, which is global (not
-                // scoped to $org_uuid) and was misleading for a per-org roster.
-                'roles'                      => [],
-                'is_owner'                   => $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
-                'membership_details_page_url' => admin_url(
-                    'admin.php?page=wicket_org_member_edit&id=' . $org_uuid . '&membership_uuid=' . $membership_uuid
-                ),
-            ];
+            $members[] = $this->buildRosterMemberRow(
+                $personRelId,
+                (array) $personAttrs,
+                $ownerPersonUuid !== '' && $personRelId === $ownerPersonUuid,
+                $org_uuid,
+                $membership_uuid,
+            );
         }
 
         // Pagination: meta.page.total_items / meta.page.total_pages

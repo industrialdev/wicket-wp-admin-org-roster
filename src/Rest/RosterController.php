@@ -300,10 +300,14 @@ class RosterController extends RestController
         $search         = (string) ($request->get_param('search') ?? '');
 
         $client = $this->mdpClient ?? new MdpClient();
+        // pin_owner: the membership owner is returned separately under
+        // `owner` (and excluded from `members`) so the UI can show them as a
+        // sticky first row on every page/search, member or not.
         $result = $client->getRosterMembers($orgUuid, $membershipUuid, [
-            'page'     => $page,
-            'per_page' => $perPage,
-            'search'   => $search,
+            'page'      => $page,
+            'per_page'  => $perPage,
+            'search'    => $search,
+            'pin_owner' => true,
         ]);
 
         return new \WP_REST_Response($result, 200);
