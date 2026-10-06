@@ -312,6 +312,7 @@ class SyncService
                 'phone'      => (string) ($rawData['phone'] ?? ''),
                 'email_type' => $emailType,
                 'phone_type' => $phoneType,
+                'job_title'  => (string) ($rawData['title'] ?? ''),
             ]
         );
 
@@ -602,6 +603,7 @@ class SyncService
                 'phone'      => (string) ($rawData['phone'] ?? ''),
                 'email_type' => $emailType,
                 'phone_type' => $phoneType,
+                'job_title'  => (string) ($rawData['title'] ?? ''),
             ]
         );
 
