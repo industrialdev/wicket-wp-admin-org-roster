@@ -54,6 +54,15 @@
  * AORM-8B.20: Cancel button and the modal's built-in close (×) button both
  * call onClose without making any state changes.
  *
+ * Bugfix (email-matched "Create as New Record"): when the imported email
+ * belongs to any match candidate (primary or secondary address —
+ * findEmailMatchedCandidate()), "Create as New Record" is hidden, an info
+ * Notice explains why, the action switches to Merge to Existing and the
+ * email-matched person is pre-selected as merge target. The MDP doesn't
+ * allow two people to share an email, so sync would have silently reused
+ * that person while the row was labelled "New Record". Frontend-only: the
+ * candidates MatchesTable already loaded are enough to detect the match.
+ *
  * @param {{
  *   record:      Object|null,  — the staged record being reviewed; null = modal closed
  *   onClose:     () => void,   — callback to dismiss the modal without saving
@@ -61,12 +70,12 @@
  * }} props
  */
 
-import { useState } from '@wordpress/element';
+import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import apiFetch from '@wordpress/api-fetch';
 import { Button, Modal, Notice, RadioControl } from '@wordpress/components';
 import ImportedRecordSummary from './ImportedRecordSummary';
-import MatchesTable from './MatchesTable';
+import MatchesTable, { buildEmailEntries } from './MatchesTable';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -184,7 +193,54 @@ export const MERGE_PREVIEW_HEADING = __( 'Merge Preview', 'wicket-aorm' );
  */
 export const MERGE_PREVIEW_MERGED_CLASS = 'aorm-review-match-modal__merge-preview-field--merged';
 
+// ── Email-match guard constants ───────────────────────────────────────────────
+
+/**
+ * CSS class on the info Notice shown when "Create as New Record" is hidden
+ * because the imported email already belongs to a match candidate.
+ *
+ * @type {string}
+ */
+export const EMAIL_MATCH_NOTICE_CLASS = 'aorm-review-match-modal__email-match-notice';
+
+/**
+ * Text of the email-match Notice.
+ *
+ * @type {string}
+ */
+export const EMAIL_MATCH_NOTICE_TEXT = __(
+	'This email address already belongs to a person in the MDP, so a new record cannot be created. Merge to Existing, Manual Updates, or Discard instead.',
+	'wicket-aorm'
+);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Find the match candidate whose known email addresses (primary or not)
+ * include the imported record's email. Comparison is case-insensitive and
+ * whitespace-trimmed. The MDP does not allow two people to share an email,
+ * so when this returns a candidate, "Create as New Record" is impossible —
+ * sync would reuse that person.
+ *
+ * @param {Object}   rawData Imported record's raw_data.
+ * @param {Object[]} matches Match candidates from MatchesTable.
+ * @return {Object|null} The email-matched candidate, or null.
+ */
+export function findEmailMatchedCandidate( rawData, matches ) {
+	const importedEmail = String( rawData?.email ?? '' ).trim().toLowerCase();
+
+	if ( importedEmail === '' || ! Array.isArray( matches ) ) {
+		return null;
+	}
+
+	return (
+		matches.find( ( match ) =>
+			buildEmailEntries( match ).some(
+				( entry ) => String( entry.address ?? '' ).trim().toLowerCase() === importedEmail
+			)
+		) ?? null
+	);
+}
 
 /**
  * Derive the initial RadioControl selection from a record's record_status.
@@ -333,11 +389,45 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 	/** Error message from the save request, or null (AORM-8B.19). */
 	const [ saveError, setSaveError ] = useState( null );
 
+	const rawData = record?.raw_data ?? {};
+
+	/**
+	 * Candidate that already owns the imported email, or null. When set,
+	 * "Create as New Record" is hidden — the MDP won't allow a second person
+	 * with that email, and sync would reuse this person instead.
+	 */
+	const emailMatchedCandidate = findEmailMatchedCandidate( rawData, loadedMatches );
+	const emailMatchedUuid      = emailMatchedCandidate?.uuid ?? null;
+
+	/**
+	 * Once matches load and the email belongs to a candidate: switch away from
+	 * the now-hidden Create action to Merge, and pre-select the email-matched
+	 * person as the merge target (unless the admin already picked one).
+	 */
+	useEffect( () => {
+		if ( ! emailMatchedUuid ) {
+			return;
+		}
+
+		if ( selectedAction === ACTION_CREATE_NEW ) {
+			setSelectedAction( ACTION_MERGE );
+		}
+
+		if ( ! selectedMergeTargetUuid ) {
+			setSelectedMergeTargetUuid( emailMatchedUuid );
+		}
+		// Only react to the email-matched candidate changing — not to every
+		// action/target change the admin makes afterwards.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [ emailMatchedUuid ] );
+
 	if ( ! record ) {
 		return null;
 	}
 
-	const rawData = record.raw_data ?? {};
+	const actionOptions = emailMatchedCandidate
+		? ACTION_OPTIONS.filter( ( option ) => option.value !== ACTION_CREATE_NEW )
+		: ACTION_OPTIONS;
 
 	/**
 	 * Called by MatchesTable once its fetch completes (AORM-8B.16).
@@ -355,7 +445,10 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 			! selectedMergeTargetUuid &&
 			matches.length > 0
 		) {
-			setSelectedMergeTargetUuid( matches[ 0 ].uuid );
+			// Prefer the candidate that owns the imported email.
+			setSelectedMergeTargetUuid(
+				findEmailMatchedCandidate( rawData, matches )?.uuid ?? matches[ 0 ].uuid
+			);
 		}
 	}
 
@@ -374,7 +467,7 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 			! selectedMergeTargetUuid &&
 			loadedMatches.length > 0
 		) {
-			setSelectedMergeTargetUuid( loadedMatches[ 0 ].uuid );
+			setSelectedMergeTargetUuid( emailMatchedUuid ?? loadedMatches[ 0 ].uuid );
 		}
 	}
 
@@ -418,7 +511,8 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 	/** Whether the Save Update button should be disabled. */
 	const isSaveDisabled =
 		isSaving ||
-		( selectedAction === ACTION_MERGE && ! selectedMergeTargetUuid );
+		( selectedAction === ACTION_MERGE && ! selectedMergeTargetUuid ) ||
+		( selectedAction === ACTION_CREATE_NEW && !! emailMatchedCandidate );
 
 	return (
 		<Modal
@@ -483,10 +577,20 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 					{ ACTION_HEADING }
 				</h3>
 
+				{ emailMatchedCandidate && (
+					<Notice
+						status="info"
+						isDismissible={ false }
+						className={ EMAIL_MATCH_NOTICE_CLASS }
+					>
+						{ EMAIL_MATCH_NOTICE_TEXT }
+					</Notice>
+				) }
+
 				<RadioControl
 					className="aorm-review-match-modal__action-radio"
 					selected={ selectedAction }
-					options={ ACTION_OPTIONS }
+					options={ actionOptions }
 					onChange={ handleActionChange }
 				/>
 			</section>

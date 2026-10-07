@@ -11,15 +11,17 @@
  *
  *   Per-row actions (Actions extra column):
  *     Reinstate — PATCH /wicket-aorm/v1/staged-records/{id} with
- *                 {category: 'ready_to_sync'}. Moves the record back into
- *                 the Ready to Sync bucket so it can be synced to MDP.
+ *                 {category: getReinstateTargetCategory(record)}. Restores
+ *                 the record to the category it came from (e.g. Possible
+ *                 Match), not always Ready to Sync — see the bugfix note
+ *                 on REINSTATE_CATEGORY.
  *     Remove    — PATCH /wicket-aorm/v1/staged-records/{id} with
  *                 {category: 'discard'}. Moves the record to the Discard
  *                 bucket; it will not be synced unless re-instated.
  *
  *   Bulk actions (shown when one or more rows are selected):
- *     Reinstate — calls handleBulkReinstate; PATCHes all selected IDs to
- *                 ready_to_sync in parallel via Promise.allSettled; partial
+ *     Reinstate — calls handleBulkReinstate; PATCHes each selected ID to its
+ *                 own getReinstateTargetCategory() in parallel via Promise.allSettled; partial
  *                 failures narrow the selection to failed IDs and show a Notice.
  *     Remove    — calls handleBulkRemove; PATCHes all selected IDs to
  *                 discard in parallel via Promise.allSettled; same
@@ -59,12 +61,69 @@ export const MANUAL_UPDATE_STATUS = 'manual_update';
 export const PREVIOUS_CATEGORY_COLUMN_LABEL = __( 'Previous Category', 'wicket-aorm' );
 
 /**
- * Target category when a record is reinstated (AORM-8B.6).
+ * Fallback target category when a record is reinstated (AORM-8B.6).
+ *
+ * Bugfix: Reinstate used to always PATCH this value. A record moved into
+ * Manual Updates from Possible Match then came back as "New Record" in Ready
+ * to Sync (its record_status from matching is new_record), even though sync
+ * would reuse the matched MDP person. Reinstate now restores the record's
+ * previous category via getReinstateTargetCategory(); this constant is only
+ * the fallback for records with no candidate matches.
  * Exported for test assertions.
  *
  * @type {string}
  */
 export const REINSTATE_CATEGORY = 'ready_to_sync';
+
+/**
+ * Fallback target for a new_record row that still has MDP match candidates
+ * but no usable previous_category.
+ *
+ * @type {string}
+ */
+export const REINSTATE_MATCH_FALLBACK_CATEGORY = 'possible_match';
+
+/**
+ * previous_category values Reinstate may restore to. manual_update and
+ * discard are excluded: previous_category is overwritten on every move, so a
+ * record that went Manual Update → Discard → Manual Update carries
+ * previous_category 'discard', and Reinstate must not send it back there.
+ * Exported for test assertions.
+ *
+ * @type {string[]}
+ */
+export const REINSTATABLE_CATEGORIES = [ 'ready_to_sync', 'possible_match', 'probable_match' ];
+
+/**
+ * Resolve the category a Manual Update record returns to on Reinstate.
+ *
+ *   1. previous_category, when it is one of REINSTATABLE_CATEGORIES.
+ *   2. Otherwise, a new_record row that still has match candidates goes to
+ *      Possible Match, so it is never shown as "New Record" while an MDP
+ *      person may be reused.
+ *   3. Otherwise, Ready to Sync (true new record, or exact/merge/on-roster
+ *      statuses whose label already describes what sync will do).
+ *
+ * @param {Object} record Staged record.
+ * @return {string} Target category.
+ */
+export function getReinstateTargetCategory( record ) {
+	const previous = record?.previous_category ?? '';
+
+	if ( REINSTATABLE_CATEGORIES.includes( previous ) ) {
+		return previous;
+	}
+
+	const hasCandidates =
+		Number( record?.match_count ?? 0 ) > 0 ||
+		( Array.isArray( record?.matched_persons ) && record.matched_persons.length > 0 );
+
+	if ( record?.record_status === 'new_record' && hasCandidates ) {
+		return REINSTATE_MATCH_FALLBACK_CATEGORY;
+	}
+
+	return REINSTATE_CATEGORY;
+}
 
 /**
  * Target category when a record is removed / discarded (AORM-8B.6).
@@ -137,10 +196,10 @@ export default function ManualUpdatePanel( { records, onRecordCategorized } ) {
 	 * the failed IDs so the admin can retry. On full success: selection is
 	 * cleared and onRecordCategorized is called to refresh accordion counts.
 	 *
-	 * @param {string}   category  Target category.
-	 * @param {Function} setIsBusy State setter for the in-progress flag.
+	 * @param {(id: number) => string} resolveCategory Returns the target category per record id.
+	 * @param {Function}               setIsBusy       State setter for the in-progress flag.
 	 */
-	function patchBulkCategory( category, setIsBusy ) {
+	function patchBulkCategory( resolveCategory, setIsBusy ) {
 		const ids = Array.from( selectedIds );
 
 		setIsBusy( true );
@@ -151,7 +210,7 @@ export default function ManualUpdatePanel( { records, onRecordCategorized } ) {
 				apiFetch( {
 					path:   `/wicket-aorm/v1/staged-records/${ id }`,
 					method: 'PATCH',
-					data:   { category },
+					data:   { category: resolveCategory( id ) },
 				} )
 			)
 		).then( ( results ) => {
@@ -179,8 +238,8 @@ export default function ManualUpdatePanel( { records, onRecordCategorized } ) {
 
 	// ── Per-row action handlers ───────────────────────────────────────────────
 
-	function handleReinstate( recordId ) {
-		patchCategory( recordId, REINSTATE_CATEGORY, setReinstatingIds );
+	function handleReinstate( record ) {
+		patchCategory( record.id, getReinstateTargetCategory( record ), setReinstatingIds );
 	}
 
 	function handleRemove( recordId ) {
@@ -190,11 +249,15 @@ export default function ManualUpdatePanel( { records, onRecordCategorized } ) {
 	// ── Bulk action handlers ──────────────────────────────────────────────────
 
 	function handleBulkReinstate() {
-		patchBulkCategory( REINSTATE_CATEGORY, setIsBulkReinstating );
+		patchBulkCategory( ( id ) => {
+			const record = ( records ?? [] ).find( ( r ) => r.id === id );
+
+			return getReinstateTargetCategory( record );
+		}, setIsBulkReinstating );
 	}
 
 	function handleBulkRemove() {
-		patchBulkCategory( REMOVE_CATEGORY, setIsBulkRemoving );
+		patchBulkCategory( () => REMOVE_CATEGORY, setIsBulkRemoving );
 	}
 
 	// ── Extra columns ─────────────────────────────────────────────────────────
@@ -223,12 +286,12 @@ export default function ManualUpdatePanel( { records, onRecordCategorized } ) {
 
 			return (
 				<div className="aorm-manual-update-row-actions">
-					{ /* Reinstate — move back to ready_to_sync */ }
+					{ /* Reinstate — restore to the previous category */ }
 					<Button
 						variant="secondary"
 						isBusy={ isReinstating }
 						disabled={ isBusy }
-						onClick={ () => handleReinstate( record.id ) }
+						onClick={ () => handleReinstate( record ) }
 						className="aorm-manual-update-row-actions__reinstate"
 						aria-label={ sprintf(
 							/* translators: %s: person first name or record id */
