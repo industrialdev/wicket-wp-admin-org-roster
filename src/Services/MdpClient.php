@@ -1295,7 +1295,11 @@ class MdpClient
      *      `GET people/{uuid}?include=emails`.
      *   2. No-op when an email with the same address (case-insensitive) is
      *      already flagged primary — nothing to add or demote.
-     *   3. POST a new `emails` resource for the person with `primary: true`.
+     *   2b. When the same address already exists but is NOT primary, PATCH that
+     *      email to `primary: true` instead of POSTing a duplicate (the MDP
+     *      rejects duplicate addresses). Common on the new_record path, where
+     *      wicket_create_or_get_person() resolves a person by a secondary email.
+     *   3. Otherwise POST a new `emails` resource for the person with `primary: true`.
      *   4. PATCH each other email currently flagged primary to `primary: false`
      *      so MDP ends up with exactly one primary address.
      *
@@ -1338,10 +1342,48 @@ class MdpClient
         $existingEmails = $this->fetchPersonEmails($client, $personUuid);
 
         // Already primary with the same address — nothing to add or demote.
+        // Already present but NOT primary (e.g. a secondary address that
+        // wicket_create_or_get_person() resolved the person by) — promote that
+        // record instead of POSTing a duplicate address the MDP would reject.
+        $existingSameAddress = null;
+
         foreach ($existingEmails as $email) {
-            if ($email['primary'] && strcasecmp($email['address'], $emailAddress) === 0) {
+            if (strcasecmp($email['address'], $emailAddress) !== 0) {
+                continue;
+            }
+
+            if ($email['primary']) {
                 return;
             }
+
+            $existingSameAddress = $email;
+        }
+
+        if ($existingSameAddress !== null) {
+            $promoteId      = $existingSameAddress['id'];
+            $promotePayload = [
+                'data' => [
+                    'type'       => 'emails',
+                    'id'         => $promoteId,
+                    'attributes' => [
+                        'primary' => true,
+                    ],
+                ],
+            ];
+
+            try {
+                $this->callWithRetry(fn () => $client->patch('emails/' . $promoteId, ['json' => $promotePayload]));
+            } catch (\Exception $e) {
+                throw new \RuntimeException(
+                    'MDP email promote failed: ' . $e->getMessage(),
+                    0,
+                    $e,
+                );
+            }
+
+            $this->demoteOtherPrimaryEmails($client, $existingEmails, $emailAddress);
+
+            return;
         }
 
         $payload = [
@@ -1373,9 +1415,22 @@ class MdpClient
             );
         }
 
-        // Demote any other email(s) currently flagged primary.
+        $this->demoteOtherPrimaryEmails($client, $existingEmails, $emailAddress);
+    }
+
+    /**
+     * PATCH every email currently flagged primary (other than `$keepAddress`)
+     * to `primary: false`, so the MDP ends up with exactly one primary address.
+     *
+     * @param object                                                               $client
+     * @param list<array{id: string, address: string, type: string, primary: bool}> $existingEmails
+     *
+     * @throws \RuntimeException When a PATCH fails.
+     */
+    private function demoteOtherPrimaryEmails(object $client, array $existingEmails, string $keepAddress): void
+    {
         foreach ($existingEmails as $email) {
-            if (! $email['primary'] || strcasecmp($email['address'], $emailAddress) === 0) {
+            if (! $email['primary'] || strcasecmp($email['address'], $keepAddress) === 0) {
                 continue;
             }
 
@@ -1401,6 +1456,146 @@ class MdpClient
                 );
             }
         }
+    }
+
+    /**
+     * Insert or update a person's phone of a specific type from an imported row.
+     *
+     * Used by every sync path that touches an existing MDP person (the CSV is the
+     * source of truth for the fields it supplies). Only the phone whose `type`
+     * equals `$phoneType` (wicket_aorm_settings[phone_number_type], resolved by
+     * SyncService) is ever touched — phones of other types are left alone.
+     *
+     * Reads and writes go through wicket-wp-base-plugin helpers rather than raw
+     * API calls:
+     *   - lookup: wicket_get_person_by_id() +
+     *     wicket_person_obj_get_repeatable_contact_info($person, 'phones', true)
+     *   - write:  wicket_add_update_person_phones() — PATCHes when given a
+     *     phone `uuid`, POSTs a new phone otherwise.
+     *
+     * Behaviour:
+     *   1. A phone of `$phoneType` exists with the same number (digits compared,
+     *      see phoneNumbersMatch()) → no-op.
+     *   2. A phone of `$phoneType` exists with a different number → update that
+     *      phone's number in place. The primary flag is left untouched.
+     *   3. No phone of `$phoneType` exists → create one; it is flagged primary
+     *      only when the person has no primary phone at all.
+     *
+     * No-ops when `$number` (after stripping non-digits) or `$phoneType` is empty,
+     * or when the base plugin helpers are unavailable.
+     *
+     * @param string $personUuid Person UUID.
+     * @param string $number     Imported phone number (any formatting).
+     * @param string $phoneType  MDP phone type slug to read/write (e.g. 'work').
+     *
+     * @throws \RuntimeException When the person cannot be loaded or the write fails.
+     */
+    public function upsertPersonPhone(string $personUuid, string $number, string $phoneType): void
+    {
+        $number    = trim($number);
+        $phoneType = trim($phoneType);
+
+        if ($personUuid === '' || $phoneType === '' || $this->normalizePhoneDigits($number) === '') {
+            return;
+        }
+
+        if (
+            ! function_exists('wicket_get_person_by_id')
+            || ! function_exists('wicket_person_obj_get_repeatable_contact_info')
+            || ! function_exists('wicket_add_update_person_phones')
+        ) {
+            return;
+        }
+
+        try {
+            $person = wicket_get_person_by_id($personUuid);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('MDP person phone lookup failed: ' . $e->getMessage(), 0, $e);
+        }
+
+        if (! is_object($person)) {
+            throw new \RuntimeException('MDP person phone lookup failed: person ' . $personUuid . ' not found.');
+        }
+
+        // Returns false (not []) when the person has no phones.
+        $currentPhones = wicket_person_obj_get_repeatable_contact_info($person, 'phones', true);
+        $currentPhones = is_array($currentPhones) ? $currentPhones : [];
+
+        $matchingPhone   = null;
+        $hasPrimaryPhone = false;
+
+        foreach ($currentPhones as $phone) {
+            $attributes = (array) ($phone['attributes'] ?? []);
+
+            if (! empty($attributes['primary'])) {
+                $hasPrimaryPhone = true;
+            }
+
+            if ($matchingPhone === null && strcasecmp((string) ($attributes['type'] ?? ''), $phoneType) === 0) {
+                $matchingPhone = $attributes;
+            }
+        }
+
+        if ($matchingPhone !== null) {
+            if ($this->phoneNumbersMatch((string) ($matchingPhone['number'] ?? ''), $number)) {
+                return;
+            }
+
+            $phoneUuid = (string) ($matchingPhone['uuid'] ?? '');
+
+            if ($phoneUuid === '') {
+                throw new \RuntimeException('MDP person phone update failed: existing ' . $phoneType . ' phone has no uuid.');
+            }
+
+            $payload = [['uuid' => $phoneUuid, 'number' => $number]];
+        } else {
+            $payload = [['number' => $number, 'type' => $phoneType, 'primary' => ! $hasPrimaryPhone]];
+        }
+
+        try {
+            $result = wicket_add_update_person_phones($personUuid, $payload);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('MDP person phone update failed: ' . $e->getMessage(), 0, $e);
+        }
+
+        if (! is_array($result) || empty($result['success'])) {
+            $errors = is_array($result) ? (array) ($result['error'] ?? []) : [];
+
+            throw new \RuntimeException(
+                'MDP person phone update failed: ' . (implode('; ', array_map('strval', $errors)) ?: 'unknown error'),
+            );
+        }
+    }
+
+    /**
+     * Strip everything but digits from a phone number.
+     */
+    private function normalizePhoneDigits(string $number): string
+    {
+        return (string) preg_replace('/\D+/', '', $number);
+    }
+
+    /**
+     * Whether two phone numbers refer to the same number, ignoring formatting.
+     *
+     * Exact digit match, or — when both have at least 10 digits — the same last
+     * 10 digits, so '+1 (555) 555-0100' (stored in MDP with a country code)
+     * matches an imported '555-555-0100'.
+     */
+    private function phoneNumbersMatch(string $a, string $b): bool
+    {
+        $a = $this->normalizePhoneDigits($a);
+        $b = $this->normalizePhoneDigits($b);
+
+        if ($a === '' || $b === '') {
+            return false;
+        }
+
+        if ($a === $b) {
+            return true;
+        }
+
+        return strlen($a) >= 10 && strlen($b) >= 10 && substr($a, -10) === substr($b, -10);
     }
 
     /**

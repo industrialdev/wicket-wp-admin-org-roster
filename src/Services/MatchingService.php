@@ -217,6 +217,13 @@ class MatchingService
             );
         }
 
+        // 6b. Being on the roster only bypasses review for a trusted match
+        //     (score=100 or exact email). A weaker on-roster match goes through
+        //     the normal thresholds so the admin reviews the imported changes.
+        $alreadyOnRoster = $alreadyOnRoster
+            && $best !== null
+            && $scorer->qualifiesForRosterAutoRoute($bestScore, $scorer->isEmailExact($best, $fields));
+
         // 7. Categorise (score=100 auto-routes to ready_to_sync / exact_match).
         $category     = $scorer->categorizeScore($bestScore, $alreadyOnRoster);
         $recordStatus = $scorer->resolveRecordStatus($bestScore, $alreadyOnRoster);

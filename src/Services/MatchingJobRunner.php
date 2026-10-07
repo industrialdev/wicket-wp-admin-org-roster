@@ -98,8 +98,11 @@ class MatchingJobRunner
      * Thresholds: 80+ → probable_match, 20–79 → possible_match, 0 → new_record.
      *
      * Already-on-roster check (AORM-7.8): the top candidate's UUID is checked
-     * against the roster via MdpClient::isPersonOnRoster(); when true the record
-     * gets category=ready_to_sync and record_status=already_on_roster.
+     * against the roster via MdpClient::isPersonOnRoster(); when true AND the
+     * match is trusted (score=100 or exact email —
+     * ScoringService::qualifiesForRosterAutoRoute()) the record gets
+     * category=ready_to_sync and record_status=already_on_roster. Weaker
+     * on-roster matches follow the normal thresholds and go to review.
      * Batch scheduling / re-dispatch (AORM-7.10, AORM-11.12): reads sync_batch_size from
      * wicket_aorm_settings (default 50). After processing the batch, if the batch
      * was full the job re-dispatches itself so the next batch is processed in a
@@ -188,6 +191,13 @@ class MatchingJobRunner
                     ScoringService::SCORE_CAP,
                 );
             }
+
+            // Being on the roster only bypasses review for a trusted match
+            // (score=100 or exact email). A weaker on-roster match goes through
+            // the normal thresholds so the admin reviews the imported changes.
+            $alreadyOnRoster = $alreadyOnRoster
+                && isset($scored[0])
+                && $scorer->qualifiesForRosterAutoRoute($bestScore, $scorer->isEmailExact($scored[0], $fields));
 
             // Categorise from the highest score (AORM-7.6, AORM-7.8).
             // score=100 auto-routes to ready_to_sync / exact_match.

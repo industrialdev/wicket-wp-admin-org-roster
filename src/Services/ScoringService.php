@@ -303,6 +303,41 @@ class ScoringService
         return min($score, self::SCORE_CAP);
     }
 
+    /**
+     * Whether the candidate's email exactly matches the imported email
+     * (case-insensitive, trimmed). Same comparison as the email_exact signal
+     * in scoreCandidate().
+     *
+     * @param array<string, mixed> $candidate MDP candidate record.
+     * @param array<string, mixed> $input     Submitted person data.
+     */
+    public function isEmailExact(array $candidate, array $input): bool
+    {
+        $candidateEmail = strtolower(trim((string) ($candidate['email'] ?? '')));
+        $inputEmail     = strtolower(trim((string) ($input['email'] ?? '')));
+
+        return $candidateEmail !== '' && $candidateEmail === $inputEmail;
+    }
+
+    /**
+     * Whether a top candidate who is already on the roster is trusted enough
+     * to bypass human review (ready_to_sync / already_on_roster).
+     *
+     * Previously any on-roster candidate auto-routed regardless of score, so a
+     * weak match (e.g. first name + phone) was silently treated as that person
+     * and its imported changes were never reviewed. Now only a perfect score
+     * (SCORE_CAP) or an exact email match qualifies — MDP emails are unique, so
+     * an email match identifies the person definitively. Everything else falls
+     * through to the normal score thresholds (probable/possible/new_record).
+     *
+     * @param int  $score      Best (post org_overlap) score.
+     * @param bool $emailExact Whether the top candidate's email matches exactly.
+     */
+    public function qualifiesForRosterAutoRoute(int $score, bool $emailExact): bool
+    {
+        return $score === self::SCORE_CAP || $emailExact;
+    }
+
     // ── Categorisation ─────────────────────────────────────────────────────
 
     /**

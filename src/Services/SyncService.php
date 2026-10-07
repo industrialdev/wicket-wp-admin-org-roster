@@ -283,6 +283,13 @@ class SyncService
      *    MdpClient::applyPersonOrgRoles() (AORM-9.7 / AORM-9.10). Duplicate slugs are
      *    deduplicated; empty slugs are filtered out.
      *
+     * wicket_create_or_get_person() may resolve an EXISTING person by email
+     * rather than creating one. Phone and title are therefore NOT passed as
+     * create extras (the base helper would append a duplicate phone to an
+     * existing person); instead the imported name/title/email/phone are
+     * applied afterwards via applyImportedProfileFields(), which updates the
+     * person in place whether it was just created or already existed.
+     *
      * @param array<string, mixed> $record  A row from wp_wicket_aorm_staged_records.
      * @return string  MDP person UUID.
      *
@@ -298,29 +305,11 @@ class SyncService
 
         // ── AORM-9.5: find or create the person ──────────────────────────
 
-        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
-        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
-        $phoneType = (string) ($settings[self::SETTINGS_KEY_PHONE_TYPE] ?? self::DEFAULT_PHONE_TYPE);
+        $personUuid = $this->createOrGetPersonFromRawData($rawData);
 
-        $personService = $this->personService ?? new \WicketORM\Services\PersonService();
+        // ── CSV is the source of truth: apply imported fields ────────────
 
-        $personResult = $personService->createOrGetPerson(
-            (string) ($rawData['first_name'] ?? ''),
-            (string) ($rawData['last_name'] ?? ''),
-            (string) ($rawData['email'] ?? ''),
-            [
-                'phone'      => (string) ($rawData['phone'] ?? ''),
-                'email_type' => $emailType,
-                'phone_type' => $phoneType,
-                'job_title'  => (string) ($rawData['title'] ?? ''),
-            ]
-        );
-
-        if (is_wp_error($personResult)) {
-            throw new \Exception($personResult->get_error_message());
-        }
-
-        $personUuid = (string) $personResult;
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.6: create default-type relationship to roster org ──────
 
@@ -339,8 +328,10 @@ class SyncService
     /**
      * Handle exact_match sync via the Relationship path.
      *
-     * 1. Updates the person's job title in MDP from the imported raw_data.title
-     *    field, when a non-empty title is present (AORM-9.8).
+     * 1. Applies the imported first/last name, title, email (as primary) and
+     *    phone (of the configured phone_number_type) to the person via
+     *    applyImportedProfileFields() — the CSV is the source of truth for every
+     *    non-empty field it supplies (originally title-only, AORM-9.8).
      * 2. Ends default-type relationships to other orgs (skipping protected
      *    relationship types such as admin roles) and ensures a default-type
      *    relationship exists to the roster org, creating one if missing (AORM-9.9).
@@ -369,9 +360,9 @@ class SyncService
 
         $orgUuid = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.8: update title ────────────────────────────────────────
+        // ── AORM-9.8: apply imported name/title/email/phone ───────────────
 
-        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.9: end other-org relationships, ensure roster-org one ──
 
@@ -385,8 +376,9 @@ class SyncService
     /**
      * Handle already_on_roster sync via the Relationship path.
      *
-     * 1. Updates the person's job title in MDP from the imported raw_data.title
-     *    field, when a non-empty title is present (AORM-9.8).
+     * 1. Applies the imported first/last name, title, email (as primary) and
+     *    phone (of the configured phone_number_type) to the person via
+     *    applyImportedProfileFields() (originally title-only, AORM-9.8).
      * 2. Ensures the user role + configured security roles scoped to the roster
      *    org via the shared ensureUserAndSecurityRoles() helper (AORM-9.10).
      *
@@ -411,9 +403,9 @@ class SyncService
 
         $orgUuid = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.8: update title ────────────────────────────────────────
+        // ── AORM-9.8: apply imported name/title/email/phone ───────────────
 
-        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.10: ensure user role + config security roles ───────────
 
@@ -468,13 +460,9 @@ class SyncService
 
         $orgUuid = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.11: update first/last name + title from import ─────────
+        // ── AORM-9.11 / 9.12: name/title, email as primary, phone ─────────
 
-        $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
-
-        // ── AORM-9.12: add imported email as primary, demote existing ─────
-
-        $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.13: end other-org relationships, ensure roster-org one ──
 
@@ -589,29 +577,11 @@ class SyncService
 
         // ── AORM-9.17: find or create the person ──────────────────────────
 
-        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
-        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
-        $phoneType = (string) ($settings[self::SETTINGS_KEY_PHONE_TYPE] ?? self::DEFAULT_PHONE_TYPE);
+        $personUuid = $this->createOrGetPersonFromRawData($rawData);
 
-        $personService = $this->personService ?? new \WicketORM\Services\PersonService();
+        // ── CSV is the source of truth: apply imported fields ────────────
 
-        $personResult = $personService->createOrGetPerson(
-            (string) ($rawData['first_name'] ?? ''),
-            (string) ($rawData['last_name'] ?? ''),
-            (string) ($rawData['email'] ?? ''),
-            [
-                'phone'      => (string) ($rawData['phone'] ?? ''),
-                'email_type' => $emailType,
-                'phone_type' => $phoneType,
-                'job_title'  => (string) ($rawData['title'] ?? ''),
-            ]
-        );
-
-        if (is_wp_error($personResult)) {
-            throw new \Exception($personResult->get_error_message());
-        }
-
-        $personUuid = (string) $personResult;
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.18: create membership assignment to the roster org ─────
 
@@ -632,9 +602,10 @@ class SyncService
     /**
      * Handle exact_match sync via the Direct Assignment path.
      *
-     * 1. Updates the person's job title in MDP from the imported raw_data.title
-     *    field, when a non-empty title is present — reuses the same
-     *    updatePersonTitleIfPresent() helper as the Relationship path (AORM-9.8).
+     * 1. Applies the imported first/last name, title, email (as primary) and
+     *    phone (of the configured phone_number_type) via the same
+     *    applyImportedProfileFields() helper as the Relationship path
+     *    (originally title-only, AORM-9.8/9.20).
      * 2. Ensures an ACTIVE Direct Assignment membership exists linking the
      *    person to the roster's org membership. A prior assignment may exist
      *    but have already ended (e.g. the person was previously removed), so
@@ -675,9 +646,9 @@ class SyncService
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
         $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.20: update title ───────────────────────────────────────
+        // ── AORM-9.20: apply imported name/title/email/phone ──────────────
 
-        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.20: create assignment if not active ────────────────────
 
@@ -691,8 +662,8 @@ class SyncService
     /**
      * Handle already_on_roster sync via the Direct Assignment path.
      *
-     * Identical behaviour to syncExactMatchViaDirectAssignment() — updates
-     * the person's title, then ensures an ACTIVE Direct Assignment membership
+     * Identical behaviour to syncExactMatchViaDirectAssignment() — applies the
+     * imported name/title/email/phone, then ensures an ACTIVE Direct Assignment membership
      * exists, creating one only when none is currently active. Direct
      * Assignment has no relationship records to end-date between the two
      * statuses (unlike the Relationship path, where exact_match additionally
@@ -730,9 +701,9 @@ class SyncService
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
         $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.20: update title ───────────────────────────────────────
+        // ── AORM-9.20: apply imported name/title/email/phone ──────────────
 
-        $this->updatePersonTitleIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.20: create assignment if not active ────────────────────
 
@@ -798,13 +769,9 @@ class SyncService
         $membershipUuid = (string) ($record['membership_uuid'] ?? '');
         $orgUuid        = (string) ($record['org_uuid'] ?? '');
 
-        // ── AORM-9.22: update first/last name + title from import ─────────
+        // ── AORM-9.22: name/title, email as primary, phone ────────────────
 
-        $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
-
-        // ── AORM-9.22: add imported email as primary, demote existing ─────
-
-        $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
+        $this->applyImportedProfileFields($personUuid, $rawData);
 
         // ── AORM-9.22: create assignment if not already active ────────────
 
@@ -906,28 +873,108 @@ class SyncService
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     /**
-     * Update a person's title in MDP when the imported row supplies one.
+     * Find or create the MDP person for an imported row.
      *
-     * Reads the `title` key from `$rawData` and delegates to
-     * MdpClient::updatePersonTitle(). Skipped when the title is absent or empty.
+     * Only the identity fields (first/last name, email) and the email type are
+     * passed to PersonService::createOrGetPerson(). Phone and job title are
+     * deliberately NOT passed as extras: wicket_create_or_get_person() applies
+     * them even when it resolves an existing person by email, and its phone
+     * handling always POSTs a new phone (duplicating the existing one). Callers
+     * apply those fields afterwards via applyImportedProfileFields().
      *
-     * @param string               $personUuid  Person UUID.
-     * @param array<string, mixed> $rawData     Decoded raw_data from a staged record.
+     * @param array<string, mixed> $rawData Decoded raw_data from a staged record.
+     * @return string MDP person UUID.
      *
-     * @throws \Exception When the MDP PATCH call fails.
+     * @throws \Exception When the person cannot be created or resolved.
      *
-     * @see AORM-9.8
+     * @see AORM-9.5
+     * @see AORM-9.17
      */
-    private function updatePersonTitleIfPresent(string $personUuid, array $rawData): void
+    private function createOrGetPersonFromRawData(array $rawData): string
     {
-        $title = (string) ($rawData['title'] ?? '');
+        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
+        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
 
-        if ($title === '') {
+        $personService = $this->personService ?? new \WicketORM\Services\PersonService();
+
+        $personResult = $personService->createOrGetPerson(
+            (string) ($rawData['first_name'] ?? ''),
+            (string) ($rawData['last_name'] ?? ''),
+            (string) ($rawData['email'] ?? ''),
+            [
+                'email_type' => $emailType,
+            ]
+        );
+
+        if (is_wp_error($personResult)) {
+            throw new \Exception($personResult->get_error_message());
+        }
+
+        return (string) $personResult;
+    }
+
+    /**
+     * Apply the imported row's profile fields to an MDP person.
+     *
+     * The CSV is the source of truth for every non-empty field it supplies, on
+     * every sync path that touches a person (new_record, exact_match,
+     * already_on_roster, merging_to_record — both roster types). Blank CSV
+     * cells never clear MDP values.
+     *
+     *   1. first/last name + title → updatePersonNameAndTitleIfPresent()
+     *   2. email                   → addImportedEmailAsPrimaryIfPresent()
+     *                                (added as primary, old primary demoted, not deleted)
+     *   3. phone                   → upsertImportedPhoneIfPresent()
+     *                                (phone of the configured phone_number_type)
+     *
+     * No-op when the person UUID is empty.
+     *
+     * @param string               $personUuid Person UUID.
+     * @param array<string, mixed> $rawData    Decoded raw_data from a staged record.
+     *
+     * @throws \Exception When any MDP write fails.
+     */
+    private function applyImportedProfileFields(string $personUuid, array $rawData): void
+    {
+        if ($personUuid === '') {
             return;
         }
 
+        $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
+        $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
+        $this->upsertImportedPhoneIfPresent($personUuid, $rawData);
+    }
+
+    /**
+     * Insert or update the person's phone of the configured type from the import.
+     *
+     * Reads `phone` from `$rawData` and the phone type from
+     * wicket_aorm_settings[phone_number_type] (default DEFAULT_PHONE_TYPE), then
+     * delegates to MdpClient::upsertPersonPhone(). Skipped when the imported
+     * phone is empty.
+     *
+     * @param string               $personUuid Person UUID.
+     * @param array<string, mixed> $rawData    Decoded raw_data from a staged record.
+     *
+     * @throws \Exception When the MDP write fails.
+     */
+    private function upsertImportedPhoneIfPresent(string $personUuid, array $rawData): void
+    {
+        $phone = trim((string) ($rawData['phone'] ?? ''));
+
+        if ($phone === '') {
+            return;
+        }
+
+        $settings  = (array) get_option(self::SETTINGS_OPTION, []);
+        $phoneType = trim((string) ($settings[self::SETTINGS_KEY_PHONE_TYPE] ?? ''));
+
+        if ($phoneType === '') {
+            $phoneType = self::DEFAULT_PHONE_TYPE;
+        }
+
         $mdpClient = $this->mdpClient ?? new MdpClient();
-        $mdpClient->updatePersonTitle($personUuid, $title);
+        $mdpClient->upsertPersonPhone($personUuid, $phone, $phoneType);
     }
 
     /**
