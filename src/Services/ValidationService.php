@@ -73,16 +73,22 @@ class ValidationService
      * Minimum number of digits in a valid phone number after stripping all
      * non-numeric characters (AORM-6.14).
      *
-     * Mirrors the MDP minimum length rule and the ITU-T recommendation for
-     * local subscriber numbers.
+     * Bugfix (incomplete phone accepted): originally 7, to allow short local
+     * subscriber numbers. That let partial numbers such as "613-202-00"
+     * (8 digits) pass on both the Add Individual form and CSV uploads and
+     * sync to the MDP. Raised to 10 — a full North American number
+     * (area code + 7 digits). Shorter international numbers must be entered
+     * with their country code. Mirrored by PHONE_MIN_DIGITS in
+     * IndividualAddForm.js.
      */
-    public const PHONE_MIN_DIGITS = 7;
+    public const PHONE_MIN_DIGITS = 10;
 
     /**
      * Maximum number of digits in a valid phone number after stripping all
      * non-numeric characters (AORM-6.14).
      *
      * Mirrors the E.164 international standard ceiling of 15 digits.
+     * Mirrored by PHONE_MAX_DIGITS in IndividualAddForm.js.
      */
     public const PHONE_MAX_DIGITS = 15;
 
@@ -91,7 +97,7 @@ class ValidationService
      *
      * Mirrors PHONE_REGEX in IndividualAddForm.js exactly — the two were
      * always intended to apply the same rule to CSV rows, but the CSV path
-     * only ever checked digit count, so any string containing 7-15 digit
+     * only ever checked digit count, so any string containing enough digit
      * characters passed regardless of what else was in the field (including
      * letters, or digits with no plausible phone shape).
      *

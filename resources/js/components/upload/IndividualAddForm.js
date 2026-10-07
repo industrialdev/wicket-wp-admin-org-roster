@@ -9,7 +9,8 @@
  *   - first_name, last_name, email are required.
  *   - first_name, last_name must match NAME_REGEX (letters, spaces, hyphens, apostrophes only).
  *   - email must match EMAIL_REGEX.
- *   - phone, when provided, must match PHONE_REGEX.
+ *   - phone, when provided, must match PHONE_REGEX and contain
+ *     PHONE_MIN_DIGITS–PHONE_MAX_DIGITS digits after stripping formatting.
  *
  * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
  * session_id via startNewSession(), stores match_category via setMatchCategory(),
@@ -69,6 +70,38 @@ export const NAME_REGEX = /^[a-zA-Z\s'-]+$/;
  */
 export const PHONE_REGEX = /^[+]?[\d\s\-().]{7,20}$/;
 
+/**
+ * Phone digit-count bounds — mirror ValidationService::PHONE_MIN_DIGITS /
+ * PHONE_MAX_DIGITS. Counted after stripping every non-digit character.
+ *
+ * Bugfix (incomplete phone accepted): the form previously checked only
+ * PHONE_REGEX, so a partial number such as "613-202-00" (8 digits) passed.
+ * The minimum is 10 digits — a full North American number.
+ *
+ * @type {number}
+ */
+export const PHONE_MIN_DIGITS = 10;
+
+/** @type {number} */
+export const PHONE_MAX_DIGITS = 15;
+
+/**
+ * Whether a non-empty phone value is valid: correct character shape and a
+ * digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS.
+ *
+ * @param {string} phone Trimmed phone value.
+ * @returns {boolean} True when valid.
+ */
+export function isValidPhone( phone ) {
+	if ( ! PHONE_REGEX.test( phone ) ) {
+		return false;
+	}
+
+	const digitCount = phone.replace( /\D/g, '' ).length;
+
+	return digitCount >= PHONE_MIN_DIGITS && digitCount <= PHONE_MAX_DIGITS;
+}
+
 // ---------------------------------------------------------------------------
 // Pure validation helper — exported for unit testing.
 // ---------------------------------------------------------------------------
@@ -109,7 +142,7 @@ export function validateFields( fields ) {
 		errors.email = __( 'Please enter a valid email address.', 'wicket-aorm' );
 	}
 
-	if ( fields.phone.trim() && ! PHONE_REGEX.test( fields.phone.trim() ) ) {
+	if ( fields.phone.trim() && ! isValidPhone( fields.phone.trim() ) ) {
 		errors.phone = __( 'Please enter a valid phone number.', 'wicket-aorm' );
 	}
 
