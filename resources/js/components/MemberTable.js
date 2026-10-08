@@ -20,12 +20,15 @@
  * the rest of the admin UI. Checkboxes are rendered with
  * @wordpress/components CheckboxControl for accessible, consistent markup.
  *
- * The membership owner cannot be removed from their own roster — their
- * row checkbox is disabled (with an explanatory tooltip) and excluded from
- * "select all," so the owner can never end up in a bulk "Remove from
- * Roster" selection in the first place. This mirrors a corresponding
- * server-side guard in MdpClient::removeRosterMembers(), which would
- * otherwise still be reachable (e.g. by devtools) if this were UI-only.
+ * The membership owner is selectable like any other row (and included in
+ * "select all") so their roles can be edited. The owner still cannot be
+ * removed from their own roster: BulkActionToolbar disables "Remove from
+ * Roster" with an explanation whenever the owner is in the selection, and
+ * MdpClient::removeRosterMembers() keeps its server-side guard. (Previously
+ * the owner's checkbox was disabled outright, which also blocked role edits.)
+ *
+ * Each row has an "Edit Roles" button (when `onEditPermissions` is given)
+ * so role editing is discoverable without selecting anything first.
  *
  * @param {{
  *   members: Array<{
@@ -222,10 +225,12 @@ export default function MemberTable( {
 
 	const sorted = buildRows( members, owner, sortField, sortDir );
 
-	// The membership owner can never be removed from their own roster, so
-	// they're excluded from "select all" and from bulk-selectable rows —
-	// selecting them would only lead to a confusing failed removal attempt.
-	const selectableMembers = sorted.filter( ( m ) => ! m.is_owner );
+	// Every row (owner included) is selectable so roles can be edited in bulk.
+	// Removal of the owner is blocked by BulkActionToolbar instead.
+	const selectableMembers = sorted;
+
+	// Rows other than the pinned owner — drives the "No members found." row.
+	const nonOwnerMembers = sorted.filter( ( m ) => ! m.is_owner );
 
 	function handleSort( field ) {
 		if ( sortField === field ) {
@@ -251,11 +256,7 @@ export default function MemberTable( {
 		}
 	}
 
-	function toggleRow( personUuid, isOwner ) {
-		if ( isOwner ) {
-			return;
-		}
-
+	function toggleRow( personUuid ) {
 		const next = new Set( selectedIds );
 
 		if ( next.has( personUuid ) ) {
@@ -311,7 +312,7 @@ export default function MemberTable( {
 					<td>{ __( 'Roles', 'wicket-aorm' ) }</td>
 					<td className="aorm-member-table__col--action">
 						<span className="screen-reader-text">
-							{ __( 'Edit Permissions', 'wicket-aorm' ) }
+							{ __( 'Edit Roles', 'wicket-aorm' ) }
 						</span>
 					</td>
 					<td className="aorm-member-table__col--action">
@@ -338,33 +339,17 @@ export default function MemberTable( {
 								.join( ' ' ) }
 						>
 							<th className="check-column" scope="row">
-								<span
-									title={
+								<CheckboxControl
+									aria-label={ sprintf(
+										/* translators: %s: member name */
 										isOwner
-											? __(
-													'The membership owner cannot be removed from the roster.',
-													'wicket-aorm'
-											  )
-											: undefined
-									}
-								>
-									<CheckboxControl
-										aria-label={
-											isOwner
-												? __(
-														'The membership owner cannot be removed from the roster',
-														'wicket-aorm'
-												  )
-												: `${ __(
-														'Select',
-														'wicket-aorm'
-												  ) } ${ memberFullName( member ) }`
-										}
-										checked={ ! isOwner && selectedIds.has( member.person_uuid ) }
-										disabled={ isOwner }
-										onChange={ () => toggleRow( member.person_uuid, isOwner ) }
-									/>
-								</span>
+											? __( 'Select %s (membership owner)', 'wicket-aorm' )
+											: __( 'Select %s', 'wicket-aorm' ),
+										memberFullName( member )
+									) }
+									checked={ selectedIds.has( member.person_uuid ) }
+									onChange={ () => toggleRow( member.person_uuid ) }
+								/>
 							</th>
 							<td>
 								<span className="aorm-member-table__first-name">
@@ -400,17 +385,21 @@ export default function MemberTable( {
 									: '—' }
 							</td>
 							<td className="aorm-member-table__col--action">
-								{/* <Button
-									variant="secondary"
-									size="small"
-									onClick={ () => onEditPermissions?.( member ) }
-									aria-label={ `${ __(
-										'Edit permissions for',
-										'wicket-aorm'
-									) } ${ member.name }` }
-								>
-									{ __( 'Edit Permissions', 'wicket-aorm' ) }
-								</Button> */}
+								{ typeof onEditPermissions === 'function' && (
+									<Button
+										variant="secondary"
+										size="small"
+										className="aorm-member-table__edit-roles-btn"
+										onClick={ () => onEditPermissions( member ) }
+										aria-label={ sprintf(
+											/* translators: %s: member name */
+											__( 'Edit roles for %s', 'wicket-aorm' ),
+											memberFullName( member )
+										) }
+									>
+										{ __( 'Edit Roles', 'wicket-aorm' ) }
+									</Button>
+								) }
 								{ isOwner && hasLocalMembership && member.membership_details_page_url &&
 									<>
 										&nbsp;
@@ -445,7 +434,7 @@ export default function MemberTable( {
 				{ /* The pinned owner row doesn't count — show the empty
 				     message whenever no other members are listed (e.g. a
 				     search that matched nobody but the owner is still pinned). */ }
-				{ selectableMembers.length === 0 && (
+				{ nonOwnerMembers.length === 0 && (
 					<tr>
 						<td
 							colSpan={ TOTAL_COLS }

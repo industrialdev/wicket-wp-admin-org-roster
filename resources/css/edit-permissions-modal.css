@@ -1,3 +1,60 @@
+.aorm-permissions-modal {
+  max-width: 520px;
+}
+
+.aorm-permissions-modal__intro {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.aorm-permissions-modal__hint {
+  color: #50575e;
+}
+
+.aorm-permissions-modal__roles {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aorm-permissions-modal__role {
+  padding: 10px 12px;
+  border: 1px solid #dcdcde;
+  border-radius: 3px;
+}
+
+.aorm-permissions-modal__role--changed {
+  border-color: #2271b1;
+  background-color: #f0f6fc;
+}
+
+.aorm-permissions-modal__role-status {
+  font-style: italic;
+}
+
+.aorm-permissions-modal__summary {
+  margin-top: 16px;
+}
+
+.aorm-permissions-modal__summary ul {
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.aorm-permissions-modal__change--add {
+  color: #00a32a;
+}
+
+.aorm-permissions-modal__change--remove {
+  color: #d63638;
+}
+
+.aorm-permissions-modal__no-changes {
+  margin: 0;
+  color: #50575e;
+}
+
 .aorm-permissions-modal__actions {
   display: flex;
   gap: 10px;

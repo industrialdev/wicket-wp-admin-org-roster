@@ -53,6 +53,7 @@ export const ACTIVITY_TYPE_OPTIONS = [
 	{ value: 'members_removed', label: __( 'Members Removed', 'wicket-aorm' ) },
 	{ value: 'roles_added',     label: __( 'Roles Added',     'wicket-aorm' ) },
 	{ value: 'roles_removed',   label: __( 'Roles Removed',   'wicket-aorm' ) },
+	{ value: 'roles_updated',   label: __( 'Roles Updated',   'wicket-aorm' ) },
 ];
 
 /** Options for the Status (log level) select. */

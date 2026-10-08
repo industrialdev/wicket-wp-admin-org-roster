@@ -16,8 +16,10 @@ use WicketAORM\Services\MdpClient;
  *   GET    /rosters/{org_uuid}/{membership_uuid}/members  — paginated member list (AORM-4.5), optional
  *                                                            ?search= filters by name/email (AORM-4.21)
  *   DELETE /rosters/{org_uuid}/{membership_uuid}/members  — bulk remove members   (AORM-4.9)
- *   POST   /rosters/{org_uuid}/{membership_uuid}/roles    — bulk add/remove roles (AORM-4.10)
- *   GET    /rosters/{org_uuid}/{membership_uuid}/activity — paginated activity log (AORM-4.18)
+ *   POST   /rosters/{org_uuid}/{membership_uuid}/roles    — bulk add/remove roles (AORM-4.10); action
+ *                                                            'update' applies add_role_slugs +
+ *                                                            remove_role_slugs in one call (Edit Roles modal)
+ *   GET   /rosters/{org_uuid}/{membership_uuid}/activity — paginated activity log (AORM-4.18)
  *
  * Logging (AORM-4.15): every mutating operation (delete_members, update_member_roles)
  * calls ActivityLogger::logRosterAction() to write an audit entry and keep the
@@ -40,7 +42,22 @@ class RosterController extends RestController
     /**
      * Valid values for the `action` parameter on the /roles endpoint.
      */
-    private const VALID_ROLE_ACTIONS = ['add', 'remove'];
+    private const VALID_ROLE_ACTIONS = ['add', 'remove', self::ROLE_ACTION_UPDATE];
+
+    /**
+     * `action` value used by the Edit Roles modal: applies `add_role_slugs`
+     * and `remove_role_slugs` together, changing only what differs from each
+     * person's current org-scoped roles (see MdpClient::updateMemberRoleChanges()).
+     */
+    public const ROLE_ACTION_UPDATE = 'update';
+
+    /**
+     * Roles an admin can assign/remove from the Roster Assignment tab.
+     * Mirrors EDITABLE_ROLES in resources/js/components/EditPermissionsModal.js.
+     * Enforced only for the 'update' action; the legacy 'add'/'remove'
+     * actions are left unrestricted for backward compatibility.
+     */
+    public const EDITABLE_ROLE_SLUGS = ['membership_manager', 'org_editor'];
 
     /**
      * Register all roster routes.
@@ -167,17 +184,13 @@ class RosterController extends RestController
                             'required'          => true,
                             'sanitize_callback' => 'sanitize_text_field',
                         ],
-                        'role_slugs'      => [
-                            'required'          => true,
-                            'type'              => 'array',
-                            'items'             => ['type' => 'string'],
-                            'sanitize_callback' => static function (mixed $value): array {
-                                return array_values(array_filter(
-                                    array_map('sanitize_key', (array) $value),
-                                    fn (string $v): bool => $v !== '',
-                                ));
-                            },
-                        ],
+                        // Not required at the route level: the legacy 'add'/'remove'
+                        // actions validate it in update_member_roles() (400 when
+                        // empty), while action 'update' uses add_role_slugs /
+                        // remove_role_slugs instead and never sends it.
+                        'role_slugs'        => self::roleSlugListArg(),
+                        'add_role_slugs'    => self::roleSlugListArg(),
+                        'remove_role_slugs' => self::roleSlugListArg(),
                     ],
                 ],
             ],
@@ -397,8 +410,11 @@ class RosterController extends RestController
      * and `role_slugs` (array).  Delegates to MdpClient::updateMemberRoles()
      * which adds or removes touch-point role assignments scoped to the roster org.
      *
+     * `action: 'update'` (Edit Roles modal) instead takes `add_role_slugs` and
+     * `remove_role_slugs` — see update_member_role_changes().
+     *
      * Returns 400 when required params are absent/empty or when `action` is
-     * not 'add' or 'remove'.
+     * not 'add', 'remove' or 'update'.
      * Returns 200 with `{updated, failed}` lists on success (partial successes
      * are allowed — callers should inspect `failed` and surface errors to the admin).
      *
@@ -419,16 +435,20 @@ class RosterController extends RestController
             );
         }
 
-        if (empty($roleSlugs)) {
+        if (! in_array($action, self::VALID_ROLE_ACTIONS, true)) {
             return new \WP_REST_Response(
-                ['message' => 'role_slugs must be a non-empty array.'],
+                ['message' => 'action must be one of: ' . implode(', ', self::VALID_ROLE_ACTIONS) . '.'],
                 400,
             );
         }
 
-        if (! in_array($action, self::VALID_ROLE_ACTIONS, true)) {
+        if ($action === self::ROLE_ACTION_UPDATE) {
+            return $this->update_member_role_changes($request, $orgUuid, $membershipUuid, $personUuids);
+        }
+
+        if (empty($roleSlugs)) {
             return new \WP_REST_Response(
-                ['message' => 'action must be one of: ' . implode(', ', self::VALID_ROLE_ACTIONS) . '.'],
+                ['message' => 'role_slugs must be a non-empty array.'],
                 400,
             );
         }
@@ -464,6 +484,141 @@ class RosterController extends RestController
         );
 
         return new \WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Handle `action: 'update'` on POST /rosters/{org_uuid}/{membership_uuid}/roles.
+     *
+     * Used by the Edit Roles modal, which merges the old Add/Remove Role(s)
+     * flows: checking a role adds it, unchecking an active role removes it.
+     * Body: `add_role_slugs` (array) and `remove_role_slugs` (array) — at
+     * least one must be non-empty, every slug must be in EDITABLE_ROLE_SLUGS,
+     * and the same slug cannot appear in both lists.
+     *
+     * Delegates to MdpClient::updateMemberRoleChanges(), which only POSTs
+     * roles a person doesn't already have and only DELETEs roles they do,
+     * reporting people who needed no change under `unchanged`.
+     *
+     * Returns 200 `{updated, failed, unchanged}`; 400 on invalid input.
+     *
+     * @param \WP_REST_Request $request
+     * @param string[]         $personUuids
+     */
+    private function update_member_role_changes(
+        $request,
+        string $orgUuid,
+        string $membershipUuid,
+        array $personUuids,
+    ): \WP_REST_Response {
+        $addSlugs    = $this->normalizeRoleSlugList($request->get_param('add_role_slugs'));
+        $removeSlugs = $this->normalizeRoleSlugList($request->get_param('remove_role_slugs'));
+
+        if (empty($addSlugs) && empty($removeSlugs)) {
+            return new \WP_REST_Response(
+                ['message' => 'add_role_slugs or remove_role_slugs must contain at least one role.'],
+                400,
+            );
+        }
+
+        $unsupported = array_diff(array_merge($addSlugs, $removeSlugs), self::EDITABLE_ROLE_SLUGS);
+
+        if (! empty($unsupported)) {
+            return new \WP_REST_Response(
+                ['message' => 'Unsupported role(s). Allowed roles: ' . implode(', ', self::EDITABLE_ROLE_SLUGS) . '.'],
+                400,
+            );
+        }
+
+        if (! empty(array_intersect($addSlugs, $removeSlugs))) {
+            return new \WP_REST_Response(
+                ['message' => 'A role cannot be both added and removed in the same request.'],
+                400,
+            );
+        }
+
+        $client = $this->mdpClient ?? new MdpClient();
+        $result = $client->updateMemberRoleChanges($orgUuid, $membershipUuid, $personUuids, $addSlugs, $removeSlugs);
+
+        $updatedCount   = count($result['updated']);
+        $failedCount    = count($result['failed']);
+        $unchangedCount = count($result['unchanged']);
+        $rosterStatus   = $failedCount > 0 ? 'has_failures' : 'idle';
+        $message        = sprintf(
+            'Roles updated for %d member(s)%s%s.',
+            $updatedCount,
+            $unchangedCount > 0 ? ", {$unchangedCount} unchanged" : '',
+            $failedCount > 0 ? ", {$failedCount} failed" : '',
+        );
+
+        $logger = $this->activityLogger ?? new ActivityLogger();
+        $logger->logRosterAction(
+            $orgUuid,
+            $membershipUuid,
+            'roles_updated',
+            $message,
+            [
+                'action'            => self::ROLE_ACTION_UPDATE,
+                'add_role_slugs'    => $addSlugs,
+                'remove_role_slugs' => $removeSlugs,
+                'updated'           => $result['updated'],
+                'failed'            => $result['failed'],
+                'unchanged'         => $result['unchanged'],
+            ],
+            $rosterStatus,
+        );
+
+        return new \WP_REST_Response($result, 200);
+    }
+
+    /**
+     * Route arg definition for an optional list of role slugs on POST /roles.
+     *
+     * @return array<string, mixed>
+     */
+    private static function roleSlugListArg(): array
+    {
+        return [
+            'required'          => false,
+            'type'              => 'array',
+            'items'             => ['type' => 'string'],
+            'sanitize_callback' => static function (mixed $value): array {
+                return array_values(array_filter(
+                    array_map('sanitize_key', (array) $value),
+                    fn (string $v): bool => $v !== '',
+                ));
+            },
+        ];
+    }
+
+    /**
+     * Normalize a role-slug request param into a de-duplicated list of
+     * non-empty strings. Non-array input yields an empty list.
+     *
+     * @param mixed $value
+     *
+     * @return list<string>
+     */
+    private function normalizeRoleSlugList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $slugs = [];
+
+        foreach ($value as $slug) {
+            if (! is_string($slug)) {
+                continue;
+            }
+
+            $slug = trim($slug);
+
+            if ($slug !== '' && ! in_array($slug, $slugs, true)) {
+                $slugs[] = $slug;
+            }
+        }
+
+        return $slugs;
     }
 
     /**

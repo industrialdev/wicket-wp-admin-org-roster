@@ -1154,6 +1154,175 @@ class MdpClient
     }
 
     /**
+     * Apply role additions and removals for a list of people scoped to a
+     * roster org, changing only what actually differs (Edit Roles modal).
+     *
+     * Per person:
+     *   1. GET `people/{uuid}/roles` once and index the roles scoped to
+     *      `$orgUuid` by name (global roles and other orgs' roles are ignored).
+     *   2. POST only the `$addRoleSlugs` the person does not already have —
+     *      avoids duplicate role assignments.
+     *   3. DELETE `people/{uuid}/relationships/roles` with the IDs of the
+     *      `$removeRoleSlugs` the person actually has — never a no-op success.
+     *   4. When nothing needed changing, the person is reported as `unchanged`
+     *      (not `updated`) so the UI can say so instead of claiming success.
+     *
+     * A slug present in both lists is ignored (callers should prevent this;
+     * RosterController rejects it with a 400).
+     *
+     * @param string   $orgUuid         Organization UUID.
+     * @param string   $membershipUuid  Unused in MDP calls; kept for symmetry.
+     * @param string[] $personUuids     Person UUIDs to process.
+     * @param string[] $addRoleSlugs    Role names to ensure the person has.
+     * @param string[] $removeRoleSlugs Role names to ensure the person does not have.
+     *
+     * @return array{
+     *   updated:   list<string>,
+     *   failed:    list<string>,
+     *   unchanged: list<string>,
+     * }
+     */
+    public function updateMemberRoleChanges(
+        string $orgUuid,
+        string $membershipUuid,
+        array $personUuids,
+        array $addRoleSlugs,
+        array $removeRoleSlugs,
+    ): array {
+        $result = ['updated' => [], 'failed' => [], 'unchanged' => []];
+
+        $addRoleSlugs    = $this->uniqueNonEmptyStrings($addRoleSlugs);
+        $removeRoleSlugs = $this->uniqueNonEmptyStrings($removeRoleSlugs);
+        $conflicting     = array_intersect($addRoleSlugs, $removeRoleSlugs);
+        $addRoleSlugs    = array_values(array_diff($addRoleSlugs, $conflicting));
+        $removeRoleSlugs = array_values(array_diff($removeRoleSlugs, $conflicting));
+
+        if (empty($personUuids) || (empty($addRoleSlugs) && empty($removeRoleSlugs))) {
+            return $result;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            $result['failed'] = array_values(array_map('strval', $personUuids));
+
+            return $result;
+        }
+
+        foreach ($personUuids as $personUuid) {
+            $personUuid = (string) $personUuid;
+
+            try {
+                $currentRoleIds = $this->fetchPersonOrgRoleIds($client, $orgUuid, $personUuid);
+
+                $toAdd = array_values(array_filter(
+                    $addRoleSlugs,
+                    static fn (string $slug): bool => ! isset($currentRoleIds[$slug]),
+                ));
+
+                $toRemoveIds = [];
+
+                foreach ($removeRoleSlugs as $slug) {
+                    foreach ($currentRoleIds[$slug] ?? [] as $roleId) {
+                        $toRemoveIds[] = $roleId;
+                    }
+                }
+
+                if (empty($toAdd) && empty($toRemoveIds)) {
+                    $result['unchanged'][] = $personUuid;
+
+                    continue;
+                }
+
+                if (! empty($toAdd)) {
+                    $this->addPersonOrgRoles($client, $orgUuid, $personUuid, $toAdd);
+                }
+
+                if (! empty($toRemoveIds)) {
+                    $payload = [
+                        'data' => array_map(
+                            static fn (string $id): array => ['type' => 'roles', 'id' => $id],
+                            $toRemoveIds,
+                        ),
+                    ];
+
+                    $this->callWithRetry(
+                        fn () => $client->delete('people/' . $personUuid . '/relationships/roles', ['json' => $payload])
+                    );
+                }
+
+                $result['updated'][] = $personUuid;
+            } catch (\Exception $e) {
+                $result['failed'][] = $personUuid;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fetch a person's roles scoped to an org, indexed by role name.
+     *
+     * @param object $client     MDP API client (must be non-null).
+     * @param string $orgUuid    Organization UUID.
+     * @param string $personUuid Person UUID.
+     *
+     * @return array<string, list<string>> role name => role resource IDs.
+     *
+     * @throws \Exception When the GET fails or returns an unexpected shape —
+     *                    without the current roles we can't safely compute a diff.
+     */
+    private function fetchPersonOrgRoleIds(object $client, string $orgUuid, string $personUuid): array
+    {
+        $endpoint = 'people/' . $personUuid . '/roles?' . http_build_query(['page' => ['size' => 100]]);
+        $response = $this->callWithRetry(fn () => $client->get($endpoint));
+
+        if (! is_array($response)) {
+            throw new \RuntimeException('Unexpected roles response for person ' . $personUuid . '.');
+        }
+
+        $roleIds = [];
+
+        foreach ($response['data'] ?? [] as $role) {
+            $roleName   = (string) ($role['attributes']['name'] ?? '');
+            $resourceId = (string) ($role['relationships']['resource']['data']['id'] ?? '');
+            $roleId     = (string) ($role['id'] ?? '');
+
+            if ($roleName === '' || $roleId === '' || $resourceId !== $orgUuid) {
+                continue;
+            }
+
+            $roleIds[$roleName][] = $roleId;
+        }
+
+        return $roleIds;
+    }
+
+    /**
+     * @param array<mixed> $values
+     *
+     * @return list<string>
+     */
+    private function uniqueNonEmptyStrings(array $values): array
+    {
+        $out = [];
+
+        foreach ($values as $value) {
+            if (! is_scalar($value)) {
+                continue;
+            }
+
+            $value = trim((string) $value);
+
+            if ($value !== '' && ! in_array($value, $out, true)) {
+                $out[] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Update a person's job title in MDP.
      *
      * Issues a PATCH to `people/{uuid}` with only the `job_title` attribute so

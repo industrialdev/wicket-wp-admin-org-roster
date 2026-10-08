@@ -106,6 +106,7 @@ export function formatActivityType( action ) {
 		members_removed: __( 'Members Removed', 'wicket-aorm' ),
 		roles_added:     __( 'Roles Added', 'wicket-aorm' ),
 		roles_removed:   __( 'Roles Removed', 'wicket-aorm' ),
+		roles_updated:   __( 'Roles Updated', 'wicket-aorm' ),
 	};
 
 	if ( map[ action ] ) {

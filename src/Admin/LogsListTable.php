@@ -83,6 +83,7 @@ class LogsListTable extends WP_List_Table
         'members_removed'   => 'Members Removed',
         'roles_added'       => 'Roles Added',
         'roles_removed'     => 'Roles Removed',
+        'roles_updated'     => 'Roles Updated',
         'matching_complete' => 'Matching Complete',
         'record_synced'     => 'Record Synced',
         'record_failed'     => 'Record Failed',

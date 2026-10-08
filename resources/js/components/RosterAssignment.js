@@ -5,10 +5,17 @@
  * GET /wicket-aorm/v1/rosters/{org_uuid}/{membership_uuid}/members endpoint
  * (AORM-4.5) and renders a MemberTable with row-level checkboxes.
  *
- * When one or more rows are selected a BulkActionToolbar (AORM-4.8) appears
- * above the table offering Remove from Roster, Add Role(s), and Remove
- * Role(s) actions.  The callback props are optional stubs; actual REST calls
- * and modal flows are wired in later tickets (AORM-4.9, 4.10, 4.13).
+ * A BulkActionToolbar (AORM-4.8) is always shown above the table offering
+ * Edit Roles and Remove from Roster; its buttons are disabled with helper
+ * text until a row is selected, and Remove is disabled while the membership
+ * owner is selected. Each row also has its own "Edit Roles" button.
+ *
+ * Edit Roles opens the merged EditPermissionsModal (replaces the old separate
+ * Add Role(s) / Remove Role(s) flows) with a snapshot of the selected member
+ * objects, so the modal can pre-check the roles they already hold. Its
+ * `{add, remove}` result is POSTed as `action: 'update'` with
+ * `add_role_slugs`/`remove_role_slugs`; the server only applies real
+ * differences and reports no-op people under `unchanged`.
  *
  * When the roster has no members (total === 0) an empty state is shown
  * with a CTA directing the admin to the Roster Upload tab (AORM-4.7) —
@@ -25,7 +32,8 @@
  *
  * EditPermissionsModal save is wired directly to the MDP roles endpoint
  * POST /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/roles (AORM-4.12).
- * On success the member list is refreshed and the selection is cleared.
+ * On full or partial success the member list is refreshed and the selection
+ * is cleared.
  *
  * The "Remove from Roster" bulk action opens a ConfirmRemoveModal (AORM-4.13)
  * before issuing DELETE /wicket-aorm/v1/rosters/{orgUuid}/{membershipUuid}/members.
@@ -113,6 +121,23 @@ export function buildMembersPath( orgUuid, membershipUuid, search, page = 1, per
 	return `${ base }?${ params.toString() }`;
 }
 
+/**
+ * Build the POST body for the Edit Roles modal's save (`action: 'update'`).
+ *
+ * @param {string[]} personUuids
+ * @param {string[]} addRoleSlugs
+ * @param {string[]} removeRoleSlugs
+ * @returns {{ person_uuids: string[], action: string, add_role_slugs: string[], remove_role_slugs: string[] }}
+ */
+export function buildRoleUpdatePayload( personUuids, addRoleSlugs = [], removeRoleSlugs = [] ) {
+	return {
+		person_uuids:      [ ...personUuids ],
+		action:            'update',
+		add_role_slugs:    [ ...addRoleSlugs ],
+		remove_role_slugs: [ ...removeRoleSlugs ],
+	};
+}
+
 export default function RosterAssignment( {
 	orgUuid,
 	membershipUuid,
@@ -154,12 +179,11 @@ export default function RosterAssignment( {
 		return () => clearTimeout( handle );
 	}, [ searchInput ] );
 
-	// Edit-Permissions modal state (AORM-4.11).
-	// pendingIds holds the selection snapshot at the moment the modal opened.
+	// Edit Roles modal state. `members` is a snapshot of the member objects
+	// (with their current roles) at the moment the modal opened.
 	const [ permissionsModal, setPermissionsModal ] = useState( {
-		isOpen: false,
-		mode:   'add',   // 'add' | 'remove'
-		ids:    new Set(),
+		isOpen:  false,
+		members: [],
 	} );
 
 	// Confirm-Remove modal state (AORM-4.13).
@@ -173,8 +197,17 @@ export default function RosterAssignment( {
 	const [ isSubmitting, setIsSubmitting ]   = useState( false );
 	const [ actionNotice, setActionNotice ]   = useState( null ); // { status: 'success'|'warning'|'error', message: string } | null
 
-	function openPermissionsModal( mode ) {
-		setPermissionsModal( { isOpen: true, mode, ids: new Set( selectedIds ) } );
+	/**
+	 * Open the Edit Roles modal for the given member objects.
+	 *
+	 * @param {Array} targetMembers
+	 */
+	function openPermissionsModal( targetMembers ) {
+		if ( isSubmitting || ! targetMembers.length ) {
+			return;
+		}
+
+		setPermissionsModal( { isOpen: true, members: targetMembers } );
 	}
 
 	function closePermissionsModal() {
@@ -260,30 +293,39 @@ export default function RosterAssignment( {
 
 	/**
 	 * Called by EditPermissionsModal when the admin clicks Save.
-	 * POSTs to the roles endpoint and refreshes the member list on success.
+	 * POSTs the role diff to the roles endpoint (`action: 'update'`) and
+	 * refreshes the member list when anything changed.
 	 *
-	 * @param {string[]} roleSlugs
+	 * @param {{ add: string[], remove: string[] }} changes
 	 */
-	function handlePermissionsSave( roleSlugs ) {
-		const { mode, ids } = permissionsModal;
+	function handlePermissionsSave( { add = [], remove = [] } = {} ) {
+		const personUuids = permissionsModal.members.map( ( m ) => m.person_uuid );
 		closePermissionsModal();
 		setActionNotice( null );
+
+		if ( personUuids.length === 0 || ( add.length === 0 && remove.length === 0 ) ) {
+			return;
+		}
+
 		setIsSubmitting( true );
 
 		apiFetch( {
 			path:   `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/roles`,
 			method: 'POST',
-			data:   {
-				person_uuids: [ ...ids ],
-				role_slugs:   roleSlugs,
-				action:       mode,
-			},
+			data:   buildRoleUpdatePayload( personUuids, add, remove ),
 		} )
 			.then( ( response ) => {
-				const updatedCount = response?.updated?.length ?? 0;
-				const failedCount  = response?.failed?.length  ?? 0;
+				const updatedCount   = response?.updated?.length   ?? 0;
+				const failedCount    = response?.failed?.length    ?? 0;
+				const unchangedCount = response?.unchanged?.length ?? 0;
 
-				if ( failedCount > 0 && updatedCount === 0 ) {
+				if ( updatedCount === 0 && failedCount === 0 ) {
+					setActionNotice( {
+						status:  'info',
+						message: __( 'No changes were needed — the selected member(s) already had these roles.', 'wicket-aorm' ),
+					} );
+					setSelectedIds( new Set() );
+				} else if ( failedCount > 0 && updatedCount === 0 ) {
 					setActionNotice( {
 						status:  'error',
 						message: sprintf(
@@ -302,14 +344,24 @@ export default function RosterAssignment( {
 							failedCount
 						),
 					} );
+					// Some roles did change — refresh so the Roles column is
+					// accurate. Selection is kept so the admin can retry.
+					refresh();
 				} else {
 					setActionNotice( {
 						status:  'success',
-						message: sprintf(
-							/* translators: %d: number of members updated */
-							__( 'Roles updated for %d member(s).', 'wicket-aorm' ),
-							updatedCount
-						),
+						message: unchangedCount > 0
+							? sprintf(
+								/* translators: 1: updated count, 2: unchanged count */
+								__( 'Roles updated for %1$d member(s); %2$d already had the selected roles.', 'wicket-aorm' ),
+								updatedCount,
+								unchangedCount
+							)
+							: sprintf(
+								/* translators: %d: number of members updated */
+								__( 'Roles updated for %d member(s).', 'wicket-aorm' ),
+								updatedCount
+							),
 					} );
 					// Clear selection and refresh list on full success.
 					setSelectedIds( new Set() );
@@ -348,6 +400,13 @@ export default function RosterAssignment( {
 	// "search matched nothing" from a genuinely empty roster, since `total`
 	// above is always scoped to the current search.
 	const hasActiveSearch = search !== '';
+
+	// Every row currently rendered (pinned owner + page members), used to
+	// resolve the selection back to member objects for the Edit Roles modal.
+	// Selection is cleared on page/search changes, so it is always a subset.
+	const visibleRows    = owner ? [ { ...owner, is_owner: true }, ...members ] : members;
+	const selectedRows   = visibleRows.filter( ( m ) => selectedIds.has( m.person_uuid ) );
+	const ownerSelected  = selectedRows.some( ( m ) => m.is_owner );
 
 	function goToPage( next ) {
 		setPage( next );
@@ -416,10 +475,11 @@ export default function RosterAssignment( {
 		{ ! isLoading && ! error && ( total > 0 || hasActiveSearch || hasOwner ) && (
 				<>
 					<BulkActionToolbar
-						selectedCount={ selectedIds.size }
-						onRemoveFromRoster={ isSubmitting ? undefined : openConfirmRemoveModal }
-						onAddRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'add' ) }
-						onRemoveRoles={ isSubmitting ? undefined : () => openPermissionsModal( 'remove' ) }
+						selectedCount={ selectedRows.length }
+						ownerSelected={ ownerSelected }
+						isBusy={ isSubmitting }
+						onRemoveFromRoster={ openConfirmRemoveModal }
+						onEditRoles={ () => openPermissionsModal( selectedRows ) }
 					/>
 
 					<MemberTable
@@ -427,6 +487,7 @@ export default function RosterAssignment( {
 						owner={ owner }
 						selectedIds={ selectedIds }
 						onSelectionChange={ setSelectedIds }
+						onEditPermissions={ ( member ) => openPermissionsModal( [ member ] ) }
 					/>
 
 					{ totalPages > 1 && (
@@ -491,7 +552,7 @@ export default function RosterAssignment( {
 
 		<EditPermissionsModal
 			isOpen={ permissionsModal.isOpen }
-			mode={ permissionsModal.mode }
+			members={ permissionsModal.members }
 			onSave={ handlePermissionsSave }
 			onClose={ closePermissionsModal }
 		/>
