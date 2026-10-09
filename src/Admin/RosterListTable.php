@@ -101,6 +101,12 @@ class RosterListTable extends WP_List_Table
     public const MEMBERSHIP_STATUS_GRACE_PERIOD = 'grace_period';
 
     /**
+     * Base CSS class on every roster row; single_row() appends a
+     * ROW_CLASS--{roster_status} modifier used for status highlighting.
+     */
+    public const ROW_CLASS = 'aorm-roster-row';
+
+    /**
      * Roster Status filter dropdown options, value => label. Order here is
      * the order rendered in the <select>. 'not_started' is a sentinel (see
      * ROSTER_STATUS_NOT_STARTED); the remaining five are the real
@@ -460,6 +466,11 @@ class RosterListTable extends WP_List_Table
      * Render the Roster Status column.
      *
      * Value sourced from wp_wicket_aorm_roster_meta.roster_status (AORM-3.3).
+     * The stored ENUM slug (e.g. 'has_failures') is rendered as its
+     * human-readable label from ROSTER_STATUS_LABELS (e.g. "Has Failures") —
+     * the same labels the Roster Status filter dropdown uses. Slugs missing
+     * from that map are humanized (underscores → spaces, Title Case) rather
+     * than shown raw.
      *
      * @param array<string, mixed> $item
      */
@@ -471,7 +482,57 @@ class RosterListTable extends WP_List_Table
             return '<span class="description" aria-label="' . esc_attr__('No roster activity yet', 'wicket-aorm') . '">—</span>';
         }
 
-        return esc_html($status);
+        return esc_html($this->rosterStatusLabel($status));
+    }
+
+    /**
+     * Render a single row, tagged with a roster-status CSS class so the row
+     * can be highlighted (styles in MenuPage::renderRosterRowStatusStyles()).
+     *
+     * @param array<string, mixed> $item
+     */
+    public function single_row($item): void
+    {
+        echo '<tr class="' . esc_attr($this->getRowStatusClass((array) $item)) . '">';
+        $this->single_row_columns($item);
+        echo '</tr>';
+    }
+
+    /**
+     * Build the row's CSS class list from its roster_status.
+     *
+     * Always includes ROW_CLASS. Adds a ROW_CLASS--{status} modifier only for
+     * statuses listed in ROSTER_STATUS_LABELS (an allow-list, so the class is
+     * always safe); an empty status maps to the 'not_started' modifier,
+     * unknown statuses get no modifier.
+     *
+     * @param array<string, mixed> $item
+     */
+    public function getRowStatusClass(array $item): string
+    {
+        $status = (string) ($item['roster_status'] ?? '');
+
+        if ($status === '') {
+            $status = self::ROSTER_STATUS_NOT_STARTED;
+        }
+
+        if (! isset(self::ROSTER_STATUS_LABELS[$status])) {
+            return self::ROW_CLASS;
+        }
+
+        return self::ROW_CLASS . ' ' . self::ROW_CLASS . '--' . $status;
+    }
+
+    /**
+     * Resolve a roster_status slug to its human-readable label.
+     */
+    private function rosterStatusLabel(string $status): string
+    {
+        if (isset(self::ROSTER_STATUS_LABELS[$status])) {
+            return self::ROSTER_STATUS_LABELS[$status];
+        }
+
+        return ucwords(str_replace(['_', '-'], ' ', $status));
     }
 
     /**
