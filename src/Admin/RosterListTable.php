@@ -176,9 +176,12 @@ class RosterListTable extends WP_List_Table
     /**
      * Declare which columns are sortable and which direction is the default.
      *
-     * 5 of the 9 columns are sortable. The default sort is Updated At
+     * 6 of the 9 columns are sortable. The default sort is Updated At
      * descending (newest first), indicated by passing true as the second
-     * element. "Roster Last Saved" (last_updated) is intentionally NOT
+     * element. Membership Status sorts by the MDP `status` attribute only —
+     * the derived "Grace Period" label (in_grace) is not a separate sort
+     * group, so grace-period rows sort alongside their underlying status.
+     * "Roster Last Saved" (last_updated) is intentionally NOT
      * sortable here — it is sourced from the local wp_wicket_aorm_roster_meta
      * table, which the MDP API (the source of pagination/sorting for this
      * table) has no knowledge of and cannot sort or paginate by server-side.
@@ -193,6 +196,7 @@ class RosterListTable extends WP_List_Table
             'created'           => ['created', false],
             'mdp_updated_at'    => ['mdp_updated_at', true], // default sort, newest first
             'roster_status'     => ['roster_status', false],
+            'membership_status' => ['membership_status', false],
         ];
     }
 
@@ -406,12 +410,16 @@ class RosterListTable extends WP_List_Table
     /**
      * Render the Membership Status column.
      *
+     * Grace-period rows (in_grace = true) render as "Active (Grace Period)"
+     * in place of the raw MDP status, making clear the membership is still
+     * active while in its grace window.
+     *
      * @param array<string, mixed> $item
      */
     protected function column_membership_status($item): string
     {
         if ((bool) ($item['in_grace'] ?? false)) {
-            return esc_html__('Grace Period', 'wicket-aorm');
+            return esc_html__('Active (Grace Period)', 'wicket-aorm');
         }
 
         return esc_html((string) ($item['membership_status'] ?? ''));
@@ -749,8 +757,9 @@ class RosterListTable extends WP_List_Table
             'org_name'        => 'organization_legal_name_en',
             'membership_tier' => 'membership_name_en',
             'created'         => 'created_at',
-            'mdp_updated_at'  => 'updated_at',
-            'roster_status'   => 'updated_at', // local-only; fall back to MDP updated_at
+            'mdp_updated_at'    => 'updated_at',
+            'membership_status' => 'status',
+            'roster_status'     => 'updated_at', // local-only; fall back to MDP updated_at
         ];
 
         $field = $columnMap[$orderby] ?? 'updated_at';
