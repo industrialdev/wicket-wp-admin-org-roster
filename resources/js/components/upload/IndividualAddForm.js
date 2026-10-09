@@ -9,8 +9,8 @@
  *   - first_name, last_name, email are required.
  *   - first_name, last_name must match NAME_REGEX (letters, spaces, hyphens, apostrophes only).
  *   - email must match EMAIL_REGEX.
- *   - phone, when provided, must match PHONE_REGEX and contain
- *     PHONE_MIN_DIGITS–PHONE_MAX_DIGITS digits after stripping formatting.
+ *   - phone, when provided, must match PHONE_REGEX and be a valid number per
+ *     libphonenumber (DEFAULT_PHONE_COUNTRY region).
  *
  * On submit (AORM-5.7), POSTs to the individual endpoint, stores the returned
  * session_id via startNewSession(), stores match_category via setMatchCategory(),
@@ -32,6 +32,7 @@
 import { useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner, TextControl } from '@wordpress/components';
+import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import { apiFetch } from '../../utils/apiFetch';
 import '../../../css/roster-upload.css';
 
@@ -71,23 +72,33 @@ export const NAME_REGEX = /^[a-zA-Z\s'-]+$/;
 export const PHONE_REGEX = /^[+]?[\d\s\-().]{7,20}$/;
 
 /**
- * Phone digit-count bounds — mirror ValidationService::PHONE_MIN_DIGITS /
- * PHONE_MAX_DIGITS. Counted after stripping every non-digit character.
+ * Default region used to parse numbers entered without a leading "+country
+ * code". "CA" resolves a bare 10-digit number against the North American
+ * Numbering Plan (+1), which covers both Canadian and US numbers. Numbers
+ * entered with a "+" prefix are parsed against their own country code.
  *
- * Bugfix (incomplete phone accepted): the form previously checked only
- * PHONE_REGEX, so a partial number such as "613-202-00" (8 digits) passed.
- * The minimum is 10 digits — a full North American number.
- *
- * @type {number}
+ * @type {string}
  */
-export const PHONE_MIN_DIGITS = 10;
-
-/** @type {number} */
-export const PHONE_MAX_DIGITS = 15;
+export const DEFAULT_PHONE_COUNTRY = 'CA';
 
 /**
- * Whether a non-empty phone value is valid: correct character shape and a
- * digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS.
+ * Whether a non-empty phone value is valid.
+ *
+ * Two checks, both required:
+ *   1. Character shape — PHONE_REGEX. Kept because libphonenumber accepts
+ *      inline extensions ("613-237-5000 x123"), which the server rejects.
+ *   2. Numbering-plan validity via libphonenumber (full "max" metadata), the
+ *      same approach MDP uses (it parses each number against a numbering
+ *      plan to derive E.164 / national / international formats). This
+ *      covers length per country (partial numbers like "613-202-00" fail)
+ *      and rejects numbers that can't exist, e.g. an unassigned area code
+ *      ("555-867-5309") or an exchange starting with 0/1 ("613-123-4526").
+ *
+ * No separate digit-count check: libphonenumber already enforces per-country
+ * length. The server's ValidationService still requires 10–15 digits, so a
+ * valid short international number (e.g. Andorra "+376 312 345", 9 digits)
+ * passes here and is rejected by the server with a 422, which the form shows
+ * inline under the phone field.
  *
  * @param {string} phone Trimmed phone value.
  * @returns {boolean} True when valid.
@@ -97,9 +108,9 @@ export function isValidPhone( phone ) {
 		return false;
 	}
 
-	const digitCount = phone.replace( /\D/g, '' ).length;
+	const parsed = parsePhoneNumberFromString( phone, DEFAULT_PHONE_COUNTRY );
 
-	return digitCount >= PHONE_MIN_DIGITS && digitCount <= PHONE_MAX_DIGITS;
+	return Boolean( parsed && parsed.isValid() );
 }
 
 // ---------------------------------------------------------------------------
