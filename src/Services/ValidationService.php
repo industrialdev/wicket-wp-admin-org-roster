@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace WicketAORM\Services;
 
+use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumberUtil;
+
 /**
  * Row-level validation rules for staged records.
  *
@@ -70,46 +73,32 @@ class ValidationService
     public const VALIDATION_LABEL_INVALID_NAME = 'Invalid – Invalid Name Format';
 
     /**
-     * Minimum number of digits in a valid phone number after stripping all
-     * non-numeric characters (AORM-6.14).
-     *
-     * Bugfix (incomplete phone accepted): originally 7, to allow short local
-     * subscriber numbers. That let partial numbers such as "613-202-00"
-     * (8 digits) pass on both the Add Individual form and CSV uploads and
-     * sync to the MDP. Raised to 10 — a full North American number
-     * (area code + 7 digits). Shorter international numbers must be entered
-     * with their country code. Mirrored by PHONE_MIN_DIGITS in
-     * IndividualAddForm.js.
-     */
-    public const PHONE_MIN_DIGITS = 10;
-
-    /**
-     * Maximum number of digits in a valid phone number after stripping all
-     * non-numeric characters (AORM-6.14).
-     *
-     * Mirrors the E.164 international standard ceiling of 15 digits.
-     * Mirrored by PHONE_MAX_DIGITS in IndividualAddForm.js.
-     */
-    public const PHONE_MAX_DIGITS = 15;
-
-    /**
      * Phone character-shape regex (post-AORM-6.14 bugfix).
      *
-     * Mirrors PHONE_REGEX in IndividualAddForm.js exactly — the two were
-     * always intended to apply the same rule to CSV rows, but the CSV path
-     * only ever checked digit count, so any string containing enough digit
-     * characters passed regardless of what else was in the field (including
-     * letters, or digits with no plausible phone shape).
+     * Mirrors PHONE_REGEX in IndividualAddForm.js exactly.
      *
      * Accepts an optional leading +, then 7-20 characters of digits, spaces,
-     * hyphens, parentheses, or dots. Checked before the digit-count rule so
-     * disallowed characters are rejected outright.
+     * hyphens, parentheses, or dots. Checked before the numbering-plan check
+     * so disallowed characters are rejected outright. Still needed alongside
+     * libphonenumber because libphonenumber accepts inline extensions
+     * ("613-237-5000 x123"), which are not supported here.
      */
     public const PHONE_REGEX = '/^[+]?[\d\s\-().]{7,20}$/';
 
     /**
+     * Default region (ISO 3166-1 alpha-2) used to parse phone numbers entered
+     * without a leading "+country code".
+     *
+     * "CA" resolves a bare 10-digit number against the North American
+     * Numbering Plan (+1), covering both Canadian and US numbers. Numbers
+     * entered with a "+" prefix are parsed against their own country code.
+     * Mirrors DEFAULT_PHONE_COUNTRY in IndividualAddForm.js.
+     */
+    public const PHONE_DEFAULT_REGION = 'CA';
+
+    /**
      * Human-readable validation label for rows where the phone value is
-     * present but fails the character-shape or digit-count checks
+     * present but fails the character-shape or numbering-plan checks
      * (AORM-6.14).
      *
      * Stored in the validation_message column of wp_wicket_aorm_staged_records.
@@ -149,9 +138,9 @@ class ValidationService
      *   1. Required fields present and non-empty after trimming.
      *   2. first_name/last_name format matches NAME_REGEX (only when present).
      *   3. Email format matches EMAIL_REGEX.
-     *   4. Phone (only when phone is provided): character shape matches
-     *      PHONE_REGEX; digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS
-     *      after stripping non-numeric characters.
+     *   4. Phone (only when phone is provided): isValidPhone() — character
+     *      shape matches PHONE_REGEX and the number is valid in its
+     *      numbering plan (libphonenumber, PHONE_DEFAULT_REGION).
      *
      * @param array<string, string> $fields Associative array of field values.
      * @return array<string, string> Field-keyed error messages (empty = valid).
@@ -203,29 +192,54 @@ class ValidationService
         }
 
         // 4. Phone format (optional field — only validate when provided).
-        //    An absent or blank value is valid (empty is OK). Two checks,
-        //    in order (cheapest/most-decisive first):
-        //      a. Character shape — PHONE_REGEX (bugfix, post-AORM-6.14).
-        //         Rejects disallowed characters (e.g. letters) and enforces
-        //         overall length before looking at digit content at all.
-        //      b. Digit count within PHONE_MIN_DIGITS–PHONE_MAX_DIGITS after
-        //         stripping non-numeric characters (AORM-6.14, MDP rules).
+        //    An absent or blank value is valid (empty is OK).
         $phone = trim((string) ($fields['phone'] ?? ''));
 
-        if ($phone !== '') {
-            if (! preg_match(self::PHONE_REGEX, $phone)) {
-                $errors['phone'] = 'Invalid phone number format.';
-            } else {
-                $digits     = (string) preg_replace('/\D/', '', $phone);
-                $digitCount = strlen($digits);
-
-                if ($digitCount < self::PHONE_MIN_DIGITS || $digitCount > self::PHONE_MAX_DIGITS) {
-                    $errors['phone'] = 'Invalid phone number format.';
-                }
-            }
+        if ($phone !== '' && ! $this->isValidPhone($phone)) {
+            $errors['phone'] = 'Invalid phone number format.';
         }
 
         return $errors;
+    }
+
+    /**
+     * Whether a non-empty phone value is valid.
+     *
+     * Two checks, both required (cheapest first):
+     *   1. Character shape — PHONE_REGEX. Rejects letters and inline
+     *      extensions before any parsing.
+     *   2. Numbering-plan validity via libphonenumber
+     *      (giggsey/libphonenumber-for-php-lite), parsed against
+     *      PHONE_DEFAULT_REGION. This follows how MDP validates phones (it
+     *      parses each number against a numbering plan to derive its E.164 /
+     *      national / international formats). It enforces length per
+     *      country — so partial numbers like "613-202-00" fail — and rejects
+     *      numbers that can't exist, e.g. an unassigned area code
+     *      ("555-867-5309") or an exchange starting with 0/1 ("613-123-4526").
+     *
+     * Replaces the former PHONE_MIN_DIGITS (10) / PHONE_MAX_DIGITS (15)
+     * digit-count bounds, which libphonenumber makes redundant. Mirrors
+     * isValidPhone() in IndividualAddForm.js (libphonenumber-js), so the form
+     * and the server agree.
+     *
+     * @param string $phone Trimmed, non-empty phone value.
+     * @return bool True when valid.
+     */
+    public function isValidPhone(string $phone): bool
+    {
+        if (! preg_match(self::PHONE_REGEX, $phone)) {
+            return false;
+        }
+
+        $util = PhoneNumberUtil::getInstance();
+
+        try {
+            $parsed = $util->parse($phone, self::PHONE_DEFAULT_REGION);
+        } catch (NumberParseException) {
+            return false;
+        }
+
+        return $util->isValidNumber($parsed);
     }
 
     /**

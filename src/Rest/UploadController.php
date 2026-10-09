@@ -213,7 +213,7 @@ class UploadController extends RestController
             $nameInvalid     = (isset($errors['first_name']) || isset($errors['last_name'])) && ! $nameMissing;
             // AORM-6.13: email is present but fails format/length rules (not a missing-data error).
             $emailInvalid = isset($errors['email']) && ! $emailMissing;
-            // AORM-6.14: phone is present but digit count is out of range.
+            // AORM-6.14: phone is present but fails ValidationService::isValidPhone().
             $phoneInvalid = isset($errors['phone']);
             // AORM-6.15/6.16 (extended): second (or later) occurrence of this email address.
             $isDuplicate  = isset($duplicateIndices[$rowIndex]);
@@ -238,7 +238,7 @@ class UploadController extends RestController
                 $category          = 'discard';
                 ++$invalidCount;
             } elseif ($phoneInvalid) {
-                // AORM-6.14: phone is present but digit count is out of range.
+                // AORM-6.14: phone is present but fails ValidationService::isValidPhone().
                 $validationStatus  = 'invalid';
                 $validationMessage = ValidationService::VALIDATION_LABEL_INVALID_PHONE;
                 $category          = 'discard';

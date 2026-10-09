@@ -112,7 +112,7 @@ The bulk upload is a guided, multi-step process:
 - First name, last name, and email are required.
 - Names must contain only letters, spaces, hyphens, and apostrophes.
 - Emails must be properly formatted.
-- Phone numbers, if provided, must have a reasonable number of digits (empty is fine).
+- Phone numbers, if provided, must be real, dialable numbers (empty is fine). Numbers without a `+` country code are read as Canadian/US numbers. Placeholder numbers such as `555-123-4567` are rejected, and extensions (`x123`) aren't supported.
 - Rows with the same email address as an earlier row in the same file are flagged as duplicates.
 
 If anything fails validation, the admin can't proceed — they need to fix the file and re-upload. Only a fully clean file moves on to the next step.

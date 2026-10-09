@@ -95,10 +95,9 @@ export const DEFAULT_PHONE_COUNTRY = 'CA';
  *      ("555-867-5309") or an exchange starting with 0/1 ("613-123-4526").
  *
  * No separate digit-count check: libphonenumber already enforces per-country
- * length. The server's ValidationService still requires 10–15 digits, so a
- * valid short international number (e.g. Andorra "+376 312 345", 9 digits)
- * passes here and is rejected by the server with a 422, which the form shows
- * inline under the phone field.
+ * length. Mirrors ValidationService::isValidPhone() on the server
+ * (giggsey/libphonenumber-for-php-lite, same Google metadata, same "CA"
+ * default region), so the form and the server agree.
  *
  * @param {string} phone Trimmed phone value.
  * @returns {boolean} True when valid.

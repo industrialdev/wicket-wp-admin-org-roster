@@ -12,6 +12,7 @@
     ],
     "require": {
         "php": ">=8.2",
+        "giggsey/libphonenumber-for-php-lite": "^9.0",
         "woocommerce/action-scheduler": "^3.0"
     },
     "autoload": {
