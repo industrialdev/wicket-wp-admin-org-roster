@@ -184,44 +184,41 @@ class MenuPage
         $table->display();
         echo '</form>';
         echo '</div>';
-        $this->renderRosterRowStatusStyles();
+        $this->renderRosterStatusPillStyles();
     }
 
     /**
-     * Row highlight colours per roster_status: [background tint, accent bar].
-     * WP admin palette (same hues as core notices). idle / not_started are
-     * intentionally absent — those rows keep the default striping.
+     * Roster Status pill colours per roster_status: [background, border].
+     * Statuses not listed here (idle, unknown) use the neutral base pill.
      *
      * @var array<string, array{0: string, 1: string}>
      */
-    private const ROSTER_ROW_STATUS_COLORS = [
+    private const ROSTER_STATUS_PILL_COLORS = [
+        'in_progress'  => ['#fcf3cf', '#dba617'],
+        'syncing'      => ['#e5f0fa', '#72aee6'],
         'has_failures' => ['#fcf0f1', '#d63638'],
-        'syncing'      => ['#fcf9e8', '#dba617'],
-        'in_progress'  => ['#f0f6fc', '#72aee6'],
-        'synced'       => ['#edfaef', '#00a32a'],
+        'synced'       => ['#dff5dc', '#4ab866'],
     ];
 
     /**
-     * Print the inline styles that highlight Organization Rosters rows by
-     * roster status (classes added by RosterListTable::single_row()).
+     * Print the inline styles for the Roster Status column pills
+     * (classes added by RosterListTable::column_roster_status()).
      *
      * Inline because this page is plain PHP and enqueues no stylesheet (the
      * build/index.css bundle only loads on React pages) — same approach as
-     * renderLogsToggleScript(). Selectors include `.wp-list-table > tbody > tr`
-     * so they out-specify core's `.striped > tbody > :nth-child(odd)` stripe.
-     * Colour is never the only signal: the Roster Status column shows the label.
+     * renderLogsToggleScript().
      */
-    private function renderRosterRowStatusStyles(): void
+    private function renderRosterStatusPillStyles(): void
     {
-        $css = '';
+        $pill = '.' . RosterListTable::STATUS_PILL_CLASS;
+        $css  = $pill . '{display:inline-block;padding:2px 8px;border:1px solid #c3c4c7;border-radius:3px;'
+            . 'background-color:#f0f0f1;color:#1d2327;font-size:12px;font-weight:500;line-height:1.6;white-space:nowrap;}';
 
-        foreach (self::ROSTER_ROW_STATUS_COLORS as $status => [$background, $accent]) {
-            $selector = '.wp-list-table > tbody > tr.' . RosterListTable::ROW_CLASS . '--' . $status;
-            $css     .= $selector . '{background-color:' . $background . ';}';
-            $css     .= $selector . ' > :first-child{box-shadow:inset 4px 0 0 ' . $accent . ';}';
+        foreach (self::ROSTER_STATUS_PILL_COLORS as $status => [$background, $border]) {
+            $css .= $pill . '--' . $status . '{background-color:' . $background . ';border-color:' . $border . ';}';
         }
 
-        echo '<style id="aorm-roster-row-status-styles">' . $css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from class constants only.
+        echo '<style id="aorm-roster-status-pill-styles">' . $css . '</style>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from class constants only.
     }
 
     /**

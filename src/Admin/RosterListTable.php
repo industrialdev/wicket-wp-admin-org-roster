@@ -101,10 +101,10 @@ class RosterListTable extends WP_List_Table
     public const MEMBERSHIP_STATUS_GRACE_PERIOD = 'grace_period';
 
     /**
-     * Base CSS class on every roster row; single_row() appends a
-     * ROW_CLASS--{roster_status} modifier used for status highlighting.
+     * Base CSS class of the Roster Status column pill; column_roster_status()
+     * appends a STATUS_PILL_CLASS--{roster_status} colour modifier.
      */
-    public const ROW_CLASS = 'aorm-roster-row';
+    public const STATUS_PILL_CLASS = 'aorm-status-pill';
 
     /**
      * Roster Status filter dropdown options, value => label. Order here is
@@ -466,11 +466,11 @@ class RosterListTable extends WP_List_Table
      * Render the Roster Status column.
      *
      * Value sourced from wp_wicket_aorm_roster_meta.roster_status (AORM-3.3).
-     * The stored ENUM slug (e.g. 'has_failures') is rendered as its
-     * human-readable label from ROSTER_STATUS_LABELS (e.g. "Has Failures") —
-     * the same labels the Roster Status filter dropdown uses. Slugs missing
-     * from that map are humanized (underscores → spaces, Title Case) rather
-     * than shown raw.
+     * The stored ENUM slug (e.g. 'has_failures') is rendered as a coloured
+     * status pill carrying its human-readable label from ROSTER_STATUS_LABELS
+     * (e.g. "Has Failures") — the same labels the Roster Status filter
+     * dropdown uses. Slugs missing from that map are humanized (underscores →
+     * spaces, Title Case) and rendered as a neutral pill.
      *
      * @param array<string, mixed> $item
      */
@@ -482,45 +482,24 @@ class RosterListTable extends WP_List_Table
             return '<span class="description" aria-label="' . esc_attr__('No roster activity yet', 'wicket-aorm') . '">—</span>';
         }
 
-        return esc_html($this->rosterStatusLabel($status));
+        return '<span class="' . esc_attr($this->statusPillClass($status)) . '">'
+            . esc_html($this->rosterStatusLabel($status))
+            . '</span>';
     }
 
     /**
-     * Render a single row, tagged with a roster-status CSS class so the row
-     * can be highlighted (styles in MenuPage::renderRosterRowStatusStyles()).
-     *
-     * @param array<string, mixed> $item
+     * Build the pill's CSS class list: always STATUS_PILL_CLASS, plus a
+     * STATUS_PILL_CLASS--{status} modifier only for statuses listed in
+     * ROSTER_STATUS_LABELS (an allow-list, so the class is always safe).
+     * Unknown statuses get the base (neutral) pill only.
      */
-    public function single_row($item): void
+    private function statusPillClass(string $status): string
     {
-        echo '<tr class="' . esc_attr($this->getRowStatusClass((array) $item)) . '">';
-        $this->single_row_columns($item);
-        echo '</tr>';
-    }
-
-    /**
-     * Build the row's CSS class list from its roster_status.
-     *
-     * Always includes ROW_CLASS. Adds a ROW_CLASS--{status} modifier only for
-     * statuses listed in ROSTER_STATUS_LABELS (an allow-list, so the class is
-     * always safe); an empty status maps to the 'not_started' modifier,
-     * unknown statuses get no modifier.
-     *
-     * @param array<string, mixed> $item
-     */
-    public function getRowStatusClass(array $item): string
-    {
-        $status = (string) ($item['roster_status'] ?? '');
-
-        if ($status === '') {
-            $status = self::ROSTER_STATUS_NOT_STARTED;
-        }
-
         if (! isset(self::ROSTER_STATUS_LABELS[$status])) {
-            return self::ROW_CLASS;
+            return self::STATUS_PILL_CLASS;
         }
 
-        return self::ROW_CLASS . ' ' . self::ROW_CLASS . '--' . $status;
+        return self::STATUS_PILL_CLASS . ' ' . self::STATUS_PILL_CLASS . '--' . $status;
     }
 
     /**
