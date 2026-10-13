@@ -34,7 +34,10 @@ use WicketAORM\Database\StagedRecordsTable;
  *         "raw_data":      object
  *       },
  *       ...
- *     ]
+ *     ],
+ *     "remaining":      int      // session-wide rows still needing review or
+ *                                // sync (StagedRecordsTable::getRemainingWorkCount());
+ *                                // > 0 → results screen offers "Continue Reviewing"
  *   }
  *
  * Returns 404 when no rows exist for the given session_id.
@@ -126,6 +129,13 @@ class SyncStatusController extends RestController
         // Sync is complete when nothing is pending (all rows have settled).
         $isComplete = $pending === 0;
 
+        // Multi-visit sessions: how much of the whole session (not just this
+        // batch) still needs review or a sync. The results screen shows
+        // "Continue Reviewing" and keeps the session while this is > 0.
+        // Only meaningful once the batch is complete — while it is running,
+        // the batch's own pending rows are included in the count.
+        $remaining = $table->getRemainingWorkCount($sessionId);
+
         return new \WP_REST_Response(
             [
                 'session_id'     => $sessionId,
@@ -136,6 +146,7 @@ class SyncStatusController extends RestController
                 'percentage'     => $percentage,
                 'is_complete'    => $isComplete,
                 'failed_records' => $progress['failed_records'],
+                'remaining'      => $remaining,
             ],
             200,
         );

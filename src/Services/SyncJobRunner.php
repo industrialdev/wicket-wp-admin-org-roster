@@ -167,9 +167,12 @@ class SyncJobRunner
         }
 
         // The batch was partial (or empty): all eligible records have been
-        // processed. Read the full session progress to get accurate totals
-        // across all batches, then write the completion log entry.
-        $progress = $table->getSyncProgress($uploadSessionId);
+        // processed. Read the progress of this commit (all of its batches) to
+        // get accurate totals, then write the completion log entry.
+        // Multi-visit sessions: scoped to the committed $ids (CommitController
+        // resolves "all" to concrete IDs) so rows synced on an earlier visit
+        // are not counted again in this run's log entry.
+        $progress = $table->getSyncProgress($uploadSessionId, $ids);
 
         $logger->logSyncComplete(
             $uploadSessionId,
@@ -179,5 +182,18 @@ class SyncJobRunner
             $progress['synced'],
             $progress['failed'],
         );
+
+        // Multi-visit sessions: when this batch synced cleanly but the session
+        // still has rows awaiting review or sync, the roster isn't finished —
+        // keep it 'in_progress' rather than the 'synced' logSyncComplete() just
+        // wrote. A batch with failures keeps 'has_failures' (more urgent).
+        if (
+            $progress['failed'] === 0
+            && $orgUuid !== ''
+            && $membershipUuid !== ''
+            && $table->getRemainingWorkCount($uploadSessionId) > 0
+        ) {
+            $logger->markRosterInProgress($orgUuid, $membershipUuid, $uploadedBy);
+        }
     }
 }

@@ -25,9 +25,21 @@ use WicketAORM\Database\StagedRecordsTable;
  *       Permanently remove a single staged record from the database (AORM-8B.9).
  *       Returns 404 when the record does not exist, 200 with
  *       {deleted: true, id} on success.
+ *
+ * Multi-visit sessions: PATCH and DELETE return 409 for a record whose
+ * sync_status is 'synced' — it has already been pushed to the MDP and is
+ * shown read-only in the session's Synced panel. StagedResolveController
+ * applies the same guard to PATCH /staged/{id}/resolve.
  */
 class StagedRecordController extends RestController
 {
+    /**
+     * 409 message returned when an admin tries to change or delete a record
+     * that has already been synced to the MDP. Shared with
+     * StagedResolveController.
+     */
+    public const SYNCED_RECORD_LOCKED_MESSAGE = 'This record has already been synced to the MDP and can no longer be changed.';
+
     /**
      * Valid target categories accepted by the PATCH endpoint.
      * Any value outside this set is rejected with a 400 response.
@@ -211,6 +223,15 @@ class StagedRecordController extends RestController
             );
         }
 
+        // Multi-visit sessions: a record already pushed to the MDP is
+        // read-only — moving it would make it look unsynced again.
+        if ((string) ($record['sync_status'] ?? '') === StagedRecordsTable::SYNC_STATUS_SYNCED) {
+            return new \WP_REST_Response(
+                ['message' => self::SYNCED_RECORD_LOCKED_MESSAGE],
+                409,
+            );
+        }
+
         $previousCategory = isset($record['category']) && $record['category'] !== ''
             ? (string) $record['category']
             : null;
@@ -263,6 +284,15 @@ class StagedRecordController extends RestController
             return new \WP_REST_Response(
                 ['message' => 'Staged record not found.'],
                 404,
+            );
+        }
+
+        // Multi-visit sessions: keep synced rows so the session's Synced panel
+        // stays an accurate record of what this session pushed to the MDP.
+        if ((string) ($record['sync_status'] ?? '') === StagedRecordsTable::SYNC_STATUS_SYNCED) {
+            return new \WP_REST_Response(
+                ['message' => self::SYNCED_RECORD_LOCKED_MESSAGE],
+                409,
             );
         }
 

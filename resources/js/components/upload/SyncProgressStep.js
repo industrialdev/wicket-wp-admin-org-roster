@@ -50,10 +50,20 @@
  *      since that's OrgRosterDetail's default initial tab and the upload
  *      session is already gone.
  *
+ * Multi-visit sessions (client request: syncing part of a session must not
+ * end it): the sync-status response carries `remaining` — rows in the whole
+ * session still awaiting review or sync. When it is > 0 the Results phase
+ * shows an info Notice with that count and a primary **Continue Reviewing**
+ * button that calls goToStep('validation-review') — the session is kept, no
+ * DELETE, no reload. **Done** (DELETE + reload) is only shown once nothing is
+ * left (or when no goToStep prop is passed). Abandon Session stays on the
+ * Review screen as the way to end a session early.
+ *
  * @param {{
  *   sessionId:        string|null,
  *   resetWizard:      () => void,
  *   onSyncComplete:   (() => void)|undefined,
+ *   goToStep:         ((step: string) => void)|undefined,
  * }} props
  */
 
@@ -97,9 +107,30 @@ export const FAILURE_NOTICE_CLASS = 'aorm-sync-progress__notice--failure';
  */
 export const START_OVER_BTN_CLASS = 'aorm-sync-progress__start-over-btn';
 
+/**
+ * CSS class for the "Continue Reviewing" button (multi-visit sessions).
+ *
+ * @type {string}
+ */
+export const CONTINUE_REVIEWING_BTN_CLASS = 'aorm-sync-progress__continue-btn';
+
+/**
+ * CSS class for the Notice saying how many records still need work.
+ *
+ * @type {string}
+ */
+export const REMAINING_NOTICE_CLASS = 'aorm-sync-progress__remaining-notice';
+
+/**
+ * Wizard step the "Continue Reviewing" button returns to.
+ *
+ * @type {string}
+ */
+export const CONTINUE_REVIEWING_STEP = 'validation-review';
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SyncProgressStep( { sessionId, resetWizard, onSyncComplete } ) {
+export default function SyncProgressStep( { sessionId, resetWizard, onSyncComplete, goToStep } ) {
 
 	// ── Phase ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +150,14 @@ export default function SyncProgressStep( { sessionId, resetWizard, onSyncComple
 	const [ finalSynced,   setFinalSynced   ] = useState( 0 );
 	const [ finalFailed,   setFinalFailed   ] = useState( 0 );
 	const [ failedRecords, setFailedRecords ] = useState( [] );
+
+	/**
+	 * Multi-visit sessions: rows in the whole session (not just this batch)
+	 * still waiting for review or sync, from the sync-status `remaining`
+	 * field. > 0 → keep the session and offer "Continue Reviewing" instead
+	 * of "Done". Missing from older responses → treated as 0.
+	 */
+	const [ finalRemaining, setFinalRemaining ] = useState( 0 );
 
 	// ── Retry state ───────────────────────────────────────────────────────────
 
@@ -179,6 +218,7 @@ export default function SyncProgressStep( { sessionId, resetWizard, onSyncComple
 				setFinalSynced( data.synced ?? 0 );
 				setFinalFailed( data.failed ?? 0 );
 				setFailedRecords( data.failed_records ?? [] );
+				setFinalRemaining( Number( data.remaining ?? 0 ) || 0 );
 
 				// Refresh the roster header's assigned_count (see the bugfix
 				// note in the file docblock) as soon as the sync is known to
@@ -258,6 +298,7 @@ export default function SyncProgressStep( { sessionId, resetWizard, onSyncComple
 			setFinalSynced( 0 );
 			setFinalFailed( 0 );
 			setFailedRecords( [] );
+			setFinalRemaining( 0 );
 
 			// Incrementing retryKey restarts the polling useEffect.
 			setRetryKey( ( k ) => k + 1 );
@@ -318,6 +359,20 @@ export default function SyncProgressStep( { sessionId, resetWizard, onSyncComple
 
 		window.location.reload();
 	}, [ sessionId ] );
+
+	// ── Continue Reviewing handler (multi-visit sessions) ─────────────────────
+
+	/**
+	 * Return to the Review step without touching the session, so the admin
+	 * can keep working through the remaining Possible / Probable / Manual
+	 * Update rows and sync again. The roster header was already refreshed
+	 * via onSyncComplete when the poll reported is_complete.
+	 */
+	const handleContinueReviewing = useCallback( () => {
+		goToStep?.( CONTINUE_REVIEWING_STEP );
+	}, [ goToStep ] );
+
+	const hasRemainingWork = finalRemaining > 0 && typeof goToStep === 'function';
 
 	// ── Derived display value ─────────────────────────────────────────────────
 
@@ -513,16 +568,44 @@ export default function SyncProgressStep( { sessionId, resetWizard, onSyncComple
 					</Notice>
 				) }
 
-				<div className="aorm-sync-progress__footer">
-					<Button
-						variant="primary"
-						onClick={ handleDone }
-						isBusy={ isClearingSession }
-						disabled={ isClearingSession }
-						className={ DONE_BTN_CLASS }
+				{ /* Multi-visit sessions: the session still has work left */ }
+				{ hasRemainingWork && (
+					<Notice
+						status="info"
+						isDismissible={ false }
+						className={ REMAINING_NOTICE_CLASS }
 					>
-						{ __( 'Done', 'wicket-aorm' ) }
-					</Button>
+						{ sprintf(
+							/* translators: %d: number of records in the session still awaiting review or sync */
+							__(
+								'%d record(s) in this session still need review or syncing. Your progress is saved — you can continue now or come back to this roster later.',
+								'wicket-aorm'
+							),
+							finalRemaining
+						) }
+					</Notice>
+				) }
+
+				<div className="aorm-sync-progress__footer">
+					{ hasRemainingWork ? (
+						<Button
+							variant="primary"
+							onClick={ handleContinueReviewing }
+							className={ CONTINUE_REVIEWING_BTN_CLASS }
+						>
+							{ __( 'Continue Reviewing', 'wicket-aorm' ) }
+						</Button>
+					) : (
+						<Button
+							variant="primary"
+							onClick={ handleDone }
+							isBusy={ isClearingSession }
+							disabled={ isClearingSession }
+							className={ DONE_BTN_CLASS }
+						>
+							{ __( 'Done', 'wicket-aorm' ) }
+						</Button>
+					) }
 				</div>
 
 			</div>

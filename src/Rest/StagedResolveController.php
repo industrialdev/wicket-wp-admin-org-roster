@@ -35,6 +35,8 @@ use WicketAORM\Database\StagedRecordsTable;
  *
  * Returns 400 when action is invalid or merge_target_uuid is missing for merge.
  * Returns 404 when no staged record exists for the given ID.
+ * Returns 409 when the record has already been synced to the MDP
+ * (sync_status = 'synced') — synced rows are read-only (multi-visit sessions).
  */
 class StagedResolveController extends RestController
 {
@@ -155,6 +157,14 @@ class StagedResolveController extends RestController
             return new \WP_REST_Response(
                 ['message' => 'Staged record not found.'],
                 404,
+            );
+        }
+
+        // Multi-visit sessions: already-synced records are read-only.
+        if ((string) ($record['sync_status'] ?? '') === StagedRecordsTable::SYNC_STATUS_SYNCED) {
+            return new \WP_REST_Response(
+                ['message' => StagedRecordController::SYNCED_RECORD_LOCKED_MESSAGE],
+                409,
             );
         }
 

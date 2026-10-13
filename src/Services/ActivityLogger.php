@@ -246,6 +246,50 @@ class ActivityLogger
     }
 
     /**
+     * Mark a roster as 'in_progress' in wp_wicket_aorm_roster_meta.
+     *
+     * Multi-visit sessions: called by SyncJobRunner after logSyncComplete()
+     * when a batch synced cleanly but the upload session still has rows
+     * waiting for review or sync. Without it the roster list would show
+     * "Synced" for a roster the admin is still working through.
+     *
+     * Meta-only upsert (no log row), same shape as markRosterSyncing().
+     * last_synced_at is left untouched so the clean-batch timestamp
+     * logSyncComplete() just wrote is kept.
+     *
+     * @param string $orgUuid        Organisation UUID.
+     * @param string $membershipUuid Membership UUID.
+     * @param int    $userId         WordPress user ID (0 = system).
+     */
+    public function markRosterInProgress(
+        string $orgUuid,
+        string $membershipUuid,
+        int $userId,
+    ): void {
+        $db        = $this->wpdb ?? $GLOBALS['wpdb'];
+        $now       = current_time('mysql', true);
+        $actor     = $this->resolveActorName($userId);
+        $metaTable = $db->prefix . 'wicket_aorm_roster_meta';
+
+        $db->query(
+            $db->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "INSERT INTO {$metaTable}
+                   (org_uuid, membership_uuid, roster_status, last_updated_at, last_updated_by)
+                 VALUES (%s, %s, 'in_progress', %s, %s)
+                 ON DUPLICATE KEY UPDATE
+                   roster_status   = VALUES(roster_status),
+                   last_updated_at = VALUES(last_updated_at),
+                   last_updated_by = VALUES(last_updated_by)",
+                $orgUuid,
+                $membershipUuid,
+                $now,
+                $actor,
+            ),
+        );
+    }
+
+    /**
      * Log a single staged record's sync outcome to wp_wicket_aorm_logs.
      *
      * Called by SyncJobRunner inside the record loop for both successes and

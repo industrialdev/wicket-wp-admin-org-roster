@@ -19,6 +19,19 @@ class StagedRecordsTable
      */
     private const ACTIVE_SYNC_STATUSES = ['pending', 'ready_to_sync'];
 
+    /** sync_status value written by SyncJobRunner on a successful MDP sync. */
+    public const SYNC_STATUS_SYNCED = 'synced';
+
+    /** sync_status value written by SyncJobRunner when an MDP sync throws. */
+    public const SYNC_STATUS_FAILED = 'failed';
+
+    /**
+     * Key of the read-only bucket getGroupedByCategory() returns for rows that
+     * were already synced earlier in a multi-visit session. Not a real
+     * `category` ENUM value — synced rows keep category = 'ready_to_sync'.
+     */
+    public const SYNCED_BUCKET = 'synced';
+
     /**
      * Check whether an active staged-records session already exists for the
      * given org + membership combination.
@@ -548,12 +561,20 @@ class StagedRecordsTable
      *   'probable_match' => ['count' => int, 'records' => [...]],
      *   'manual_update'  => ['count' => int, 'records' => [...]],
      *   'discard'        => ['count' => int, 'records' => [...]],
+     *   'synced'         => ['count' => int, 'records' => [...]],
      * ]
+     *
+     * Multi-visit sessions: any row whose sync_status is 'synced' is placed in
+     * the read-only 'synced' bucket regardless of its stored category, so an
+     * admin returning to a partially-synced session only sees outstanding work
+     * under Ready to Sync. Failed rows stay in Ready to Sync (they can be
+     * re-committed — see CommitController / resetFailedForSync()).
      *
      * Each record array contains:
      *   - 'id'                (int)          — auto-increment row ID
      *   - 'record_status'     (string)       — e.g. 'new_record', 'exact_match'
      *   - 'sync_status'       (string)       — e.g. 'pending', 'ready_to_sync'
+     *   - 'error_details'     (string|null)  — last sync error (failed rows), else null
      *   - 'raw_data'          (array)        — decoded parsed CSV field values
      *   - 'match_count'       (int)          — number of MDP candidates found
      *   - 'previous_category' (string|null)  — set when record was moved from
@@ -570,6 +591,7 @@ class StagedRecordsTable
      *   probable_match: array{count: int, records: list<array<string, mixed>>},
      *   manual_update: array{count: int, records: list<array<string, mixed>>},
      *   discard: array{count: int, records: list<array<string, mixed>>},
+     *   synced: array{count: int, records: list<array<string, mixed>>},
      * }
      */
     public function getGroupedByCategory(string $sessionId): array
@@ -581,7 +603,7 @@ class StagedRecordsTable
         $rows = $wpdb->get_results(
             $wpdb->prepare(
                 // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-                "SELECT id, category, record_status, sync_status, raw_data, match_count, previous_category, matched_persons
+                "SELECT id, category, record_status, sync_status, error_details, raw_data, match_count, previous_category, matched_persons
                  FROM {$table}
                  WHERE upload_session_id = %s
                    AND validation_status = 'valid'
@@ -597,10 +619,19 @@ class StagedRecordsTable
             'probable_match' => ['count' => 0, 'records' => []],
             'manual_update'  => ['count' => 0, 'records' => []],
             'discard'        => ['count' => 0, 'records' => []],
+            'synced'         => ['count' => 0, 'records' => []],
         ];
 
         foreach (is_array($rows) ? $rows : [] as $row) {
             $category = (string) ($row['category'] ?? '');
+
+            // Multi-visit sessions: rows already pushed to the MDP on an
+            // earlier sync are surfaced in their own read-only 'synced'
+            // bucket rather than their stored category (always ready_to_sync),
+            // so Ready to Sync and "Sync All" only reflect outstanding work.
+            if ((string) ($row['sync_status'] ?? '') === self::SYNC_STATUS_SYNCED) {
+                $category = self::SYNCED_BUCKET;
+            }
 
             if (! array_key_exists($category, $grouped)) {
                 continue;
@@ -625,6 +656,9 @@ class StagedRecordsTable
                 'id'                => (int) $row['id'],
                 'record_status'     => (string) ($row['record_status'] ?? ''),
                 'sync_status'       => (string) ($row['sync_status'] ?? ''),
+                'error_details'     => isset($row['error_details']) && $row['error_details'] !== ''
+                    ? (string) $row['error_details']
+                    : null,
                 'raw_data'          => json_decode((string) ($row['raw_data'] ?? '{}'), true) ?? [],
                 'match_count'       => (int) ($row['match_count'] ?? 0),
                 'previous_category' => $prevCat,
@@ -654,6 +688,10 @@ class StagedRecordsTable
      * the same category = 'ready_to_sync' guard already used by
      * getPendingSyncRecords() and getSyncProgress().
      *
+     * Multi-visit sessions: removals already synced on an earlier visit are
+     * excluded (sync_status != 'synced') — they appear in the read-only
+     * 'synced' bucket of getGroupedByCategory() instead.
+     *
      * @param  string $sessionId  The upload_session_id UUID.
      * @return list<array{
      *   id:                int,
@@ -679,6 +717,7 @@ class StagedRecordsTable
                    AND validation_status = 'valid'
                    AND record_status = 'remove_existing'
                    AND category = 'ready_to_sync'
+                   AND sync_status != 'synced'
                  ORDER BY id ASC",
                 $sessionId,
             ),
@@ -773,6 +812,113 @@ class StagedRecordsTable
         );
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Return the IDs of rows eligible for the next sync batch.
+     *
+     * Same eligibility rules as getPendingSyncRecords() (sync_status and
+     * category both 'ready_to_sync', optionally restricted to $ids), but only
+     * the IDs. CommitController uses it to turn {ids: "all"} into the concrete
+     * set being synced *now*, so progress counts and the completion log only
+     * cover this batch, not rows synced on an earlier visit to the session.
+     *
+     * Call after resetFailedForSync() so retried rows are included.
+     *
+     * @param string       $sessionId  The upload_session_id UUID.
+     * @param string|int[] $ids        'all', or an array of integer record IDs.
+     * @return list<int>
+     */
+    public function getPendingSyncRecordIds(string $sessionId, string|array $ids = 'all'): array
+    {
+        return array_values(array_map(
+            static fn (array $row): int => (int) ($row['id'] ?? 0),
+            $this->getPendingSyncRecords($sessionId, $ids),
+        ));
+    }
+
+    /**
+     * Put failed rows back in the sync queue so they can be retried.
+     *
+     * Sets sync_status back to 'ready_to_sync' and clears error_details for
+     * rows in the session with sync_status = 'failed' and
+     * category = 'ready_to_sync', optionally restricted to $ids.
+     *
+     * Bugfix ("Retry Failed Records" was a no-op): SyncJobRunner only picks up
+     * rows whose sync_status is 'ready_to_sync', so re-committing failed IDs
+     * used to dispatch a job that found nothing to do. CommitController now
+     * calls this before resolving the batch.
+     *
+     * @param string       $sessionId  The upload_session_id UUID.
+     * @param string|int[] $ids        'all', or an array of integer record IDs.
+     * @return int  Number of rows reset (0 on failure).
+     */
+    public function resetFailedForSync(string $sessionId, string|array $ids = 'all'): int
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $idClause = '';
+
+        if (is_array($ids) && ! empty($ids)) {
+            $sanitized = implode(', ', array_map('absint', $ids));
+            // $sanitized contains only comma-separated integers — safe to interpolate.
+            $idClause = "AND id IN ({$sanitized})";
+        }
+
+        $result = $wpdb->query(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "UPDATE {$table}
+                 SET sync_status = 'ready_to_sync',
+                     error_details = NULL,
+                     updated_at = %s
+                 WHERE upload_session_id = %s
+                   AND category = 'ready_to_sync'
+                   AND sync_status = 'failed'
+                   {$idClause}",
+                current_time('mysql'),
+                $sessionId,
+            ),
+        );
+
+        return $result === false ? 0 : (int) $result;
+    }
+
+    /**
+     * Count rows in a session that still need admin review or a sync.
+     *
+     * A row counts as remaining when it is valid, has sync_status 'pending' or
+     * 'ready_to_sync', and is not in the 'discard' category. That covers
+     * unsynced Ready to Sync rows and every Possible Match / Probable Match /
+     * Manual Updates row. Synced and failed rows are not counted, and neither
+     * are discarded ones (a resolved state).
+     *
+     * Multi-visit sessions: the sync results screen uses this (via the
+     * sync-status endpoint) to decide between "Continue Reviewing" (keep the
+     * session) and "Done" (clear it), and SyncJobRunner uses it to keep the
+     * roster marked 'in_progress' while work remains.
+     *
+     * @param string $sessionId  The upload_session_id UUID.
+     */
+    public function getRemainingWorkCount(string $sessionId): int
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        return (int) $wpdb->get_var(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT COUNT(*) FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND sync_status IN ('pending', 'ready_to_sync')
+                   AND category != 'discard'",
+                $sessionId,
+            ),
+        );
     }
 
     /**
@@ -950,6 +1096,10 @@ class StagedRecordsTable
      * after it has been settled for the full TTL period, not merely since it
      * was first created.
      *
+     * Rows belonging to a session that still has unresolved work (see
+     * getRemainingWorkCount()) are kept regardless of age, so partially-synced
+     * multi-visit sessions survive until they are finished or abandoned.
+     *
      * Called by CleanupJobRunner::handle() on a daily WP-Cron schedule.
      * The TTL value is read from wicket_aorm_settings[cleanup_ttl_days]
      * (default 30, configurable in the plugin settings under Background Jobs).
@@ -970,12 +1120,26 @@ class StagedRecordsTable
 
         $table = $wpdb->prefix . 'wicket_aorm_staged_records';
 
+        // Multi-visit sessions: never purge rows from a session that still has
+        // unresolved work (same definition as getRemainingWorkCount()), or an
+        // admin returning after the TTL would find the session's synced rows
+        // gone from the read-only Synced panel. The inner SELECT is wrapped in
+        // a derived table because MySQL does not allow a DELETE to select from
+        // the table it is deleting from directly.
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $sql = $wpdb->prepare(
             // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
             "DELETE FROM {$table}
              WHERE sync_status IN ('synced', 'failed')
-               AND updated_at < DATE_SUB(NOW(), INTERVAL %d DAY)",
+               AND updated_at < DATE_SUB(NOW(), INTERVAL %d DAY)
+               AND upload_session_id NOT IN (
+                   SELECT upload_session_id FROM (
+                       SELECT DISTINCT upload_session_id FROM {$table}
+                       WHERE validation_status = 'valid'
+                         AND sync_status IN ('pending', 'ready_to_sync')
+                         AND category != 'discard'
+                   ) AS aorm_active_sessions
+               )",
             $days,
         );
 

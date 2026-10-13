@@ -268,21 +268,23 @@ class Assets
             ];
         }
 
-        // Step 2 — has a sync been dispatched or started?
-        $syncProgress = $table->getSyncProgress($sessionId);
-
-        if ($syncProgress['synced'] + $syncProgress['failed'] > 0) {
-            // At least one record was processed by the sync job.
-            return [
-                'sessionId' => $sessionId,
-                'step'      => 'sync-progress',
-            ];
-        }
-
+        // Step 2 — is a sync in flight right now?
+        //
+        // Multi-visit sessions: only roster_status = 'syncing' means a sync is
+        // running. It is set by CommitController on dispatch and by
+        // SyncJobRunner on every batch, and replaced by 'synced' /
+        // 'has_failures' / 'in_progress' when the batch completes.
+        //
+        // This used to also return 'sync-progress' whenever
+        // getSyncProgress()['synced'] + ['failed'] > 0. Synced rows stay in the
+        // session until it is finished, abandoned, or purged by the cleanup
+        // job, so once anything had synced every reload replayed the "Sync
+        // Complete" screen instead of returning the admin to Review to keep
+        // working through the remaining records.
         $rosterStatus = $table->getRosterSyncStatus($orgUuid, $membershipUuid);
 
         if ($rosterStatus === 'syncing') {
-            // Job was dispatched but hasn't processed a record yet.
+            // Job dispatched (or mid-run) — resume on the progress screen.
             return [
                 'sessionId' => $sessionId,
                 'step'      => 'sync-progress',

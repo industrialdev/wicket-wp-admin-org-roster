@@ -12,6 +12,14 @@
  *   3. possible_match  — Possible Match
  *   4. manual_update   — Manual Updates
  *   5. discard         — Discard
+ *   6. synced          — Synced (read-only; multi-visit sessions)
+ *
+ * Multi-visit sessions: an admin can sync part of a session and come back
+ * later to keep working through the rest. Rows synced on an earlier visit are
+ * returned in a separate `synced` bucket and shown in the read-only
+ * SyncedPanel; an info Notice explains that the session can be continued or
+ * abandoned. Ready to Sync / "Sync All" only cover rows not yet synced
+ * (failed rows stay there and are retried on the next sync).
  *
  * AORM-8.4: A session header showing the uploaded file name and action type
  * is rendered above the accordion (not inside the Ready to Sync panel) since
@@ -83,6 +91,7 @@ import ProbableMatchPanel from './ProbableMatchPanel';
 import ReadyToSyncPanel from './ReadyToSyncPanel';
 import ReviewMatchModal from './ReviewMatchModal';
 import SyncConfirmModal from './SyncConfirmModal';
+import SyncedPanel from './SyncedPanel';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -115,7 +124,16 @@ export const CATEGORY_ORDER = [
 	'possible_match',
 	'manual_update',
 	'discard',
+	'synced',
 ];
+
+/**
+ * CSS class for the info Notice shown when part of the session has already
+ * been synced (multi-visit sessions).
+ *
+ * @type {string}
+ */
+export const PARTIAL_SYNC_NOTICE_CLASS = 'aorm-validation-review__partial-sync-notice';
 
 /**
  * Human-readable labels for each category key.
@@ -129,6 +147,7 @@ export const CATEGORY_LABELS = {
 	probable_match: __( 'Probable Match', 'wicket-aorm' ),
 	manual_update:  __( 'Manual Updates', 'wicket-aorm' ),
 	discard:        __( 'Discard',        'wicket-aorm' ),
+	synced:         __( 'Synced',         'wicket-aorm' ),
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -452,6 +471,24 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 				</div>
 			) }
 
+			{ /* Multi-visit sessions: part of this session is already in the MDP */ }
+			{ ! isLoading && ! error && ( categories?.synced?.count ?? 0 ) > 0 && (
+				<Notice
+					status="info"
+					isDismissible={ false }
+					className={ PARTIAL_SYNC_NOTICE_CLASS }
+				>
+					{ sprintf(
+						/* translators: %d: number of records already synced in this session */
+						__(
+							'%d record(s) from this session have already been synced. You can keep reviewing and syncing the remaining records, and come back to this session later. Use "Abandon Session" to stop without syncing the rest.',
+							'wicket-aorm'
+						),
+						categories.synced.count
+					) }
+				</Notice>
+			) }
+
 			{ /* Sync All button — shown when there are ready_to_sync records */ }
 			{ ! isLoading && ! error && ( categories?.ready_to_sync?.count ?? 0 ) > 0 && (
 				<div className="aorm-validation-review__sync-all-wrapper">
@@ -525,6 +562,9 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 										records={ bucket.records ?? [] }
 										onOpenReviewModal={ openReviewModal }
 									/>
+								) : key === 'synced' ? (
+									/* Multi-visit sessions: read-only list of rows synced on an earlier visit. */
+									<SyncedPanel records={ bucket.records ?? [] } />
 								) : key === 'manual_update' ? (
 									/* AORM-8.9: Manual Updates panel — table with Previous Category column.
 									 * AORM-8B.6: onRecordCategorized re-fetches after Reinstate/Remove. */

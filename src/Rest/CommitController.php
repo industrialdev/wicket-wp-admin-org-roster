@@ -20,10 +20,16 @@ use WicketAORM\Services\SyncJobRunner;
  *   { "ids": [1, 2, 3] }               — sync only the specified staged record IDs
  *
  * Responses:
- *   202 { accepted: true, session_id, ids: "all"|[...] }
- *   400 { message }  — ids is an empty array
+ *   202 { accepted: true, session_id, ids: "all"|[...] }  — ids echoes the request
+ *   400 { message }  — ids is an empty array, or nothing in it is waiting to sync
  *   404 { message }  — session not found
  *   422 { message }  — ids param is missing or of invalid type
+ *
+ * Multi-visit sessions: before dispatching, failed rows in the requested set
+ * are reset to 'ready_to_sync' (so retries actually re-sync), and the request
+ * is resolved to the concrete IDs still waiting to sync. Those IDs — not the
+ * raw "all" — go to the SyncJobRunner dispatch and to the committed-IDs
+ * transient, so progress and the completion log cover only this batch.
  *
  * @see AORM-9.2
  */
@@ -111,23 +117,42 @@ class CommitController extends RestController
             $normalizedIds = array_values(array_map('absint', $ids));
         }
 
+        // Bugfix ("Retry Failed Records" was a no-op): failed rows in the
+        // committed set go back to 'ready_to_sync' so SyncJobRunner picks them
+        // up again. With ids = "all" this also lets "Sync All" retry rows that
+        // failed on an earlier visit to the session.
+        $table->resetFailedForSync($sessionId, $normalizedIds);
+
+        // Multi-visit sessions: resolve the request into the concrete IDs that
+        // are still waiting to sync. A partially-synced session keeps its
+        // synced rows (category stays 'ready_to_sync'), so passing "all"
+        // through as-is would make the progress screen and the completion log
+        // count records synced on earlier visits as part of this batch.
+        $batchIds = $table->getPendingSyncRecordIds($sessionId, $normalizedIds);
+
+        if (count($batchIds) === 0) {
+            return new \WP_REST_Response(
+                ['message' => 'None of the requested records are waiting to be synced.'],
+                400,
+            );
+        }
+
         // Dispatch the background sync job.
         $scheduler = $this->schedulerService ?? new SchedulerService();
         $scheduler->dispatch(
             SyncJobRunner::HOOK,
             [
                 'upload_session_id' => $sessionId,
-                'ids'               => $normalizedIds,
+                'ids'               => $batchIds,
             ],
         );
 
-        // Store the committed IDs so the sync-status endpoint can scope its
+        // Store the batch IDs so the sync-status endpoint can scope its
         // progress counts to exactly the records being synced in this batch.
-        // 'all' is stored as-is; partial arrays are stored as int[].
         // Expires after 24 h — long enough for any foreseeable sync job.
         set_transient(
             'wicket_aorm_committed_ids_' . $sessionId,
-            $normalizedIds,
+            $batchIds,
             DAY_IN_SECONDS,
         );
 

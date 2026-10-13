@@ -984,6 +984,35 @@
 	margin-top: 20px;
 	padding-top: 16px;
 	border-top: 1px solid #dcdcde;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+/* -----------------------------------------------------------------------
+   Multi-visit sessions — partial sync
+   ----------------------------------------------------------------------- */
+
+.aorm-ready-to-sync-panel__sync-failed-badge {
+	display: inline-flex;
+	align-items: center;
+	margin-left: 6px;
+	padding: 1px 7px;
+	border-radius: 10px;
+	background: #fcf0f1;
+	color: #b32d2e;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.aorm-synced-panel__description {
+	margin: 0 0 12px;
+	color: #50575e;
+}
+
+.aorm-validation-review__partial-sync-notice,
+.aorm-sync-progress__remaining-notice {
+	margin: 0 0 16px;
 }
 
 /* -----------------------------------------------------------------------

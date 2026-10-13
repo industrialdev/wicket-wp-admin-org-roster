@@ -184,6 +184,20 @@ export const CROSS_ORG_WARNING_MESSAGE = __(
  */
 export const REMOVALS_START_OVER_BTN_CLASS = 'aorm-ready-to-sync-panel__removals-start-over';
 
+/**
+ * Multi-visit sessions: a row whose last sync attempt failed stays in Ready
+ * to Sync (synced rows move to the read-only Synced panel). It is flagged in
+ * the Status column and is retried by the next "Sync All" / "Sync to MDP" —
+ * CommitController resets failed rows before dispatching.
+ */
+export const SYNC_STATUS_FAILED = 'failed';
+
+/** Badge text shown next to the status of a failed row. */
+export const SYNC_FAILED_LABEL = __( 'Sync failed', 'wicket-aorm' );
+
+/** CSS class for the "Sync failed" badge. */
+export const SYNC_FAILED_BADGE_CLASS = 'aorm-ready-to-sync-panel__sync-failed-badge';
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReadyToSyncPanel( {
@@ -479,8 +493,19 @@ export default function ReadyToSyncPanel( {
 		{
 			key:    'record_status',
 			label:  __( 'Status', 'wicket-aorm' ),
-			render: ( record ) =>
-				RECORD_STATUS_LABELS[ record.record_status ] ?? record.record_status,
+			render: ( record ) => (
+				<>
+					{ RECORD_STATUS_LABELS[ record.record_status ] ?? record.record_status }
+					{ record.sync_status === SYNC_STATUS_FAILED && (
+						<span
+							className={ SYNC_FAILED_BADGE_CLASS }
+							title={ record.error_details || undefined }
+						>
+							{ SYNC_FAILED_LABEL }
+						</span>
+					) }
+				</>
+			),
 		},
 		actionsColumn,
 	];
