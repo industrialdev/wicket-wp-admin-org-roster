@@ -107,6 +107,8 @@ export function formatActivityType( action ) {
 		roles_added:     __( 'Roles Added', 'wicket-aorm' ),
 		roles_removed:   __( 'Roles Removed', 'wicket-aorm' ),
 		roles_updated:   __( 'Roles Updated', 'wicket-aorm' ),
+		session_abandoned: __( 'Session Abandoned', 'wicket-aorm' ),
+		session_closed:    __( 'Session Closed', 'wicket-aorm' ),
 	};
 
 	if ( map[ action ] ) {

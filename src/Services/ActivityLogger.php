@@ -245,6 +245,121 @@ class ActivityLogger
         );
     }
 
+    /** Log action for a session discarded while it still had unsynced work. */
+    public const ACTION_SESSION_ABANDONED = 'session_abandoned';
+
+    /** Log action for a session cleared after everything in it was processed ("Done"). */
+    public const ACTION_SESSION_CLOSED = 'session_closed';
+
+    /**
+     * Log the end of an upload session and, optionally, update the roster status.
+     *
+     * Called by UploadController::abandon() (DELETE /uploads/{session_id})
+     * after the session's staged rows are deleted. Writes one row —
+     * ACTION_SESSION_ABANDONED, or ACTION_SESSION_CLOSED when the caller
+     * passes it (session fully processed, e.g. "Done") — with object_type = 'roster' and
+     * object_id = $membershipUuid, so it shows on the roster's Activity tab
+     * as well as the Global Logs page. upload_session_id is set too.
+     *
+     * $rosterStatus === null means "keep the current status": the abandoned
+     * session pushed nothing to the MDP and the roster wasn't left mid-sync,
+     * so whatever an earlier session set (e.g. 'synced') still holds and no
+     * roster_meta write happens. Any other value is upserted with
+     * last_updated_at / last_updated_by (last_synced_at is left alone).
+     * UploadController::resolveAbandonedRosterStatus() picks the value.
+     *
+     * The roster_meta write also reaches the roster status a stale
+     * 'syncing' / 'in_progress' / 'has_failures' left behind mid-session
+     * (bugfix: it used to stay unchanged after an abandon).
+     *
+     * @param string               $uploadSessionId UUID of the abandoned session.
+     * @param string               $orgUuid         Organisation UUID.
+     * @param string               $membershipUuid  Membership UUID.
+     * @param string|null          $rosterStatus    ENUM value to write, or null to leave roster_meta untouched.
+     * @param array<string, mixed> $context         Counts etc., stored as JSON.
+     * @param string               $action          ACTION_SESSION_ABANDONED or ACTION_SESSION_CLOSED.
+     */
+    public function logSessionEnded(
+        string $uploadSessionId,
+        string $orgUuid,
+        string $membershipUuid,
+        ?string $rosterStatus,
+        array $context = [],
+        string $action = self::ACTION_SESSION_ABANDONED,
+    ): void {
+        $db     = $this->wpdb ?? $GLOBALS['wpdb'];
+        $userId = get_current_user_id();
+        $now    = current_time('mysql', true);
+
+        $message = sprintf(
+            $action === self::ACTION_SESSION_CLOSED
+                ? 'Upload session closed: %d synced, %d failed, %d unsynced record(s) discarded.'
+                : 'Upload session abandoned: %d synced, %d failed, %d unsynced record(s) discarded.',
+            (int) ($context['synced'] ?? 0),
+            (int) ($context['failed'] ?? 0),
+            (int) ($context['unsynced'] ?? 0),
+        );
+
+        $db->insert(
+            $db->prefix . 'wicket_aorm_logs',
+            [
+                'upload_session_id' => $uploadSessionId,
+                'org_uuid'          => $orgUuid,
+                'user_id'           => $userId,
+                'level'             => 'info',
+                'action'            => $action,
+                'object_type'       => 'roster',
+                'object_id'         => $membershipUuid,
+                'message'           => $message,
+                'context'           => json_encode(array_merge(
+                    [
+                        'upload_session_id' => $uploadSessionId,
+                        'membership_uuid'   => $membershipUuid,
+                        'roster_status'     => $rosterStatus,
+                    ],
+                    $context,
+                )),
+                'created_at'        => $now,
+            ],
+            [
+                '%s', // upload_session_id
+                '%s', // org_uuid
+                '%d', // user_id
+                '%s', // level
+                '%s', // action
+                '%s', // object_type
+                '%s', // object_id
+                '%s', // message
+                '%s', // context
+                '%s', // created_at
+            ],
+        );
+
+        if ($rosterStatus === null) {
+            return;
+        }
+
+        $metaTable = $db->prefix . 'wicket_aorm_roster_meta';
+
+        $db->query(
+            $db->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "INSERT INTO {$metaTable}
+                   (org_uuid, membership_uuid, roster_status, last_updated_at, last_updated_by)
+                 VALUES (%s, %s, %s, %s, %s)
+                 ON DUPLICATE KEY UPDATE
+                   roster_status   = VALUES(roster_status),
+                   last_updated_at = VALUES(last_updated_at),
+                   last_updated_by = VALUES(last_updated_by)",
+                $orgUuid,
+                $membershipUuid,
+                $rosterStatus,
+                $now,
+                $this->resolveActorName($userId),
+            ),
+        );
+    }
+
     /**
      * Mark a roster as 'in_progress' in wp_wicket_aorm_roster_meta.
      *

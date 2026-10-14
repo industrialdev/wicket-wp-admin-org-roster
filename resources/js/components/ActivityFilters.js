@@ -54,6 +54,8 @@ export const ACTIVITY_TYPE_OPTIONS = [
 	{ value: 'roles_added',     label: __( 'Roles Added',     'wicket-aorm' ) },
 	{ value: 'roles_removed',   label: __( 'Roles Removed',   'wicket-aorm' ) },
 	{ value: 'roles_updated',   label: __( 'Roles Updated',   'wicket-aorm' ) },
+	{ value: 'session_abandoned', label: __( 'Session Abandoned', 'wicket-aorm' ) },
+	{ value: 'session_closed',    label: __( 'Session Closed',    'wicket-aorm' ) },
 ];
 
 /** Options for the Status (log level) select. */

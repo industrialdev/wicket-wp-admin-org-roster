@@ -356,6 +356,46 @@ class UploadController extends RestController
     }
 
     /**
+     * Roster statuses that only make sense while a session is open. If an
+     * abandoned session pushed nothing to the MDP, these are reset to 'idle'.
+     *
+     * @var list<string>
+     */
+    public const SESSION_ONLY_ROSTER_STATUSES = ['syncing', 'in_progress'];
+
+    /**
+     * Roster status to write when a session is abandoned/closed, or null to
+     * leave the current status unchanged.
+     *
+     * - Any record in the session failed      → 'has_failures'
+     * - Some synced, none failed               → 'synced'
+     * - Nothing synced or failed (no MDP change):
+     *     current status is 'syncing'/'in_progress' → 'idle' (stale)
+     *     anything else (e.g. 'synced' from an earlier session, or no
+     *     roster_meta row yet)                      → null (keep it)
+     *
+     * @param int         $synced        Rows in the session with sync_status 'synced'.
+     * @param int         $failed        Rows in the session with sync_status 'failed'.
+     * @param string|null $currentStatus Current roster_meta.roster_status, or null.
+     */
+    public static function resolveAbandonedRosterStatus(int $synced, int $failed, ?string $currentStatus): ?string
+    {
+        if ($failed > 0) {
+            return 'has_failures';
+        }
+
+        if ($synced > 0) {
+            return 'synced';
+        }
+
+        if ($currentStatus !== null && in_array($currentStatus, self::SESSION_ONLY_ROSTER_STATUSES, true)) {
+            return 'idle';
+        }
+
+        return null;
+    }
+
+    /**
      * Handle DELETE /uploads/{session_id}.
      *
      * Permanently removes all staged records for the given session so the
@@ -363,13 +403,71 @@ class UploadController extends RestController
      * Idempotent: deleting a session that has already been removed (or never
      * existed) returns 200 with deleted = 0.
      *
+     * For a known session it also logs the session's end — 'session_abandoned',
+     * or 'session_closed' when nothing was left unsynced and something was
+     * processed — with synced / failed / unsynced counts, and updates
+     * roster_meta.roster_status via resolveAbandonedRosterStatus()
+     * (see ActivityLogger::logSessionEnded()).
+     * This runs for every caller of the endpoint: Abandon Session, "Start
+     * Fresh" in CsvValidationStep, and "Done" on the sync results screen.
+     *
      * @param \WP_REST_Request $request
      */
     public function abandon(\WP_REST_Request $request): \WP_REST_Response
     {
         $sessionId = (string) $request->get_param('session_id');
         $table     = $this->stagedRecordsTable ?? new StagedRecordsTable();
-        $deleted   = $table->deleteRecordsBySessionId($sessionId);
+
+        // Bugfix (roster status unchanged after abandon): capture what this
+        // session did before its rows are deleted, so the roster status can
+        // reflect it instead of keeping a stale 'in_progress' / 'syncing' /
+        // 'has_failures' from mid-session. Unknown sessions (null context)
+        // skip this — nothing to log, delete is still a no-op.
+        $context = $table->getSessionContext($sessionId);
+        $summary = null;
+
+        if ($context !== null && $context['org_uuid'] !== '' && $context['membership_uuid'] !== '') {
+            $progress = $table->getSyncProgress($sessionId);
+            $summary  = [
+                'synced'        => (int) $progress['synced'],
+                'failed'        => (int) $progress['failed'],
+                'unsynced'      => $table->getRemainingWorkCount($sessionId),
+                'action_type'   => $context['action_type'],
+                'currentStatus' => $table->getRosterSyncStatus($context['org_uuid'], $context['membership_uuid']),
+            ];
+        }
+
+        $deleted = $table->deleteRecordsBySessionId($sessionId);
+
+        if ($summary !== null) {
+            $rosterStatus = self::resolveAbandonedRosterStatus(
+                $summary['synced'],
+                $summary['failed'],
+                $summary['currentStatus'],
+            );
+
+            // "Done" after everything was processed is a close, not an abandon.
+            $action = ($summary['unsynced'] === 0 && $summary['synced'] + $summary['failed'] > 0)
+                ? ActivityLogger::ACTION_SESSION_CLOSED
+                : ActivityLogger::ACTION_SESSION_ABANDONED;
+
+            $logger = $this->activityLogger ?? new ActivityLogger();
+            $logger->logSessionEnded(
+                $sessionId,
+                $context['org_uuid'],
+                $context['membership_uuid'],
+                $rosterStatus,
+                [
+                    'synced'          => $summary['synced'],
+                    'failed'          => $summary['failed'],
+                    'unsynced'        => $summary['unsynced'],
+                    'deleted'         => $deleted,
+                    'action_type'     => $summary['action_type'],
+                    'previous_status' => $summary['currentStatus'],
+                ],
+                $action,
+            );
+        }
 
         return new \WP_REST_Response(
             [

@@ -88,6 +88,8 @@ class LogsListTable extends WP_List_Table
         'record_synced'     => 'Record Synced',
         'record_failed'     => 'Record Failed',
         'sync_complete'     => 'Sync Complete',
+        'session_abandoned' => 'Session Abandoned',
+        'session_closed'    => 'Session Closed',
     ];
 
     /**
