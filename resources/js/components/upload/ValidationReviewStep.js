@@ -66,6 +66,15 @@
  * resetWizard() is also threaded down to ReadyToSyncPanel so its own
  * replacements-fetch error (AORM-8B.4) can offer the same recovery path.
  *
+ * Seat capacity (bugfix, over-capacity uploads): the staged response's
+ * `capacity` block (SeatCapacityService) drives a Notice above "Sync All"
+ * stating how many seats are available vs. how many records need one, a
+ * "Seat" column in ReadyToSyncPanel showing exactly which rows get a seat,
+ * and the seat line in SyncConfirmModal. "Sync All" is disabled while the
+ * session is over capacity; the commit endpoint enforces the same rule (409
+ * `seat_limit_exceeded`), which is shown in the confirm modal and triggers a
+ * re-fetch so the plan reflects the live seat count.
+ *
  * @param {{
  *   goToStep:       (step: string) => void,
  *   resetWizard:    () => void,
@@ -82,6 +91,11 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Button, Notice, Panel, PanelBody, Spinner } from '@wordpress/components';
 
 import { apiFetch } from '../../utils/apiFetch';
+import {
+	SEAT_LIMIT_ERROR_CODE,
+	describeSeatEvaluation,
+	evaluateSeatsForSync,
+} from '../../utils/seatCapacity';
 import { ACTION_TYPE_LABELS } from './ReadyToSyncPanel';
 import AbandonSessionModal from './AbandonSessionModal';
 import DiscardPanel from './DiscardPanel';
@@ -136,6 +150,17 @@ export const CATEGORY_ORDER = [
 export const PARTIAL_SYNC_NOTICE_CLASS = 'aorm-validation-review__partial-sync-notice';
 
 /**
+ * CSS class for the seat capacity Notice above "Sync All" (warning when the
+ * session needs more seats than the roster has free, info otherwise).
+ *
+ * @type {string}
+ */
+export const SEAT_CAPACITY_NOTICE_CLASS = 'aorm-validation-review__seat-capacity-notice';
+
+/** id of the seat Notice — referenced by the disabled Sync All button. */
+const SEAT_CAPACITY_NOTICE_ID = 'aorm-validation-review-seat-capacity';
+
+/**
  * Human-readable labels for each category key.
  * Translatable via @wordpress/i18n.
  *
@@ -155,6 +180,7 @@ export const CATEGORY_LABELS = {
 export default function ValidationReviewStep( { sessionId, selectedFile, goToStep, resetWizard } ) {
 	const [ categories, setCategories ] = useState( null );
 	const [ actionType, setActionType ] = useState( null );
+	const [ capacity,   setCapacity   ] = useState( null );
 	const [ isLoading,  setIsLoading  ] = useState( false );
 	const [ error,      setError      ] = useState( null );
 
@@ -280,10 +306,16 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 				err?.message ??
 					__( 'Failed to start sync. Please try again.', 'wicket-aorm' )
 			);
+
+			// Seats changed since the plan was loaded — refresh it so the
+			// Seat column and Notice match what the server just enforced.
+			if ( err?.code === SEAT_LIMIT_ERROR_CODE ) {
+				refetchStaged();
+			}
 		} finally {
 			setIsCommitting( false );
 		}
-	}, [ sessionId, syncConfirmIds, isCommitting, goToStep ] );
+	}, [ sessionId, syncConfirmIds, isCommitting, goToStep, refetchStaged ] );
 
 	// ── AORM-9.31: Abandon Session modal state ────────────────────────────────
 
@@ -353,6 +385,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 			.then( ( response ) => {
 				setCategories( response?.categories ?? null );
 				setActionType( response?.action_type ?? null );
+				setCapacity( response?.capacity ?? null );
 			} )
 			.catch( ( err ) => {
 				setError(
@@ -364,6 +397,14 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 				setIsLoading( false );
 			} );
 	}, [ sessionId, refetchKey ] );
+
+	// ── Seat capacity ─────────────────────────────────────────────────────────
+
+	const syncAllSeats   = evaluateSeatsForSync( capacity, 'all' );
+	const showSeatNotice = syncAllSeats.limited && syncAllSeats.seatsNeeded > 0;
+	const confirmSeats   = syncConfirmIds !== null
+		? evaluateSeatsForSync( capacity, syncConfirmIds )
+		: null;
 
 	// ── Render ────────────────────────────────────────────────────────────────
 
@@ -378,6 +419,12 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 					onClose={ closeSyncConfirmModal }
 					isCommitting={ isCommitting }
 					commitError={ commitError }
+					seatSummary={
+						confirmSeats?.limited && confirmSeats.seatsNeeded > 0
+							? describeSeatEvaluation( confirmSeats )
+							: null
+					}
+					isOverCapacity={ !! confirmSeats?.isOver }
 				/>
 			) }
 
@@ -489,6 +536,19 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 				</Notice>
 			) }
 
+			{ /* Seat capacity: seats available vs. records needing one */ }
+			{ ! isLoading && ! error && showSeatNotice && (
+				<Notice
+					status={ syncAllSeats.isOver ? 'warning' : 'info' }
+					isDismissible={ false }
+					className={ SEAT_CAPACITY_NOTICE_CLASS }
+				>
+					<p id={ SEAT_CAPACITY_NOTICE_ID }>
+						{ describeSeatEvaluation( syncAllSeats ) }
+					</p>
+				</Notice>
+			) }
+
 			{ /* Sync All button — shown when there are ready_to_sync records */ }
 			{ ! isLoading && ! error && ( categories?.ready_to_sync?.count ?? 0 ) > 0 && (
 				<div className="aorm-validation-review__sync-all-wrapper">
@@ -496,6 +556,9 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 						variant="primary"
 						onClick={ handleSyncAll }
 						className={ SYNC_ALL_BTN_CLASS }
+						disabled={ syncAllSeats.isOver }
+						accessibleWhenDisabled
+						aria-describedby={ syncAllSeats.isOver ? SEAT_CAPACITY_NOTICE_ID : undefined }
 					>
 						{ sprintf(
 							/* translators: %d: number of records ready to sync */
@@ -547,6 +610,7 @@ export default function ValidationReviewStep( { sessionId, selectedFile, goToSte
 										onOpenReviewModal={ openReviewModal }
 										onSyncSelected={ handleSyncSelected }
 										resetWizard={ resetWizard }
+										capacity={ capacity }
 									/>
 								) : key === 'possible_match' ? (
 									/* AORM-8.7: Possible Match panel — table with # Matches column.

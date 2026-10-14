@@ -131,6 +131,7 @@ final class Main
         (new Rest\CommitController())->register_routes();          // AORM-9.2
         (new Rest\SyncStatusController())->register_routes();     // AORM-9.28
         (new Rest\ActiveSessionController())->register_routes();  // AORM-7 cross-browser
+        (new Rest\RosterSeatsController())->register_routes();    // Seat capacity (Add Individual warning)
     }
 
     /**

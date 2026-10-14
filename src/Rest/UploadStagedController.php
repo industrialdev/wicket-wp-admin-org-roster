@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WicketAORM\Rest;
 
 use WicketAORM\Database\StagedRecordsTable;
+use WicketAORM\Services\SeatCapacityService;
 
 /**
  * Upload staged-records categorised-review endpoint.
@@ -46,12 +47,20 @@ use WicketAORM\Database\StagedRecordsTable;
  *                                        email, given_name, family_name); null when
  *                                        no matches were stored (e.g. remove_existing)
  *
+ * Seat capacity (bugfix, over-capacity uploads): the response also carries
+ * `capacity` — SeatCapacityService::getSessionCapacity() for every outstanding
+ * Ready to Sync row (what "Sync All" would push), or null when the MDP can't
+ * be reached. `capacity.records` maps record id → 'assigned' |
+ * 'over_capacity' | 'already_held' | 'frees_seat'. Recomputed on every
+ * request because seat usage can change outside AORM.
+ *
  * Returns 404 when no rows exist for the given session_id.
  */
 class UploadStagedController extends RestController
 {
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
+        private readonly ?SeatCapacityService $seatCapacityService = null,
     ) {
     }
 
@@ -115,13 +124,36 @@ class UploadStagedController extends RestController
 
         $categories = $table->getGroupedByCategory($sessionId);
 
+        $seats    = $this->seatCapacityService ?? new SeatCapacityService(null, $table);
+        $capacity = $seats->getSessionCapacity($sessionId, $context['membership_uuid']);
+
         return new \WP_REST_Response(
             [
                 'session_id'  => $sessionId,
                 'action_type' => $context['action_type'],
                 'categories'  => $categories,
+                'capacity'    => $this->formatCapacity($capacity),
             ],
             200,
         );
+    }
+
+    /**
+     * JSON-friendly capacity block: `records` becomes an object keyed by id
+     * (a PHP list would serialise as an array when ids happen to be 0..n).
+     *
+     * @param array<string, mixed>|null $capacity
+     *
+     * @return array<string, mixed>|null
+     */
+    private function formatCapacity(?array $capacity): ?array
+    {
+        if ($capacity === null) {
+            return null;
+        }
+
+        $capacity['records'] = (object) ($capacity['records'] ?? []);
+
+        return $capacity;
     }
 }

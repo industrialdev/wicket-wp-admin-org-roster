@@ -33,6 +33,19 @@ class StagedRecordsTable
     public const SYNCED_BUCKET = 'synced';
 
     /**
+     * ORDER BY clause shared by every query that defines sync order.
+     *
+     * Seat capacity: remove_existing rows (replace mode) are synced first so
+     * the seats they free are available to the adds that follow — they are
+     * inserted after the uploaded rows (MatchingJobRunner's final batch), so
+     * a plain id ASC order would try every add before any removal and run
+     * into the seat limit. Everything else stays in file order (id ASC), so
+     * which rows get the remaining seats is deterministic and matches the
+     * plan SeatCapacityService shows on the review screen.
+     */
+    public const SYNC_ORDER_BY = "ORDER BY CASE WHEN record_status = 'remove_existing' THEN 0 ELSE 1 END ASC, id ASC";
+
+    /**
      * Check whether an active staged-records session already exists for the
      * given org + membership combination.
      *
@@ -767,8 +780,9 @@ class StagedRecordsTable
      * When $ids is an array of integers, only rows whose id is in that list are
      * returned.  Passing 'all' (or omitting it) fetches every eligible row.
      *
-     * Rows are returned in insertion order (id ASC) so that partial runs (batching)
-     * are deterministic and each batch advances through the queue linearly.
+     * Rows are returned in sync order (SYNC_ORDER_BY: remove_existing rows first,
+     * then insertion order, id ASC) so that partial runs (batching) are
+     * deterministic and each batch advances through the queue linearly.
      *
      * Used by SyncJobRunner::handle() (AORM-9.3) to build the per-batch work list.
      *
@@ -804,7 +818,7 @@ class StagedRecordsTable
                    AND sync_status = 'ready_to_sync'
                    AND category = 'ready_to_sync'
                    {$idClause}
-                 ORDER BY id ASC
+                 " . self::SYNC_ORDER_BY . "
                  {$limitClause}",
                 $sessionId,
             ),
@@ -884,6 +898,51 @@ class StagedRecordsTable
         );
 
         return $result === false ? 0 : (int) $result;
+    }
+
+    /**
+     * Return the Ready to Sync rows that have not been synced yet, in sync order.
+     *
+     * Seat capacity: SeatCapacityService plans seats over exactly the rows a
+     * "Sync All" would push — valid, category = 'ready_to_sync', sync_status
+     * not 'synced' (failed rows are included because CommitController resets
+     * and retries them). Ordered by SYNC_ORDER_BY, the same order
+     * getPendingSyncRecords() hands rows to SyncJobRunner.
+     *
+     * @param string       $sessionId  The upload_session_id UUID.
+     * @param string|int[] $ids        'all', or an array of integer record IDs.
+     * @return list<array<string, mixed>>
+     */
+    public function getOutstandingSyncRecords(string $sessionId, string|array $ids = 'all'): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $idClause = '';
+
+        if (is_array($ids) && ! empty($ids)) {
+            // Only comma-separated integers — safe to interpolate.
+            $idClause = 'AND id IN (' . implode(', ', array_map('absint', $ids)) . ')';
+        }
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT id, record_status, sync_status, raw_data, matched_persons, merge_target_uuid
+                 FROM {$table}
+                 WHERE upload_session_id = %s
+                   AND validation_status = 'valid'
+                   AND category = 'ready_to_sync'
+                   AND sync_status != 'synced'
+                   {$idClause}
+                 " . self::SYNC_ORDER_BY,
+                $sessionId,
+            ),
+            \ARRAY_A,
+        );
+
+        return is_array($rows) ? array_values($rows) : [];
     }
 
     /**

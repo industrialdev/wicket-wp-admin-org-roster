@@ -47,7 +47,15 @@
  *   sessionId?:           string|null,             — session UUID; enables AORM-8B.4 replacements fetch
  *   resetWizard?:         () => void,    — returns the wizard to landing; enables a "Start Over"
  *                                          button on the replacements fetch error Notice
+ *   capacity?:            Object|null,   — seat plan from the staged response (SeatCapacityService)
  * }} props
+ *
+ * Seat capacity (bugfix, over-capacity uploads): when the roster has a seat
+ * limit, the "Records being added" table gets a "Seat" column showing, per
+ * row, whether it will get a seat, is over capacity, or already has one —
+ * in sync order, so the admin can see exactly who gets in and discard the
+ * rest. The bulk "Sync to MDP" button is disabled (with an inline reason)
+ * when the selection needs more seats than are free.
  *
  * AORM-8B.4: When sessionId is provided and actionType === 'replace', the
  * "Records being removed" table is populated by fetching
@@ -73,6 +81,14 @@ import { __, sprintf } from '@wordpress/i18n';
 import { Button, ExternalLink, Notice, Spinner } from '@wordpress/components';
 import { apiFetch } from '../../utils/apiFetch';
 import RecordsTable from './RecordsTable';
+import {
+	SEAT_OVER_CAPACITY,
+	SEAT_STATUS_LABELS,
+	describeSeatEvaluation,
+	evaluateSeatsForSync,
+	getRecordSeatStatus,
+	isSeatLimited,
+} from '../../utils/seatCapacity';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -198,6 +214,13 @@ export const SYNC_FAILED_LABEL = __( 'Sync failed', 'wicket-aorm' );
 /** CSS class for the "Sync failed" badge. */
 export const SYNC_FAILED_BADGE_CLASS = 'aorm-ready-to-sync-panel__sync-failed-badge';
 
+/** Seat column key + base CSS class for its badge (modifier = seat status). */
+export const SEAT_COLUMN_KEY   = 'seat';
+export const SEAT_BADGE_CLASS  = 'aorm-ready-to-sync-panel__seat-badge';
+
+/** CSS class for the inline reason shown when bulk sync is over capacity. */
+export const BULK_SEAT_WARNING_CLASS = 'aorm-rts-bulk-toolbar__seat-warning';
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ReadyToSyncPanel( {
@@ -208,6 +231,7 @@ export default function ReadyToSyncPanel( {
 	onRecordDiscarded,
 	onSyncSelected,
 	resetWizard,
+	capacity = null,
 } ) {
 	const [ discardingIds,       setDiscardingIds       ] = useState( new Set() );
 	const [ discardError,        setDiscardError        ] = useState( null );
@@ -507,8 +531,32 @@ export default function ReadyToSyncPanel( {
 				</>
 			),
 		},
+		// Seat capacity: which rows get a seat (limited rosters only).
+		...( isSeatLimited( capacity ) ? [ {
+			key:    SEAT_COLUMN_KEY,
+			label:  __( 'Seat', 'wicket-aorm' ),
+			render: ( record ) => {
+				const status = getRecordSeatStatus( capacity, record.id );
+
+				if ( ! status ) {
+					return '—';
+				}
+
+				return (
+					<span className={ `${ SEAT_BADGE_CLASS } ${ SEAT_BADGE_CLASS }--${ status }` }>
+						{ SEAT_STATUS_LABELS[ status ] ?? status }
+					</span>
+				);
+			},
+		} ] : [] ),
 		actionsColumn,
 	];
+
+	// Seat capacity: can the current bulk selection be synced?
+	const selectedSeats = evaluateSeatsForSync( capacity, Array.from( selectedAddedIds ) );
+	const overCapacityCount = isSeatLimited( capacity )
+		? addedRecords.filter( ( r ) => getRecordSeatStatus( capacity, r.id ) === SEAT_OVER_CAPACITY ).length
+		: 0;
 
 	// ── AORM-8B.3: Build the "Actions" extra column for the removal table ────
 
@@ -639,6 +687,9 @@ export default function ReadyToSyncPanel( {
 							variant="primary"
 							onClick={ () => onSyncSelected?.( Array.from( selectedAddedIds ) ) }
 							className="aorm-rts-bulk-toolbar__sync"
+							disabled={ selectedSeats.isOver }
+							accessibleWhenDisabled
+							aria-describedby={ selectedSeats.isOver ? 'aorm-rts-bulk-seat-warning' : undefined }
 						>
 							{ __( 'Sync to MDP', 'wicket-aorm' ) }
 						</Button>
@@ -654,7 +705,30 @@ export default function ReadyToSyncPanel( {
 						>
 							{ __( 'Discard', 'wicket-aorm' ) }
 						</Button>
+
+						{ selectedSeats.isOver && (
+							<span
+								id="aorm-rts-bulk-seat-warning"
+								className={ BULK_SEAT_WARNING_CLASS }
+							>
+								{ describeSeatEvaluation( selectedSeats ) }
+							</span>
+						) }
 					</div>
+				) }
+
+				{ /* Seat capacity: one-click way to see who won't get a seat */ }
+				{ overCapacityCount > 0 && (
+					<p className="aorm-ready-to-sync-panel__seat-hint">
+						{ sprintf(
+							/* translators: %d: number of rows marked "Over capacity" */
+							__(
+								'%d record(s) are marked "Over capacity". Seats are given in file order — discard records you don\'t want to sync so the rest fit.',
+								'wicket-aorm'
+							),
+							overCapacityCount
+						) }
+					</p>
 				) }
 
 				<RecordsTable

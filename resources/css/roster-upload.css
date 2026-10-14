@@ -1038,3 +1038,48 @@
 	color: #646970;
 	font-size: 13px;
 }
+
+/* ── Seat capacity (bugfix, over-capacity uploads) ─────────────────────── */
+
+.aorm-ready-to-sync-panel__seat-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 7px;
+	border-radius: 10px;
+	background: #f0f0f1;
+	color: #50575e;
+	font-size: 11px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.aorm-ready-to-sync-panel__seat-badge--assigned {
+	background: #edfaef;
+	color: #00632b;
+}
+
+.aorm-ready-to-sync-panel__seat-badge--over_capacity {
+	background: #fcf0f1;
+	color: #b32d2e;
+}
+
+.aorm-ready-to-sync-panel__seat-badge--frees_seat {
+	background: #f0f6fc;
+	color: #135e96;
+}
+
+.aorm-ready-to-sync-panel__seat-hint {
+	margin: 8px 0;
+	color: #b32d2e;
+}
+
+.aorm-rts-bulk-toolbar__seat-warning {
+	color: #b32d2e;
+	font-size: 12px;
+}
+
+.aorm-validation-review__seat-capacity-notice,
+.aorm-sync-confirm-modal__seats,
+.aorm-individual-add-form__seat-warning {
+	margin: 0 0 12px;
+}

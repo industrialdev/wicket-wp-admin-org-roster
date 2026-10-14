@@ -12,12 +12,19 @@
  * Proceed while the commit POST is in-flight) and `commitError` (renders a
  * dismissible Notice when the POST returns an error).
  *
+ * Seat capacity (bugfix, over-capacity uploads): `seatSummary` (a sentence
+ * from describeSeatEvaluation()) states how many seats this sync uses vs.
+ * how many are free; `isOverCapacity` turns it into a warning and disables
+ * Proceed, since the commit endpoint would refuse the batch anyway.
+ *
  * @param {{
- *   isOpen:        boolean,
- *   onConfirm:     function(): void,
- *   onClose:       function(): void,
- *   isCommitting?: boolean,
- *   commitError?:  string|null,
+ *   isOpen:          boolean,
+ *   onConfirm:       function(): void,
+ *   onClose:         function(): void,
+ *   isCommitting?:   boolean,
+ *   commitError?:    string|null,
+ *   seatSummary?:    string|null,
+ *   isOverCapacity?: boolean,
  * }} props
  */
 
@@ -31,6 +38,9 @@ export const MODAL_MESSAGE = __( 'Sync cannot be cancelled once started. Proceed
 export const CONFIRM_LABEL = __( 'Proceed', 'wicket-aorm' );
 export const CANCEL_LABEL  = __( 'Cancel',  'wicket-aorm' );
 
+/** CSS class for the seat capacity Notice inside the modal. */
+export const SEAT_SUMMARY_CLASS = 'aorm-sync-confirm-modal__seats';
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function SyncConfirmModal( {
@@ -39,6 +49,8 @@ export default function SyncConfirmModal( {
 	onClose,
 	isCommitting = false,
 	commitError  = null,
+	seatSummary  = null,
+	isOverCapacity = false,
 } ) {
 	if ( ! isOpen ) {
 		return null;
@@ -54,6 +66,16 @@ export default function SyncConfirmModal( {
 				{ MODAL_MESSAGE }
 			</p>
 
+			{ seatSummary && (
+				<Notice
+					status={ isOverCapacity ? 'warning' : 'info' }
+					isDismissible={ false }
+					className={ SEAT_SUMMARY_CLASS }
+				>
+					{ seatSummary }
+				</Notice>
+			) }
+
 			{ commitError && (
 				<Notice
 					status="error"
@@ -68,7 +90,7 @@ export default function SyncConfirmModal( {
 				<Button
 					variant="primary"
 					isBusy={ isCommitting }
-					disabled={ isCommitting }
+					disabled={ isCommitting || isOverCapacity }
 					onClick={ onConfirm }
 					className="aorm-sync-confirm-modal__proceed"
 				>

@@ -45,6 +45,12 @@ class MdpClient
     public const TIER_CACHE_TTL_SECONDS = 300;
 
     /**
+     * People per request in getActiveSeatHolderUuids() (keeps the
+     * filter[person_uuid_in][] query string well under URL length limits).
+     */
+    public const SEAT_LOOKUP_CHUNK_SIZE = 50;
+
+    /**
      * Fetch organization memberships from the MDP.
      *
      * Calls the `organization_memberships` JSON:API endpoint, scoped to
@@ -2519,6 +2525,128 @@ class MdpClient
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Fetch the raw organization_membership payload used for seat capacity.
+     *
+     * `GET organization_memberships/{uuid}?include=membership` — the JSON:API
+     * response is returned as-is (data + included) so SeatCapacityService can
+     * read `active_assignments_count` / `max_assignments` /
+     * `unlimited_assignments` and hand the same payload to
+     * wicket-wp-account-centre's MembershipService::getEffectiveMaxAssignments()
+     * (which needs the included `memberships` tier to resolve per-tier seat
+     * limits).
+     *
+     * Deliberately NOT MembershipService::getOrgMembershipData(): that call is
+     * cached, and a stale active_assignments_count would defeat the check.
+     *
+     * @param string $membershipUuid Org-membership UUID.
+     *
+     * @return array<string, mixed>|null Null on empty UUID, unavailable
+     *                                   client, API error, or empty data.
+     */
+    public function getOrgMembershipSeatPayload(string $membershipUuid): ?array
+    {
+        if ($membershipUuid === '') {
+            return null;
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return null;
+        }
+
+        try {
+            $response = $client->get(
+                'organization_memberships/' . $membershipUuid . '?' . http_build_query(['include' => 'membership']),
+            );
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        if (! is_array($response) || empty($response['data'])) {
+            return null;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Return which of the given people currently hold an active seat on a roster.
+     *
+     * Batched counterpart to hasActivePersonMembershipAssignment(): queries
+     * `organization_memberships/{uuid}/person_memberships` with
+     * `filter[person_uuid_in][]` + `filter[active_at]=now`, in chunks of
+     * SEAT_LOOKUP_CHUNK_SIZE people per request, and collects the person UUID
+     * of every active row. Used by SeatCapacityService to decide whether a
+     * matched / merge-target person already holds a seat (so syncing them
+     * doesn't consume a new one).
+     *
+     * @param string   $membershipUuid Org-membership UUID.
+     * @param string[] $personUuids    Person UUIDs to check.
+     *
+     * @return list<string>|null Person UUIDs with an active seat, or null when
+     *                           any request fails / the client is unavailable
+     *                           (callers must not guess capacity then).
+     */
+    public function getActiveSeatHolderUuids(string $membershipUuid, array $personUuids): ?array
+    {
+        if ($membershipUuid === '') {
+            return null;
+        }
+
+        $personUuids = $this->uniqueNonEmptyStrings($personUuids);
+
+        if ($personUuids === []) {
+            return [];
+        }
+
+        $client = wicket_api_client();
+
+        if (! $client) {
+            return null;
+        }
+
+        $holders = [];
+
+        foreach (array_chunk($personUuids, self::SEAT_LOOKUP_CHUNK_SIZE) as $chunk) {
+            $query = (string) preg_replace(
+                '/\%5B\d+\%5D/',
+                '%5B%5D',
+                http_build_query([
+                    'filter' => [
+                        'person_uuid_in' => $chunk,
+                        'active_at'      => 'now',
+                    ],
+                    'page' => [
+                        // A person can hold more than one active row — leave headroom.
+                        'size' => count($chunk) * 2,
+                    ],
+                ]),
+            );
+
+            try {
+                $response = $client->get('organization_memberships/' . $membershipUuid . '/person_memberships?' . $query);
+            } catch (\Exception $e) {
+                return null;
+            }
+
+            if (! is_array($response)) {
+                return null;
+            }
+
+            foreach ($response['data'] ?? [] as $row) {
+                $personUuid = (string) ($row['relationships']['person']['data']['id'] ?? '');
+
+                if ($personUuid !== '') {
+                    $holders[$personUuid] = true;
+                }
+            }
+        }
+
+        return array_keys($holders);
     }
 
     /**

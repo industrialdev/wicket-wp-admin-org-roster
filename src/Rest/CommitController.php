@@ -7,6 +7,7 @@ namespace WicketAORM\Rest;
 use WicketAORM\Database\StagedRecordsTable;
 use WicketAORM\Services\ActivityLogger;
 use WicketAORM\Services\SchedulerService;
+use WicketAORM\Services\SeatCapacityService;
 use WicketAORM\Services\SyncJobRunner;
 
 /**
@@ -23,6 +24,8 @@ use WicketAORM\Services\SyncJobRunner;
  *   202 { accepted: true, session_id, ids: "all"|[...] }  — ids echoes the request
  *   400 { message }  — ids is an empty array, or nothing in it is waiting to sync
  *   404 { message }  — session not found
+ *   409 { message, code: 'seat_limit_exceeded', capacity }  — the batch needs
+ *                    more seats than the roster has free (see below)
  *   422 { message }  — ids param is missing or of invalid type
  *
  * Multi-visit sessions: before dispatching, failed rows in the requested set
@@ -31,14 +34,26 @@ use WicketAORM\Services\SyncJobRunner;
  * raw "all" — go to the SyncJobRunner dispatch and to the committed-IDs
  * transient, so progress and the completion log cover only this batch.
  *
+ * Seat capacity (bugfix, over-capacity uploads): before anything is reset or
+ * dispatched, the requested batch is planned with
+ * SeatCapacityService::getSessionCapacity(). When it needs more new seats than
+ * the roster has free (counting seats released by remove_existing rows in the
+ * same batch), the commit is refused with 409 so the MDP never decides who
+ * gets a seat. The admin discards rows or syncs a smaller selection instead.
+ * Fails open (no block) when the MDP can't be reached.
+ *
  * @see AORM-9.2
  */
 class CommitController extends RestController
 {
+    /** Error code returned with the 409 when a batch exceeds the seat limit. */
+    public const SEAT_LIMIT_ERROR_CODE = 'seat_limit_exceeded';
+
     public function __construct(
         private readonly ?StagedRecordsTable $stagedRecordsTable = null,
         private readonly ?SchedulerService $schedulerService = null,
         private readonly ?ActivityLogger $activityLogger = null,
+        private readonly ?SeatCapacityService $seatCapacityService = null,
     ) {
     }
 
@@ -115,6 +130,30 @@ class CommitController extends RestController
 
         if (is_array($ids)) {
             $normalizedIds = array_values(array_map('absint', $ids));
+        }
+
+        // Seat capacity: refuse a batch that doesn't fit before touching any
+        // rows. Checked against the live MDP seat count, so it also catches
+        // seats taken elsewhere since the review screen was loaded.
+        $seats    = $this->seatCapacityService ?? new SeatCapacityService(null, $table);
+        $capacity = $seats->getSessionCapacity($sessionId, $context['membership_uuid'], $normalizedIds);
+
+        if ($capacity !== null && ! empty($capacity['is_over_capacity'])) {
+            $capacity['records'] = (object) ($capacity['records'] ?? []);
+
+            return new \WP_REST_Response(
+                [
+                    'code'     => self::SEAT_LIMIT_ERROR_CODE,
+                    'message'  => sprintf(
+                        /* translators: 1: seats needed, 2: seats available */
+                        __('These records need %1$d seat(s) but only %2$d are available on this roster. Discard records or sync a smaller selection.', 'wicket-aorm'),
+                        (int) $capacity['seats_needed'],
+                        (int) $capacity['available_seats'] + (int) $capacity['seats_freed'],
+                    ),
+                    'capacity' => $capacity,
+                ],
+                409,
+            );
         }
 
         // Bugfix ("Retry Failed Records" was a no-op): failed rows in the

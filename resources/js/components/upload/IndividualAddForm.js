@@ -19,6 +19,14 @@
  * On success (AORM-5.8), navigates to the validation-review step via goToStep()
  * so the admin can see the newly added record and its match category.
  *
+ * Seat capacity (bugfix, over-capacity uploads): on mount the form fetches
+ * GET /wicket-aorm/v1/rosters/{org}/{membership}/seats. When the roster has
+ * a seat limit and no seat is free (`is_full`), a warning Notice explains
+ * that the person can still be staged but won't receive an active
+ * membership until a seat is freed — the record is then held back at sync
+ * by the same capacity rule as CSV uploads. Submit is NOT blocked. A failed
+ * or unavailable lookup shows nothing.
+ *
  * @param {{
  *   goToStep:          (step: string) => void,
  *   resetWizard:       () => void,
@@ -29,8 +37,8 @@
  * }} props
  */
 
-import { useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { useEffect, useState } from '@wordpress/element';
+import { __, sprintf } from '@wordpress/i18n';
 import { Button, Notice, Spinner, TextControl } from '@wordpress/components';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import { apiFetch } from '../../utils/apiFetch';
@@ -163,6 +171,28 @@ export function validateFields( fields ) {
 // Initial state
 // ---------------------------------------------------------------------------
 
+/** CSS class for the "roster is full" warning Notice. */
+export const SEAT_WARNING_CLASS = 'aorm-individual-add-form__seat-warning';
+
+/**
+ * Warning text for a full roster.
+ *
+ * @param {number} activeSeats Seats currently in use.
+ * @param {number} maxSeats    Effective seat limit.
+ * @return {string} Translated warning.
+ */
+export function buildRosterFullMessage( activeSeats, maxSeats ) {
+	return sprintf(
+		/* translators: 1: seats in use, 2: roster seat limit */
+		__(
+			'This roster is full (%1$d of %2$d seats in use). You can still add this person, but no active membership can be assigned to them — and they can\'t be synced — until a seat is freed.',
+			'wicket-aorm'
+		),
+		activeSeats,
+		maxSeats
+	);
+}
+
 /** Initial/empty field state. */
 const EMPTY_FIELDS = {
 	first_name:   '',
@@ -187,6 +217,32 @@ export default function IndividualAddForm( {
 	const [ errors, setErrors ]       = useState( {} );
 	const [ isSubmitting, setIsSubmitting ] = useState( false );
 	const [ serverError, setServerError ]   = useState( null );
+	const [ seats, setSeats ]               = useState( null );
+
+	// Seat capacity: warn up front when the roster has no free seat.
+	useEffect( () => {
+		if ( ! orgUuid || ! membershipUuid ) {
+			return undefined;
+		}
+
+		let cancelled = false;
+
+		apiFetch( { path: `/wicket-aorm/v1/rosters/${ orgUuid }/${ membershipUuid }/seats` } )
+			.then( ( response ) => {
+				if ( ! cancelled ) {
+					setSeats( response ?? null );
+				}
+			} )
+			.catch( () => {
+				// No warning when the lookup fails — the sync-time check still applies.
+			} );
+
+		return () => {
+			cancelled = true;
+		};
+	}, [ orgUuid, membershipUuid ] );
+
+	const isRosterFull = !! seats?.is_full;
 
 	/**
 	 * Update a single field by name and clear any existing error for it.
@@ -315,6 +371,17 @@ export default function IndividualAddForm( {
 					'wicket-aorm'
 				) }
 			</p>
+
+			{ /* ── Seat capacity: roster already full ── */ }
+			{ isRosterFull && (
+				<Notice
+					status="warning"
+					isDismissible={ false }
+					className={ SEAT_WARNING_CLASS }
+				>
+					{ buildRosterFullMessage( Number( seats.active_seats ) || 0, Number( seats.max_seats ) || 0 ) }
+				</Notice>
+			) }
 
 			{ /* ── Server error notice ── */ }
 			{ serverError && (
