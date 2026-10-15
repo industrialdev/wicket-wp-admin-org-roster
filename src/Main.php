@@ -38,6 +38,12 @@ final class Main
         // AORM-11.2: Register AORM settings via the WordPress Settings API.
         add_action('admin_init', [$this, 'registerSettings']);
 
+        // Settings page "Fix stuck sessions" button (admin-post.php handler).
+        add_action(
+            'admin_post_' . Admin\StuckSessionsSection::ACTION,
+            [new Admin\StuckSessionsSection(), 'handle'],
+        );
+
         // REST API routes.
         add_action('rest_api_init', [$this, 'registerRestRoutes']);
 

@@ -267,6 +267,9 @@ class MenuPage
         submit_button();
         echo '</form>';
 
+        // Maintenance tool — its own form (forms can't nest), see StuckSessionsSection.
+        (new StuckSessionsSection())->render();
+
         echo '</div>';
     }
 

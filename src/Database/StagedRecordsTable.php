@@ -1206,4 +1206,65 @@ class StagedRecordsTable
 
         return $result === false ? 0 : (int) $result;
     }
+
+    /**
+     * Candidate sessions stuck on "Comparing records against MDP…".
+     *
+     * A session qualifies when it still has valid, matchable rows at
+     * sync_status = 'pending' (the matching job never processed them) and no
+     * row in the session has changed since $olderThan — so an upload that is
+     * matching right now is not reported. Whether a job is still queued for
+     * the session is checked separately by StuckSessionService.
+     *
+     * invalid_rows > 0 marks a session whose file failed validation: matching
+     * is never dispatched for those (see UploadController::upload()).
+     *
+     * @param string $olderThan MySQL datetime (site time, same as updated_at).
+     * @return list<array{upload_session_id: string, org_uuid: string, membership_uuid: string, action_type: string, started_at: string, last_activity_at: string, pending_rows: int, invalid_rows: int}>
+     */
+    public function getStuckMatchingSessions(string $olderThan): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'wicket_aorm_staged_records';
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT upload_session_id,
+                        MAX(org_uuid) AS org_uuid,
+                        MAX(membership_uuid) AS membership_uuid,
+                        MAX(action_type) AS action_type,
+                        MIN(created_at) AS started_at,
+                        MAX(updated_at) AS last_activity_at,
+                        SUM(validation_status = 'valid' AND record_status != 'remove_existing' AND sync_status = 'pending') AS pending_rows,
+                        SUM(validation_status != 'valid') AS invalid_rows
+                 FROM {$table}
+                 GROUP BY upload_session_id
+                 HAVING pending_rows > 0
+                    AND last_activity_at < %s
+                 ORDER BY started_at ASC",
+                $olderThan,
+            ),
+            \ARRAY_A,
+        );
+
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'upload_session_id' => (string) ($row['upload_session_id'] ?? ''),
+                'org_uuid'          => (string) ($row['org_uuid'] ?? ''),
+                'membership_uuid'   => (string) ($row['membership_uuid'] ?? ''),
+                'action_type'       => (string) ($row['action_type'] ?? ''),
+                'started_at'        => (string) ($row['started_at'] ?? ''),
+                'last_activity_at'  => (string) ($row['last_activity_at'] ?? ''),
+                'pending_rows'      => (int) ($row['pending_rows'] ?? 0),
+                'invalid_rows'      => (int) ($row['invalid_rows'] ?? 0),
+            ],
+            $rows,
+        ));
+    }
 }

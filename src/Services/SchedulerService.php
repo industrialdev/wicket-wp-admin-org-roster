@@ -54,6 +54,28 @@ class SchedulerService
     }
 
     /**
+     * Whether an action for $hook + $args is queued or currently running.
+     *
+     * Action Scheduler: as_has_scheduled_action() (AS 3.3+, counts pending AND
+     * in-progress actions), falling back to as_next_scheduled_action() on older
+     * versions. WP-Cron: wp_next_scheduled().
+     *
+     * @param array<string, mixed> $args
+     */
+    public function isScheduled(string $hook, array $args = [], string $group = self::DEFAULT_GROUP): bool
+    {
+        if ($this->actionSchedulerAvailable()) {
+            if (function_exists('as_has_scheduled_action')) {
+                return (bool) as_has_scheduled_action($hook, $args, $group);
+            }
+
+            return as_next_scheduled_action($hook, $args, $group) !== false;
+        }
+
+        return wp_next_scheduled($hook, $args) !== false;
+    }
+
+    /**
      * Whether Action Scheduler is available in the current environment.
      *
      * Exposed publicly so callers can choose higher-fidelity error handling
