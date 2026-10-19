@@ -84,6 +84,13 @@ class SettingsPage
     /** Field ID for the base_member_role text input. */
     public const FIELD_BASE_MEMBER_ROLE = 'aorm_field_base_member_role';
 
+    /**
+     * Element ID of the cascading-roster helper notice rendered under the
+     * base member role field. Toggled client-side when the Roster Type
+     * select changes.
+     */
+    public const BASE_MEMBER_ROLE_CASCADE_NOTICE_ID = 'aorm_base_member_role_cascade_notice';
+
     /** Field ID for the relationship_type select. */
     public const FIELD_RELATIONSHIP_TYPE = 'aorm_field_relationship_type';
 
@@ -457,6 +464,15 @@ class SettingsPage
      * ensureUserAndSecurityRoles() helper in SyncService. Left empty, no base
      * role is applied.
      *
+     * When the roster type is cascading (Relationship), an extra helper
+     * notice warns admins/IS not to enter the member role here: the
+     * cascading relationship already assigns it, so adding it again makes the
+     * role appear twice in the roster table's Roles column. It is styled as a
+     * WP core inline warning notice and rendered with display:none for any
+     * other roster type; a small inline script
+     * toggles it when the Roster Type select changes, so the guidance updates
+     * before the form is saved.
+     *
      * @see AORM-11.13
      */
     public function renderBaseMemberRoleField(): void
@@ -477,6 +493,36 @@ class SettingsPage
             'wicket-aorm',
         );
         echo '</p>';
+
+        $rosterType  = (string) ($options['roster_type'] ?? SyncService::ROSTER_TYPE_RELATIONSHIP);
+        $isCascading = $rosterType === SyncService::ROSTER_TYPE_RELATIONSHIP;
+
+        // WP core inline warning notice (yellow left border). The `inline`
+        // class stops WP's common.js from moving it to the top of the page.
+        // Hidden via inline display:none rather than the `hidden` attribute,
+        // which .notice styles can override.
+        echo '<div class="notice notice-warning inline aorm-cascade-member-role-notice"'
+            . ' id="' . esc_attr(self::BASE_MEMBER_ROLE_CASCADE_NOTICE_ID) . '"'
+            . ($isCascading ? '' : ' style="display:none"')
+            . '>';
+        echo '<p>';
+        echo '<strong>' . esc_html__('Cascading roster (Roster Type: Relationship):', 'wicket-aorm') . '</strong> ';
+        echo esc_html__(
+            'Do NOT enter the member role here. The member role is assigned automatically by the cascading relationship, so adding it here makes it appear twice in the Roles column of the roster table. Use this field only for a different base role, or leave it blank.',
+            'wicket-aorm',
+        );
+        echo '</p>';
+        echo '</div>';
+
+        // Show/hide the notice live when the Roster Type select changes.
+        echo '<script>(function(){'
+            . 'var s=document.getElementById("' . esc_attr(self::FIELD_ROSTER_TYPE) . '"),'
+            . 'n=document.getElementById("' . esc_attr(self::BASE_MEMBER_ROLE_CASCADE_NOTICE_ID) . '");'
+            . 'if(!s||!n){return;}'
+            . 's.addEventListener("change",function(){'
+            . 'n.style.display=s.value==="' . esc_attr(SyncService::ROSTER_TYPE_RELATIONSHIP) . '"?"":"none";'
+            . '});'
+            . '})();</script>';
     }
 
     /**
