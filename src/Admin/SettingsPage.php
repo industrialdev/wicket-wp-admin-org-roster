@@ -726,8 +726,13 @@ class SettingsPage
     public function renderEmailTypeField(): void
     {
         $options = (array) get_option(self::OPTION_NAME, []);
-        $current = (string) ($options[SyncService::SETTINGS_KEY_EMAIL_TYPE] ?? SyncService::DEFAULT_EMAIL_TYPE);
-        $types   = (new MdpClient())->getEmailTypes();
+        $saved    = (string) ($options[SyncService::SETTINGS_KEY_EMAIL_TYPE] ?? SyncService::DEFAULT_EMAIL_TYPE);
+        $client   = new MdpClient();
+        $types    = $client->getEmailTypes();
+        $resolved = $client->resolvePersonEmailType($saved);
+
+        // Pre-select what sync will actually use, so saving fixes an invalid value.
+        $current = $resolved;
 
         echo '<select id="' . esc_attr(self::FIELD_EMAIL_TYPE) . '" '
             . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(SyncService::SETTINGS_KEY_EMAIL_TYPE) . ']">';
@@ -740,6 +745,15 @@ class SettingsPage
         }
 
         echo '</select>';
+
+        if ($resolved !== $saved) {
+            $this->renderUnavailableTypeNotice(sprintf(
+                /* translators: 1: saved email type slug, 2: email type label sync will use instead. */
+                __('The saved email type "%1$s" is not available for person records in the MDP. Roster sync will use "%2$s" instead. Save the settings to confirm a valid type.', 'wicket-aorm'),
+                $saved,
+                (string) ($types[$resolved] ?? $resolved),
+            ));
+        }
         echo '<p class="description">';
         echo esc_html__(
             'This type is assigned to email addresses created for new person records and merge operations during a roster sync.',
@@ -777,8 +791,13 @@ class SettingsPage
     public function renderPhoneTypeField(): void
     {
         $options = (array) get_option(self::OPTION_NAME, []);
-        $current = (string) ($options[SyncService::SETTINGS_KEY_PHONE_TYPE] ?? SyncService::DEFAULT_PHONE_TYPE);
-        $types   = (new MdpClient())->getPhoneTypes();
+        $saved    = (string) ($options[SyncService::SETTINGS_KEY_PHONE_TYPE] ?? SyncService::DEFAULT_PHONE_TYPE);
+        $client   = new MdpClient();
+        $types    = $client->getPhoneTypes();
+        $resolved = $client->resolvePersonPhoneType($saved);
+
+        // Pre-select what sync will actually use, so saving fixes an invalid value.
+        $current = $resolved;
 
         echo '<select id="' . esc_attr(self::FIELD_PHONE_TYPE) . '" '
             . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(SyncService::SETTINGS_KEY_PHONE_TYPE) . ']">';
@@ -791,12 +810,37 @@ class SettingsPage
         }
 
         echo '</select>';
+
+        if ($resolved !== $saved) {
+            $this->renderUnavailableTypeNotice(sprintf(
+                /* translators: 1: saved phone type slug, 2: phone type label sync will use instead. */
+                __('The saved phone type "%1$s" is not available for person records in the MDP. Roster sync will use "%2$s" instead. Save the settings to confirm a valid type.', 'wicket-aorm'),
+                $saved,
+                (string) ($types[$resolved] ?? $resolved),
+            ));
+        }
         echo '<p class="description">';
         echo esc_html__(
             'This type is assigned to phone numbers created for new person records and merge operations during a roster sync.',
             'wicket-aorm',
         );
         echo '</p>';
+    }
+
+    /**
+     * Render an inline WP warning notice under a phone/email type <select>
+     * whose saved value is not available for person records in the MDP.
+     *
+     * Uses the `inline` class so common.js does not relocate the notice to the
+     * top of the page (same pattern as the cascade member-role notice).
+     *
+     * @param string $message Already-translated, unescaped message.
+     */
+    private function renderUnavailableTypeNotice(string $message): void
+    {
+        echo '<div class="notice notice-warning inline aorm-unavailable-type-notice"><p>'
+            . esc_html($message)
+            . '</p></div>';
     }
 
     /**
@@ -828,23 +872,41 @@ class SettingsPage
         $current = (string) (
             $options[MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE] ?? MatchingService::DEFAULT_PHONE_MATCH_TYPE
         );
-        $types = (new MdpClient())->getPhoneTypes();
+        $client = new MdpClient();
+        $types  = $client->getPhoneTypes();
+
+        // A saved type that is not person-applicable (e.g. organization-only)
+        // can never match a person's phone. resolvePersonPhoneType() returns
+        // the value unchanged when the MDP is unavailable, so no false warning
+        // is shown against the fallback list. When invalid, "Any type" is
+        // pre-selected (the saved slug is not among the options anyway).
+        $invalid  = $current !== '' && $client->resolvePersonPhoneType($current) !== $current;
+        $selected = $invalid ? '' : $current;
 
         echo '<select id="' . esc_attr(self::FIELD_PHONE_MATCH_TYPE) . '" '
             . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(MatchingService::SETTINGS_KEY_PHONE_MATCH_TYPE) . ']">';
 
-        echo '<option value=""' . selected($current, '', false) . '>'
+        echo '<option value=""' . selected($selected, '', false) . '>'
             . esc_html__('Any type', 'wicket-aorm')
             . '</option>';
 
         foreach ($types as $value => $label) {
             echo '<option value="' . esc_attr((string) $value) . '"'
-                . selected($current, (string) $value, false) . '>'
+                . selected($selected, (string) $value, false) . '>'
                 . esc_html((string) $label)
                 . '</option>';
         }
 
         echo '</select>';
+
+        if ($invalid) {
+            $this->renderUnavailableTypeNotice(sprintf(
+                /* translators: %s: saved phone match type slug. */
+                __('The saved phone match type "%s" is not available for person records in the MDP, so no phone numbers will match. Choose a type (or "Any type") and save the settings.', 'wicket-aorm'),
+                $current,
+            ));
+        }
+
         echo '<p class="description">';
         echo esc_html__(
             'Restricts matching to phone numbers of this type only, and shows that type\'s number (blank if the person has none) instead of the primary phone.',

@@ -51,6 +51,20 @@ class MdpClient
     public const SEAT_LOOKUP_CHUNK_SIZE = 50;
 
     /**
+     * Entity values (resource type `available_for_entity`) that make a
+     * resource type usable on a person record.
+     */
+    public const PERSON_ENTITY_SCOPES = ['person', 'all_entities'];
+
+    /**
+     * Per-instance cache for fetchPersonResourceTypes(), keyed by resource type
+     * slug ('phones', 'emails'). A null value means "MDP unavailable / no data".
+     *
+     * @var array<string, array{types: array<string, string>, default: string}|null>
+     */
+    private array $personResourceTypesCache = [];
+
+    /**
      * Fetch organization memberships from the MDP.
      *
      * Calls the `organization_memberships` JSON:API endpoint, scoped to
@@ -3059,14 +3073,16 @@ class MdpClient
     }
 
     /**
-     * Fetch the list of available email address types from the MDP.
+     * Fetch the email address types available for person records from the MDP.
      *
-     * Attempts to read enum values from the MDP schema definitions endpoint.
-     * Falls back to the well-known Wicket email types when the MDP client is
-     * unavailable, the endpoint does not exist, or the response is malformed.
+     * Uses wicket_get_resource_types('emails') (via fetchPersonResourceTypes())
+     * and returns a slug → label map of person-applicable types only — types
+     * whose `available_for_entity` is `person` or `all_entities` (or unset).
+     * Organization-only types are excluded because they cannot be written to a
+     * person record.
      *
-     * Returns a map of {slug => display_label} suitable for rendering a
-     * <select> on the settings page.
+     * Falls back to the well-known Wicket email types (work / home / personal)
+     * when the MDP is unavailable or returns no person-applicable types.
      *
      * @return array<string, string>  Map of slug → display label.
      *
@@ -3074,50 +3090,33 @@ class MdpClient
      */
     public function getEmailTypes(): array
     {
+        $result = $this->fetchPersonResourceTypes('emails');
+
+        if ($result !== null) {
+            return $result['types'];
+        }
+
         // Well-known Wicket MDP email types — used as the fallback when the
         // API is unreachable or returns an unexpected response format.
-        $defaults = [
+        return [
             'work'     => __('Work', 'wicket-aorm'),
             'home'     => __('Home', 'wicket-aorm'),
             'personal' => __('Personal', 'wicket-aorm'),
         ];
-
-        if (! function_exists('wicket_get_resource_types')) {
-            return $defaults;
-        }
-
-        try {
-            $response = wicket_get_resource_types('emails');
-
-            if (! is_array($response) || empty($response['data'])) {
-                return $defaults;
-            }
-
-            $types = [];
-
-            foreach ($response['data'] as $item) {
-                $slug  = (string) ($item['attributes']['slug'] ?? '');
-                $label = (string) ($item['attributes']['name'] ?? '');
-
-                if ($slug === '') {
-                    continue;
-                }
-
-                $types[$slug] = $label !== '' ? $label : ucfirst($slug);
-            }
-
-            return ! empty($types) ? $types : $defaults;
-        } catch (\Exception $e) {
-            return $defaults;
-        }
     }
 
     /**
-     * Fetch available phone number types from the MDP schema definitions endpoint.
+     * Fetch the phone number types available for person records from the MDP.
      *
-     * Queries `schema_definitions?filter[resource_type_eq]=phones&filter[field_name_eq]=phone_type`
-     * and returns a slug → label map. Falls back to the well-known set
-     * (work / home / mobile) when the MDP is unavailable or returns no data.
+     * Uses wicket_get_resource_types('phones') (via fetchPersonResourceTypes())
+     * and returns a slug → label map. Only types whose `available_for_entity`
+     * is `person` or `all_entities` are kept — organization-only types (e.g.
+     * "800") cannot be written to a person record, so offering them would
+     * break phone sync. Types without an `available_for_entity` value are not
+     * entity-scoped and are kept.
+     *
+     * Falls back to the well-known set (work / home / mobile) when the MDP is
+     * unavailable or returns no person-applicable types.
      *
      * @return array<string, string> Map of slug → human-readable label.
      *
@@ -3125,42 +3124,147 @@ class MdpClient
      */
     public function getPhoneTypes(): array
     {
+        $result = $this->fetchPersonResourceTypes('phones');
+
+        if ($result !== null) {
+            return $result['types'];
+        }
+
         // Well-known Wicket MDP phone types — used as the fallback when the
         // API is unreachable or returns an unexpected response format.
-        $defaults = [
+        return [
             'work'   => __('Work', 'wicket-aorm'),
             'home'   => __('Home', 'wicket-aorm'),
             'mobile' => __('Mobile', 'wicket-aorm'),
         ];
+    }
 
-        if (! function_exists('wicket_get_resource_types')) {
-            return $defaults;
+    /**
+     * Return a phone type that is valid for person records in the MDP.
+     *
+     * Returns $phoneType unchanged when it is a person-applicable MDP phone
+     * type. Otherwise (organization-only, unknown, or empty) returns the MDP's
+     * default person-applicable phone type, or the first person-applicable
+     * type when none is flagged default.
+     *
+     * When the MDP is unavailable or returns no data there is nothing to
+     * validate against, so $phoneType is returned unchanged.
+     *
+     * Used by SyncService before writing a phone to a person, and by the
+     * Settings page to flag a saved value that sync would replace.
+     *
+     * @param string $phoneType Configured phone type slug.
+     * @return string Phone type slug safe to write to a person record.
+     */
+    public function resolvePersonPhoneType(string $phoneType): string
+    {
+        return $this->resolvePersonResourceType('phones', $phoneType);
+    }
+
+    /**
+     * Return an email type that is valid for person records in the MDP.
+     *
+     * Same contract as resolvePersonPhoneType(), for the 'emails' resource
+     * types.
+     *
+     * @param string $emailType Configured email type slug.
+     * @return string Email type slug safe to write to a person record.
+     */
+    public function resolvePersonEmailType(string $emailType): string
+    {
+        return $this->resolvePersonResourceType('emails', $emailType);
+    }
+
+    /**
+     * Shared implementation of resolvePersonPhoneType()/resolvePersonEmailType().
+     *
+     * @param string $resourceType Resource type slug ('phones' / 'emails').
+     * @param string $type         Configured type slug.
+     * @return string
+     */
+    private function resolvePersonResourceType(string $resourceType, string $type): string
+    {
+        $result = $this->fetchPersonResourceTypes($resourceType);
+
+        if ($result === null || array_key_exists($type, $result['types'])) {
+            return $type;
         }
 
-        try {
-            $response = wicket_get_resource_types('phones');
+        if ($result['default'] !== '') {
+            return $result['default'];
+        }
 
-            if (! is_array($response) || empty($response['data'])) {
-                return $defaults;
-            }
+        return (string) array_key_first($result['types']);
+    }
 
-            $types = [];
+    /**
+     * Fetch the person-applicable resource types for a resource from the MDP.
+     *
+     * Calls wicket_get_resource_types($resourceType) and keeps only entries
+     * with a non-empty slug whose `available_for_entity` is one of
+     * PERSON_ENTITY_SCOPES, or is not set (not entity-scoped). This is the same
+     * rule the base plugin uses (wicket-woocommerce-checkout-addresses.php).
+     *
+     * `default` is the slug of the first kept type flagged `default: true` in
+     * the MDP, or '' when none is.
+     *
+     * Returns null when the helper is not loaded, the MDP returns a non-array
+     * or empty response, no person-applicable types remain, or the helper
+     * throws. Results (including null) are cached per instance.
+     *
+     * @param string $resourceType Resource type slug ('phones' / 'emails').
+     * @return array{types: array<string, string>, default: string}|null
+     */
+    private function fetchPersonResourceTypes(string $resourceType): ?array
+    {
+        if (array_key_exists($resourceType, $this->personResourceTypesCache)) {
+            return $this->personResourceTypesCache[$resourceType];
+        }
 
-            foreach ($response['data'] as $item) {
-                $slug  = (string) ($item['attributes']['slug'] ?? '');
-                $label = (string) ($item['attributes']['name'] ?? '');
+        $result = null;
 
-                if ($slug === '') {
-                    continue;
+        if (function_exists('wicket_get_resource_types')) {
+            try {
+                $response = wicket_get_resource_types($resourceType);
+
+                if (is_array($response) && ! empty($response['data']) && is_array($response['data'])) {
+                    $types   = [];
+                    $default = '';
+
+                    foreach ($response['data'] as $item) {
+                        $attributes = is_array($item['attributes'] ?? null) ? $item['attributes'] : [];
+                        $slug       = (string) ($attributes['slug'] ?? '');
+                        $label      = (string) ($attributes['name'] ?? '');
+                        $available  = (string) ($attributes['available_for_entity'] ?? '');
+
+                        if ($slug === '') {
+                            continue;
+                        }
+
+                        // Skip types scoped to a non-person entity (e.g. organization-only).
+                        if ($available !== '' && ! in_array($available, self::PERSON_ENTITY_SCOPES, true)) {
+                            continue;
+                        }
+
+                        $types[$slug] = $label !== '' ? $label : ucfirst($slug);
+
+                        if ($default === '' && ($attributes['default'] ?? false) === true) {
+                            $default = $slug;
+                        }
+                    }
+
+                    if (! empty($types)) {
+                        $result = ['types' => $types, 'default' => $default];
+                    }
                 }
-
-                $types[$slug] = $label !== '' ? $label : ucfirst($slug);
+            } catch (\Exception $e) {
+                $result = null;
             }
-
-            return ! empty($types) ? $types : $defaults;
-        } catch (\Exception $e) {
-            return $defaults;
         }
+
+        $this->personResourceTypesCache[$resourceType] = $result;
+
+        return $result;
     }
 
     /**

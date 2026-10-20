@@ -145,6 +145,16 @@ class SyncService
      *
      * @see AORM-9.24 — membershipService added for the Direct Assignment remove_existing path
      */
+    /**
+     * Per-instance cache of person-applicable contact types resolved via
+     * MdpClient::resolvePersonPhoneType()/resolvePersonEmailType(), keyed by
+     * "<kind>:<configured slug>". One SyncService is used per sync batch, so
+     * this limits the MDP resource_types lookup to once per batch.
+     *
+     * @var array<string, string>
+     */
+    private array $resolvedContactTypes = [];
+
     public function __construct(
         private readonly ?\WicketORM\Services\PersonService $personService = null,
         private readonly ?\WicketORM\Services\ConnectionService $connectionService = null,
@@ -893,7 +903,10 @@ class SyncService
     private function createOrGetPersonFromRawData(array $rawData): string
     {
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
-        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
+        $emailType = $this->resolvePersonContactType(
+            'emails',
+            (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE),
+        );
 
         $personService = $this->personService ?? new \WicketORM\Services\PersonService();
 
@@ -973,6 +986,8 @@ class SyncService
             $phoneType = self::DEFAULT_PHONE_TYPE;
         }
 
+        $phoneType = $this->resolvePersonContactType('phones', $phoneType);
+
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->upsertPersonPhone($personUuid, $phone, $phoneType);
     }
@@ -1042,10 +1057,44 @@ class SyncService
         }
 
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
-        $emailType = (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE);
+        $emailType = $this->resolvePersonContactType(
+            'emails',
+            (string) ($settings[self::SETTINGS_KEY_EMAIL_TYPE] ?? self::DEFAULT_EMAIL_TYPE),
+        );
 
         $mdpClient = $this->mdpClient ?? new MdpClient();
         $mdpClient->addImportedEmailAsPrimary($personUuid, $email, $emailType);
+    }
+
+    /**
+     * Resolve a configured phone/email type to one the MDP accepts on a person.
+     *
+     * A saved setting (or the 'work' default) may name a type that is
+     * organization-only or does not exist in this MDP, which would make the
+     * person phone/email write fail. Delegates to
+     * MdpClient::resolvePersonPhoneType()/resolvePersonEmailType(), which keep
+     * a valid type, substitute the MDP default person type otherwise, and
+     * return the configured value unchanged when the MDP cannot be reached.
+     *
+     * Memoized per SyncService instance (one per sync batch).
+     *
+     * @param string $kind       'phones' or 'emails'.
+     * @param string $configured Configured type slug.
+     * @return string Type slug to send to the MDP.
+     */
+    private function resolvePersonContactType(string $kind, string $configured): string
+    {
+        $key = $kind . ':' . $configured;
+
+        if (! array_key_exists($key, $this->resolvedContactTypes)) {
+            $mdpClient = $this->mdpClient ?? new MdpClient();
+
+            $this->resolvedContactTypes[$key] = $kind === 'phones'
+                ? $mdpClient->resolvePersonPhoneType($configured)
+                : $mdpClient->resolvePersonEmailType($configured);
+        }
+
+        return $this->resolvedContactTypes[$key];
     }
 
     /**
