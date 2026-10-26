@@ -214,7 +214,7 @@ All endpoints register under `wicket-aorm/v1/`. Example routes:
 
 - Short, imperative, scope-specific commit messages (e.g., `adds staged records table migration`, `fixes upload validation for CSV headers`).
 - Keep commits focused — no mixed refactor/feature changes.
-- PRs should include: purpose, risk notes, test evidence, and screenshots for UI changes.
+- PR descriptions use the repo `.github/PULL_REQUEST_TEMPLATE.md`; full rules, including the title format: `@see atlas://conventions/pr-template.md`.
 - Link the relevant AORM ticket.
 
 ## Release & Branch Workflow
