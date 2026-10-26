@@ -4,7 +4,7 @@
  * Plugin Name: Wicket Admin Org Roster
  * Plugin URI: https://wicket.io
  * Description: WordPress admin plugin for managing organization rosters and person-to-organization relationships via the Wicket MDP API. Provides bulk upload, validation, duplicate resolution, and sync workflows.
- * Version: 0.1.1
+ * Version: 1.0.0
  * Author: Wicket Inc.
  * Author URI: https://wicket.io
  * Text Domain: wicket-aorm

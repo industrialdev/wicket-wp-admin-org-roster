@@ -1,6 +1,6 @@
 {
     "name": "wicket-admin-org-roster",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "private": true,
     "description": "WordPress admin plugin for managing organization rosters via the Wicket MDP API.",
     "scripts": {
