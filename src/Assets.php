@@ -8,6 +8,7 @@ use WicketAORM\Admin\MenuPage;
 use WicketAORM\Database\StagedRecordsTable;
 use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\MdpClient;
+use WicketAORM\Services\MergeRules;
 use WicketAORM\Services\SyncService;
 
 /**
@@ -117,6 +118,17 @@ class Assets
      * both '' for "Any type") — used by MemberTable.js and MatchesTable.js to
      * label and populate the "Phone" column consistently with MdpClient.
      *
+     * Also includes mergeRules (AORM-11.11) — the complete
+     * wicket_aorm_settings[merge_rules] map (field => 'imported'|'original',
+     * normalized via MergeRules::fromSettings()) so ReviewMatchModal's Merge
+     * Preview shows the value the sync will actually keep for each field.
+     * Alongside it, phoneNumberType/phoneNumberTypeLabel — the configured
+     * wicket_aorm_settings[phone_number_type] (falling back to
+     * SyncService::DEFAULT_PHONE_TYPE, same as the sync) and a ucfirst()
+     * label (no MDP lookup, to keep page load free of extra API calls) — so
+     * the preview's Phone row compares against the phone of the type the
+     * sync actually writes/protects, not the primary phone.
+     *
      * Also includes hasLocalMembership — true when the Wicket Memberships
      * plugin holds a local `wicket_membership` post for this membership;
      * MemberTable.js shows the owner's "Change Owner" button only when true.
@@ -171,6 +183,27 @@ class Assets
             $data['phoneMatchTypeLabel'] = $phoneMatchType !== ''
                 ? ((new MdpClient())->getPhoneTypes()[$phoneMatchType] ?? ucfirst($phoneMatchType))
                 : '';
+
+            // Sync merge logic (AORM-11.11) — lets the Review Match modal's
+            // Merge Preview show the MDP value (no "Merged" badge) for fields
+            // configured as "original value", matching what SyncService writes.
+            $data['mergeRules'] = MergeRules::fromSettings();
+
+            // Phone type the sync writes (AORM-11.11 review) — the Merge
+            // Preview's Phone row reads this type's number from
+            // targetMatch.phones. Same fallback as
+            // SyncService::upsertImportedPhoneIfPresent().
+            $phoneNumberType = trim((string) ($settings[SyncService::SETTINGS_KEY_PHONE_TYPE] ?? ''));
+
+            if ($phoneNumberType === '') {
+                $phoneNumberType = SyncService::DEFAULT_PHONE_TYPE;
+            }
+
+            // Label is ucfirst(slug) rather than MdpClient::getPhoneTypes():
+            // that lookup is two uncached MDP calls, too costly to add to
+            // every roster page load just for a preview row label.
+            $data['phoneNumberType']      = $phoneNumberType;
+            $data['phoneNumberTypeLabel'] = ucfirst($phoneNumberType);
 
             // Whether the Wicket Memberships plugin holds a local record for
             // this membership — MemberTable.js only shows the owner's

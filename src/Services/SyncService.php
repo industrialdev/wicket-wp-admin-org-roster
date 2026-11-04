@@ -902,6 +902,11 @@ class SyncService
      */
     private function createOrGetPersonFromRawData(array $rawData): string
     {
+        // Deliberately NOT filtered by MergeRules (AORM-11.11): first/last
+        // name + email are required to create a person. For an existing
+        // person found by email, wicket_create_or_get_person() leaves the
+        // names untouched, so "original" names stay protected.
+
         $settings  = (array) get_option(self::SETTINGS_OPTION, []);
         $emailType = $this->resolvePersonContactType(
             'emails',
@@ -934,6 +939,16 @@ class SyncService
      * already_on_roster, merging_to_record — both roster types). Blank CSV
      * cells never clear MDP values.
      *
+     * AORM-11.11: the Settings page "Sync Merge Logic" section can set any of
+     * first_name / last_name / email / phone / title to "original value".
+     * Those fields are blanked via MergeRules::filterRawData() before the
+     * writers below run, so they never overwrite the MDP person (even when
+     * the MDP value is empty; an "original" email is dropped entirely).
+     * Exception: createOrGetPersonFromRawData() runs BEFORE this and always
+     * uses the imported first/last name + email — a brand-new person can't be
+     * created without them. An existing person resolved by email keeps their
+     * names (wicket_create_or_get_person() doesn't update them).
+     *
      *   1. first/last name + title → updatePersonNameAndTitleIfPresent()
      *   2. email                   → addImportedEmailAsPrimaryIfPresent()
      *                                (added as primary, old primary demoted, not deleted)
@@ -952,6 +967,9 @@ class SyncService
         if ($personUuid === '') {
             return;
         }
+
+        // AORM-11.11: drop every field configured as "original value".
+        $rawData = MergeRules::filterRawData($rawData, MergeRules::fromSettings());
 
         $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
         $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);
