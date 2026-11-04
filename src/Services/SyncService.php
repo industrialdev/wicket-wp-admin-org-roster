@@ -934,6 +934,12 @@ class SyncService
      * already_on_roster, merging_to_record — both roster types). Blank CSV
      * cells never clear MDP values.
      *
+     * AORM-11.11: the Settings page "Sync Merge Logic" section can set any of
+     * first_name / last_name / email / phone / title to "original value".
+     * Those fields are blanked via MergeRules::filterRawData() before the
+     * writers below run, so they are never written to the MDP (even when the
+     * MDP value is empty; an "original" email is dropped entirely).
+     *
      *   1. first/last name + title → updatePersonNameAndTitleIfPresent()
      *   2. email                   → addImportedEmailAsPrimaryIfPresent()
      *                                (added as primary, old primary demoted, not deleted)
@@ -952,6 +958,9 @@ class SyncService
         if ($personUuid === '') {
             return;
         }
+
+        // AORM-11.11: drop every field configured as "original value".
+        $rawData = MergeRules::filterRawData($rawData, MergeRules::fromSettings());
 
         $this->updatePersonNameAndTitleIfPresent($personUuid, $rawData);
         $this->addImportedEmailAsPrimaryIfPresent($personUuid, $rawData);

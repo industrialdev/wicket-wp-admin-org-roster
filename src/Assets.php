@@ -8,6 +8,7 @@ use WicketAORM\Admin\MenuPage;
 use WicketAORM\Database\StagedRecordsTable;
 use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\MdpClient;
+use WicketAORM\Services\MergeRules;
 use WicketAORM\Services\SyncService;
 
 /**
@@ -117,6 +118,11 @@ class Assets
      * both '' for "Any type") — used by MemberTable.js and MatchesTable.js to
      * label and populate the "Phone" column consistently with MdpClient.
      *
+     * Also includes mergeRules (AORM-11.11) — the complete
+     * wicket_aorm_settings[merge_rules] map (field => 'imported'|'original',
+     * normalized via MergeRules::fromSettings()) so ReviewMatchModal's Merge
+     * Preview shows the value the sync will actually keep for each field.
+     *
      * Also includes hasLocalMembership — true when the Wicket Memberships
      * plugin holds a local `wicket_membership` post for this membership;
      * MemberTable.js shows the owner's "Change Owner" button only when true.
@@ -171,6 +177,11 @@ class Assets
             $data['phoneMatchTypeLabel'] = $phoneMatchType !== ''
                 ? ((new MdpClient())->getPhoneTypes()[$phoneMatchType] ?? ucfirst($phoneMatchType))
                 : '';
+
+            // Sync merge logic (AORM-11.11) — lets the Review Match modal's
+            // Merge Preview show the MDP value (no "Merged" badge) for fields
+            // configured as "original value", matching what SyncService writes.
+            $data['mergeRules'] = MergeRules::fromSettings();
 
             // Whether the Wicket Memberships plugin holds a local record for
             // this membership — MemberTable.js only shows the owner's

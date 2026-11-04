@@ -45,6 +45,13 @@
  * Exports MERGE_PREVIEW_SECTION_CLASS, MERGE_PREVIEW_HEADING, and
  * MERGE_PREVIEW_MERGED_CLASS constants for test assertions.
  *
+ * AORM-11.11: the preview follows the Settings page "Sync Merge Logic" rules
+ * (window.aormContext.mergeRules, field => 'imported' | 'original'). A field
+ * set to 'original' shows the MDP value with no "Merged" badge (or "—" when
+ * the MDP has none — the sync never writes it). The former single "Name" row
+ * is split into "First Name" and "Last Name" rows since each has its own
+ * rule. Read-only: the rules are changed in Settings, not in the modal.
+ *
  * AORM-8B.19: Save Update button. Calls PATCH /wicket-aorm/v1/staged/{id}/resolve
  * with the selected action and, when ACTION_MERGE is chosen, the selectedMergeTargetUuid.
  * isSaving state disables the button during the request. A dismissible Notice surfaces
@@ -193,6 +200,45 @@ export const MERGE_PREVIEW_HEADING = __( 'Merge Preview', 'wicket-aorm' );
  */
 export const MERGE_PREVIEW_MERGED_CLASS = 'aorm-review-match-modal__merge-preview-field--merged';
 
+// ── Sync merge logic (AORM-11.11) ─────────────────────────────────────────────
+
+/**
+ * Merge rule: keep the MDP value — the imported value is never written.
+ * Mirrors MergeRules::ORIGINAL (PHP).
+ *
+ * @type {string}
+ */
+export const MERGE_RULE_ORIGINAL = 'original';
+
+/**
+ * Merge rule: write the imported value. Mirrors MergeRules::IMPORTED (PHP).
+ *
+ * @type {string}
+ */
+export const MERGE_RULE_IMPORTED = 'imported';
+
+/**
+ * Whether the imported value wins for a field under the given rules.
+ * Anything other than MERGE_RULE_ORIGINAL (including a missing rule) means
+ * imported, matching MergeRules::usesImported() on the server.
+ *
+ * @param {Object|null|undefined} mergeRules Field => rule map.
+ * @param {string}                field      raw_data key, e.g. 'email'.
+ * @return {boolean}
+ */
+export function usesImportedValue( mergeRules, field ) {
+	return ( mergeRules ?? {} )[ field ] !== MERGE_RULE_ORIGINAL;
+}
+
+/**
+ * Read the configured merge rules injected by Assets::buildLocalizationData().
+ *
+ * @return {Object} Field => rule map ({} when absent → everything imported).
+ */
+function getConfiguredMergeRules() {
+	return ( window.aormContext ?? {} ).mergeRules ?? {};
+}
+
 // ── Email-match guard constants ───────────────────────────────────────────────
 
 /**
@@ -287,63 +333,54 @@ function buildMergeTargetOptions( matches ) {
 /**
  * Build the merged field list for the preview section (AORM-8B.17).
  *
- * Merge strategy (from AORM-9): use imported first/last/title, add imported
- * email as primary, add imported phone. Each entry has:
+ * Merge strategy (AORM-9 + AORM-11.11): for each field, the non-empty
+ * imported value wins when its merge rule is 'imported' (the default);
+ * otherwise the existing MDP value is kept. Blank imported cells never clear
+ * MDP values. Each entry has:
  *   - label   {string}  — display label
  *   - value   {string}  — final value (or "—" when empty)
  *   - merged  {boolean} — true when the value comes from the imported record
  *
- * @param {Object} rawData        Imported record's raw_data object.
+ * First Name, Last Name and Email are always listed; Phone and Title only
+ * when either the imported record or the MDP person has a value.
+ *
+ * @param {Object}      rawData     Imported record's raw_data object.
  * @param {Object|null} targetMatch The selected MDP match candidate, or null.
+ * @param {Object}      mergeRules  Field => 'imported' | 'original' (AORM-11.11).
  * @return {Array<{label: string, value: string, merged: boolean}>}
  */
-function buildMergePreviewFields( rawData, targetMatch ) {
-	const importedName = [
-		rawData.first_name ?? '',
-		rawData.last_name  ?? '',
-	].filter( Boolean ).join( ' ' );
+export function buildMergePreviewFields( rawData, targetMatch, mergeRules = {} ) {
+	const imported = ( key ) => String( rawData?.[ key ] ?? '' ).trim();
+	const existing = ( key ) => String( targetMatch?.[ key ] ?? '' ).trim();
 
-	const importedEmail = ( rawData.email ?? '' ).trim();
-	const importedPhone = ( rawData.phone   ?? '' ).trim();
-	const importedTitle = ( rawData.title           ?? '' ).trim();
+	const resolve = ( label, field, importedValue, existingValue ) => {
+		const takeImported = importedValue !== '' && usesImportedValue( mergeRules, field );
 
-	const existingName  = ( targetMatch?.full_name      ?? '' ).trim();
-	const existingEmail = ( targetMatch?.primary_email  ?? '' ).trim();
-	const existingPhone = ( targetMatch?.primary_phone  ?? '' ).trim();
-	const existingTitle = ( targetMatch?.title          ?? '' ).trim();
+		return {
+			label,
+			value:  ( takeImported ? importedValue : existingValue ) || '—',
+			merged: takeImported,
+		};
+	};
 
-	const fields = [];
+	const fields = [
+		resolve( __( 'First Name', 'wicket-aorm' ), 'first_name', imported( 'first_name' ), existing( 'given_name' ) ),
+		resolve( __( 'Last Name', 'wicket-aorm' ), 'last_name', imported( 'last_name' ), existing( 'family_name' ) ),
+		resolve( __( 'Email', 'wicket-aorm' ), 'email', imported( 'email' ), existing( 'primary_email' ) ),
+	];
 
-	// Name — always from imported record.
-	fields.push( {
-		label:  __( 'Name', 'wicket-aorm' ),
-		value:  importedName || existingName || '—',
-		merged: !! importedName,
-	} );
+	const importedPhone = imported( 'phone' );
+	const existingPhone = existing( 'primary_phone' );
 
-	// Email — imported email becomes primary.
-	fields.push( {
-		label:  __( 'Email', 'wicket-aorm' ),
-		value:  importedEmail || existingEmail || '—',
-		merged: !! importedEmail,
-	} );
-
-	// Phone — imported phone used when present.
 	if ( importedPhone || existingPhone ) {
-		fields.push( {
-			label:  __( 'Phone', 'wicket-aorm' ),
-			value:  importedPhone || existingPhone,
-			merged: !! importedPhone,
-		} );
+		fields.push( resolve( __( 'Phone', 'wicket-aorm' ), 'phone', importedPhone, existingPhone ) );
 	}
 
-	// Title — imported title overwrites existing.
+	const importedTitle = imported( 'title' );
+	const existingTitle = existing( 'title' );
+
 	if ( importedTitle || existingTitle ) {
-		fields.push( {
-			label:  __( 'Title', 'wicket-aorm' ),
-			value:  importedTitle || existingTitle,
-			merged: !! importedTitle,
-		} );
+		fields.push( resolve( __( 'Title', 'wicket-aorm' ), 'title', importedTitle, existingTitle ) );
 	}
 
 	return fields;
@@ -629,12 +666,17 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 			{ /* ── Merge preview (AORM-8B.17) ──────────────────────────────────
 			     Rendered only when ACTION_MERGE is selected and a target UUID is
 			     chosen. Shows the final merged field values; fields overwritten
-			     from the imported record carry a "Merged" badge. */ }
+			     from the imported record carry a "Merged" badge. Follows the
+			     Settings "Sync Merge Logic" rules (AORM-11.11). */ }
 			{ selectedAction === ACTION_MERGE && selectedMergeTargetUuid && ( () => {
 				const targetMatch = loadedMatches.find(
 					( m ) => m.uuid === selectedMergeTargetUuid
 				) ?? null;
-				const previewFields = buildMergePreviewFields( rawData, targetMatch );
+				const previewFields = buildMergePreviewFields(
+					rawData,
+					targetMatch,
+					getConfiguredMergeRules()
+				);
 
 				return (
 					<section

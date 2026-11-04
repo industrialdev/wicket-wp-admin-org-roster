@@ -6,6 +6,7 @@ namespace WicketAORM\Admin;
 
 use WicketAORM\Services\MatchingService;
 use WicketAORM\Services\MdpClient;
+use WicketAORM\Services\MergeRules;
 use WicketAORM\Services\SyncService;
 use WicketAORM\Services\SyncJobRunner;
 
@@ -26,6 +27,8 @@ use WicketAORM\Services\SyncJobRunner;
  *   - security_roles                (string[]) array of MDP role slug strings
  *   - sync_batch_size               (int) positive integer, default 50
  *   - cleanup_ttl_days              (int) positive integer, default 30
+ *   - merge_rules                   (array<string, string>) field => 'imported' | 'original'
+ *                                   for first_name/last_name/email/phone/title (AORM-11.11)
  *
  * base_member_role and protected_relationship_types were previously read from
  * the wicket-wp-account-centre plugin's OrgManConfig; they moved to AORM's own
@@ -177,6 +180,24 @@ class SettingsPage
 
     /** Field ID for the cleanup_ttl_days number input. */
     public const FIELD_CLEANUP_TTL = 'aorm_field_cleanup_ttl';
+
+    /**
+     * Section 8 — Sync merge logic.
+     *
+     * One select per imported field (first name, last name, email, phone,
+     * title) choosing which value wins when an imported row is synced to an
+     * MDP person: the imported value, or the original MDP value. Stored under
+     * wicket_aorm_settings[merge_rules]; see MergeRules for the semantics.
+     *
+     * @see AORM-11.11
+     */
+    public const SECTION_MERGE_RULES = 'aorm_section_merge_rules';
+
+    /**
+     * Field ID prefix for the merge rule selects — the full ID is this prefix
+     * followed by the MergeRules field key, e.g. "aorm_field_merge_rule_email".
+     */
+    public const FIELD_MERGE_RULE_PREFIX = 'aorm_field_merge_rule_';
 
     // -------------------------------------------------------------------------
     // Registration
@@ -377,6 +398,31 @@ class SettingsPage
             self::SECTION_BACKGROUND_JOBS,
             ['label_for' => self::FIELD_CLEANUP_TTL],
         );
+
+        // ── Section 8: Sync Merge Logic (AORM-11.11) ─────────────────────
+        // Per-field choice of imported value vs original MDP value when an
+        // imported row is synced to a person. One row per field so each
+        // select gets its own <label for>.
+        add_settings_section(
+            self::SECTION_MERGE_RULES,
+            __('Sync Merge Logic', 'wicket-aorm'),
+            [$this, 'renderMergeRulesSectionDescription'],
+            self::PAGE_SLUG,
+        );
+
+        foreach ($this->mergeRuleFieldLabels() as $field => $label) {
+            add_settings_field(
+                self::FIELD_MERGE_RULE_PREFIX . $field,
+                $label,
+                [$this, 'renderMergeRuleField'],
+                self::PAGE_SLUG,
+                self::SECTION_MERGE_RULES,
+                [
+                    'label_for' => self::FIELD_MERGE_RULE_PREFIX . $field,
+                    'field'     => $field,
+                ],
+            );
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -993,6 +1039,114 @@ class SettingsPage
         echo '</p>';
     }
 
+    /**
+     * Render the introductory description for Section 8 (Sync Merge Logic).
+     *
+     * @see AORM-11.11
+     */
+    public function renderMergeRulesSectionDescription(): void
+    {
+        echo '<p class="description">';
+        echo esc_html__(
+            'Choose which value to keep for each field when an imported record is synced to a person in the MDP. "Imported value" writes the value from the uploaded file (blank cells never clear MDP data). "Original value" never writes the imported value, even when the MDP field is empty. Applies to every sync, including new records.',
+            'wicket-aorm',
+        );
+        echo '</p>';
+    }
+
+    /**
+     * Render one merge rule <select> (Imported value / Original value).
+     *
+     * Called once per MergeRules field via add_settings_field(); the field key
+     * arrives in $args['field']. Reflects the saved rule, defaulting to
+     * MergeRules::DEFAULT_RULE ('imported'). Email and phone get a short
+     * description of what "original" means for them.
+     *
+     * @param array<string, mixed> $args add_settings_field() args.
+     *
+     * @see AORM-11.11
+     */
+    public function renderMergeRuleField(array $args = []): void
+    {
+        $field = (string) ($args['field'] ?? '');
+
+        if (! in_array($field, MergeRules::FIELDS, true)) {
+            return;
+        }
+
+        $current = MergeRules::fromSettings()[$field];
+
+        $choices = [
+            MergeRules::IMPORTED => __('Imported value', 'wicket-aorm'),
+            MergeRules::ORIGINAL => __('Original value', 'wicket-aorm'),
+        ];
+
+        echo '<select id="' . esc_attr(self::FIELD_MERGE_RULE_PREFIX . $field) . '" '
+            . 'name="' . esc_attr(self::OPTION_NAME) . '[' . esc_attr(MergeRules::SETTINGS_KEY) . '][' . esc_attr($field) . ']">';
+
+        foreach ($choices as $value => $label) {
+            echo '<option value="' . esc_attr($value) . '"'
+                . selected($current, $value, false) . '>'
+                . esc_html($label)
+                . '</option>';
+        }
+
+        echo '</select>';
+
+        if ($field === MergeRules::FIELD_EMAIL) {
+            echo '<p class="description">';
+            echo esc_html__(
+                'With "Original value" the imported email is dropped entirely — it is not added to the person as a primary or secondary address.',
+                'wicket-aorm',
+            );
+            echo '</p>';
+        }
+
+        if ($field === MergeRules::FIELD_PHONE) {
+            echo '<p class="description">';
+            echo esc_html(
+                sprintf(
+                    /* translators: %s: phone type label, e.g. "Work" */
+                    __('Applies to the person\'s %s phone (the Default Phone Type setting above).', 'wicket-aorm'),
+                    $this->configuredPhoneTypeLabel(),
+                ),
+            );
+            echo '</p>';
+        }
+    }
+
+    /**
+     * Labels for the Section 8 rows, keyed by MergeRules field.
+     *
+     * @return array<string, string>
+     */
+    private function mergeRuleFieldLabels(): array
+    {
+        return [
+            MergeRules::FIELD_FIRST_NAME => __('First Name', 'wicket-aorm'),
+            MergeRules::FIELD_LAST_NAME  => __('Last Name', 'wicket-aorm'),
+            MergeRules::FIELD_EMAIL      => __('Email Address', 'wicket-aorm'),
+            MergeRules::FIELD_PHONE      => __('Phone', 'wicket-aorm'),
+            MergeRules::FIELD_TITLE      => __('Title', 'wicket-aorm'),
+        ];
+    }
+
+    /**
+     * Human label of the configured phone_number_type (the type the sync
+     * writes), falling back to SyncService::DEFAULT_PHONE_TYPE when unset.
+     */
+    private function configuredPhoneTypeLabel(): string
+    {
+        $options   = (array) get_option(self::OPTION_NAME, []);
+        $phoneType = trim((string) ($options[SyncService::SETTINGS_KEY_PHONE_TYPE] ?? ''));
+
+        if ($phoneType === '') {
+            $phoneType = SyncService::DEFAULT_PHONE_TYPE;
+        }
+
+        return (string) ((new MdpClient())->getPhoneTypes()[$phoneType] ?? ucfirst($phoneType));
+    }
+
     // -------------------------------------------------------------------------
     // Sanitization
     // -------------------------------------------------------------------------
@@ -1119,6 +1273,45 @@ class SettingsPage
                 __('Staged record retention must be a positive integer. Reverting to previous value.', 'wicket-aorm'),
             );
             $out['cleanup_ttl_days'] = (int) ($prev['cleanup_ttl_days'] ?? self::DEFAULT_CLEANUP_TTL_DAYS);
+        }
+
+        // ── merge_rules (AORM-11.11) ──────────────────────────────────────
+        $out[MergeRules::SETTINGS_KEY] = $this->sanitizeMergeRules(
+            $raw[MergeRules::SETTINGS_KEY] ?? null,
+            $prev[MergeRules::SETTINGS_KEY] ?? [],
+        );
+
+        return $out;
+    }
+
+    /**
+     * Sanitize the submitted merge rules against the previously saved ones.
+     *
+     * Always returns a complete field => rule map. A valid submitted rule is
+     * kept; a missing or invalid one keeps the previous rule (itself
+     * normalized, so it falls back to 'imported'). Unknown fields are dropped.
+     *
+     * @param mixed $raw  Submitted wicket_aorm_settings[merge_rules].
+     * @param mixed $prev Previously stored wicket_aorm_settings[merge_rules].
+     * @return array<string, string>
+     *
+     * @see AORM-11.11
+     */
+    private function sanitizeMergeRules(mixed $raw, mixed $prev): array
+    {
+        $raw = is_array($raw) ? $raw : [];
+        $out = MergeRules::normalize($prev);
+
+        foreach (MergeRules::FIELDS as $field) {
+            if (! array_key_exists($field, $raw) || ! is_string($raw[$field])) {
+                continue;
+            }
+
+            $rule = sanitize_text_field($raw[$field]);
+
+            if (in_array($rule, MergeRules::VALID_RULES, true)) {
+                $out[$field] = $rule;
+            }
         }
 
         return $out;
