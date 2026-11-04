@@ -1048,7 +1048,7 @@ class SettingsPage
     {
         echo '<p class="description">';
         echo esc_html__(
-            'Choose which value to keep for each field when an imported record is synced to a person in the MDP. "Imported value" writes the value from the uploaded file (blank cells never clear MDP data). "Original value" never writes the imported value, even when the MDP field is empty. Applies to every sync, including new records.',
+            'Choose which value to keep for each field when an imported record is synced to a person in the MDP. "Imported value" writes the value from the uploaded file (blank cells never clear MDP data). "Original value" never overwrites an existing person, even when the MDP field is empty. A brand-new person is always created with the imported first name, last name and email, because the MDP requires them; title and phone still follow these rules.',
             'wicket-aorm',
         );
         echo '</p>';

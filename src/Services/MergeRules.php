@@ -25,12 +25,19 @@ namespace WicketAORM\Services;
  *   - imported → the non-empty imported value is written to the MDP (the
  *                "CSV is the source of truth" behaviour; blank CSV cells
  *                still never clear MDP values).
- *   - original → the field is never written to the MDP on any sync path,
- *                even when the MDP value is empty. For email this means the
- *                imported address is dropped entirely (not added as a
- *                secondary). Applies to new_record too, so a brand-new person
- *                gets no title/phone when those fields are set to original
- *                (the email is still required to create the person).
+ *   - original → the imported value never overwrites an existing MDP
+ *                person, on any sync path, even when the MDP value is empty.
+ *                For email this means the imported address is dropped
+ *                entirely (not added as a secondary).
+ *
+ * Person creation exception: a brand-new person (new_record when no MDP
+ * person owns the email) is always created with the imported first name,
+ * last name and email — wicket_create_or_get_person() refuses to create a
+ * person without them, and there is no original value yet. Title and phone
+ * follow the rules even on creation, so a brand-new person gets no
+ * title/phone when those are set to original. When new_record resolves an
+ * EXISTING person by email, wicket_create_or_get_person() does not touch
+ * their names, so original names stay protected there too.
  *
  * Every field defaults to 'imported', so sites that never save Section 8
  * keep the pre-AORM-11.11 behaviour.

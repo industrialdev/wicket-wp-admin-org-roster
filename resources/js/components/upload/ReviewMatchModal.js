@@ -51,6 +51,11 @@
  * the MDP has none — the sync never writes it). The former single "Name" row
  * is split into "First Name" and "Last Name" rows since each has its own
  * rule. Read-only: the rules are changed in Settings, not in the modal.
+ * The Phone row compares against the MDP phone of the configured
+ * phone_number_type (window.aormContext.phoneNumberType — the type the sync
+ * writes/protects), labelled e.g. "Phone (Work)". When the candidate came
+ * from the slim fallback (detail fetch failed, no given/family name), the
+ * existing first/last name is derived by splitting full_name.
  *
  * AORM-8B.19: Save Update button. Calls PATCH /wicket-aorm/v1/staged/{id}/resolve
  * with the selected action and, when ACTION_MERGE is chosen, the selectedMergeTargetUuid.
@@ -78,7 +83,7 @@
  */
 
 import { useEffect, useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import apiFetch from '@wordpress/api-fetch';
 import { Button, Modal, Notice, RadioControl } from '@wordpress/components';
 import ImportedRecordSummary from './ImportedRecordSummary';
@@ -239,6 +244,70 @@ function getConfiguredMergeRules() {
 	return ( window.aormContext ?? {} ).mergeRules ?? {};
 }
 
+/**
+ * Read the phone type the sync writes, injected by Assets.php.
+ *
+ * @return {{phoneType: string, phoneTypeLabel: string}}
+ */
+function getConfiguredPhoneType() {
+	const context = window.aormContext ?? {};
+
+	return {
+		phoneType:      String( context.phoneNumberType ?? '' ),
+		phoneTypeLabel: String( context.phoneNumberTypeLabel ?? '' ),
+	};
+}
+
+/**
+ * Existing first/last name of a match candidate.
+ *
+ * Uses given_name/family_name when either is set. When both are empty —
+ * the slim fallback StagedMatchesController returns when the person detail
+ * fetch fails only carries full_name — splits full_name: first word as the
+ * first name, the rest as the last name. Preview-only heuristic.
+ *
+ * @param {Object|null} targetMatch Match candidate.
+ * @return {{given: string, family: string}}
+ */
+export function resolveExistingNames( targetMatch ) {
+	const given  = String( targetMatch?.given_name ?? '' ).trim();
+	const family = String( targetMatch?.family_name ?? '' ).trim();
+
+	if ( given || family ) {
+		return { given, family };
+	}
+
+	const parts = String( targetMatch?.full_name ?? '' ).trim().split( /\s+/ ).filter( Boolean );
+
+	return {
+		given:  parts[ 0 ] ?? '',
+		family: parts.slice( 1 ).join( ' ' ),
+	};
+}
+
+/**
+ * Existing phone number of a match candidate for the configured type.
+ *
+ * Mirrors MdpClient::upsertPersonPhone(): the first phone whose type matches
+ * (case-insensitive) is the one the sync updates — or protects when phone is
+ * set to "original". Without a configured type, falls back to primary_phone.
+ *
+ * @param {Object|null} targetMatch Match candidate.
+ * @param {string}      phoneType   Configured phone_number_type slug.
+ * @return {string}
+ */
+export function resolveExistingPhone( targetMatch, phoneType ) {
+	if ( ! phoneType ) {
+		return String( targetMatch?.primary_phone ?? '' ).trim();
+	}
+
+	const wanted = phoneType.toLowerCase();
+	const phones = Array.isArray( targetMatch?.phones ) ? targetMatch.phones : [];
+	const match  = phones.find( ( phone ) => String( phone?.type ?? '' ).toLowerCase() === wanted );
+
+	return String( match?.number ?? '' ).trim();
+}
+
 // ── Email-match guard constants ───────────────────────────────────────────────
 
 /**
@@ -342,14 +411,19 @@ function buildMergeTargetOptions( matches ) {
  *   - merged  {boolean} — true when the value comes from the imported record
  *
  * First Name, Last Name and Email are always listed; Phone and Title only
- * when either the imported record or the MDP person has a value.
+ * when either the imported record or the MDP person has a value. Existing
+ * names fall back to a split full_name (resolveExistingNames()); the
+ * existing phone is the one of options.phoneType (resolveExistingPhone()).
  *
  * @param {Object}      rawData     Imported record's raw_data object.
  * @param {Object|null} targetMatch The selected MDP match candidate, or null.
  * @param {Object}      mergeRules  Field => 'imported' | 'original' (AORM-11.11).
+ * @param {Object}      options
+ * @param {string}      [options.phoneType]      Configured phone_number_type slug.
+ * @param {string}      [options.phoneTypeLabel] Its label, shown as "Phone (<label>)".
  * @return {Array<{label: string, value: string, merged: boolean}>}
  */
-export function buildMergePreviewFields( rawData, targetMatch, mergeRules = {} ) {
+export function buildMergePreviewFields( rawData, targetMatch, mergeRules = {}, options = {} ) {
 	const imported = ( key ) => String( rawData?.[ key ] ?? '' ).trim();
 	const existing = ( key ) => String( targetMatch?.[ key ] ?? '' ).trim();
 
@@ -363,17 +437,23 @@ export function buildMergePreviewFields( rawData, targetMatch, mergeRules = {} )
 		};
 	};
 
+	const existingNames = resolveExistingNames( targetMatch );
+
 	const fields = [
-		resolve( __( 'First Name', 'wicket-aorm' ), 'first_name', imported( 'first_name' ), existing( 'given_name' ) ),
-		resolve( __( 'Last Name', 'wicket-aorm' ), 'last_name', imported( 'last_name' ), existing( 'family_name' ) ),
+		resolve( __( 'First Name', 'wicket-aorm' ), 'first_name', imported( 'first_name' ), existingNames.given ),
+		resolve( __( 'Last Name', 'wicket-aorm' ), 'last_name', imported( 'last_name' ), existingNames.family ),
 		resolve( __( 'Email', 'wicket-aorm' ), 'email', imported( 'email' ), existing( 'primary_email' ) ),
 	];
 
 	const importedPhone = imported( 'phone' );
-	const existingPhone = existing( 'primary_phone' );
+	const existingPhone = resolveExistingPhone( targetMatch, String( options.phoneType ?? '' ) );
+	const phoneLabel    = options.phoneTypeLabel
+		/* translators: %s: phone type label, e.g. "Work" */
+		? sprintf( __( 'Phone (%s)', 'wicket-aorm' ), options.phoneTypeLabel )
+		: __( 'Phone', 'wicket-aorm' );
 
 	if ( importedPhone || existingPhone ) {
-		fields.push( resolve( __( 'Phone', 'wicket-aorm' ), 'phone', importedPhone, existingPhone ) );
+		fields.push( resolve( phoneLabel, 'phone', importedPhone, existingPhone ) );
 	}
 
 	const importedTitle = imported( 'title' );
@@ -675,7 +755,8 @@ export default function ReviewMatchModal( { record, onClose, onResolved } ) {
 				const previewFields = buildMergePreviewFields(
 					rawData,
 					targetMatch,
-					getConfiguredMergeRules()
+					getConfiguredMergeRules(),
+					getConfiguredPhoneType()
 				);
 
 				return (
